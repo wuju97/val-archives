@@ -6,7 +6,7 @@ import {
   loadArchive, saveArchive, addEntry, updateEntry, deleteEntry,
   regenerateMasterPrompt, getPriorityLevel, setPriority,
 } from "@/lib/archiveEngine";
-import { hasGeminiKey, geminiEnhanceRule } from "@/lib/geminiEngine";
+import { hasGeminiKey, geminiEnhanceRule, geminiOrganizeRules } from "@/lib/geminiEngine";
 
 export default function RuleBookPage() {
   const [archive, setArchive] = useState(loadArchive());
@@ -73,12 +73,33 @@ export default function RuleBookPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={handlePriorityClick}
-          style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: `2px solid ${priorityColor}`, background: priority !== "none" ? priorityColor : "transparent", color: priority !== "none" ? "white" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600", transition: "all 0.2s" }}
-        >
-          {priorityLabel}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          {hasGeminiKey() && rules.length > 1 && (
+            <button onClick={async () => {
+              setOrganizing(true); setOrganizeResult("");
+              const ruleTexts = rules.map((r: { text: string }) => r.text);
+              const { organized, summary } = await geminiOrganizeRules(ruleTexts);
+              const nonRules = archive.entries.filter((e: { category: string }) => e.category !== "rules");
+              const organizedEntries = organized.map((text: string) => ({
+                id: crypto.randomUUID(), text, category: "rules" as const,
+                createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+              }));
+              const updatedArchive = { ...archive, entries: [...nonRules, ...organizedEntries] };
+              const refreshed = regenerateMasterPrompt(updatedArchive);
+              saveArchive(refreshed); setArchive(refreshed);
+              setOrganizeResult(summary || "Rules organized");
+              setOrganizing(false);
+            }} disabled={organizing}
+            style={{ background: "#7c3aed", color: "white", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: organizing ? 0.6 : 1 }}>
+              {organizing ? "✨ Organizing..." : "✨ AI Organize"}
+            </button>
+          )}
+          <button
+            onClick={handlePriorityClick}
+            style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: `2px solid ${priorityColor}`, background: priority !== "none" ? priorityColor : "transparent", color: priority !== "none" ? "white" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600", transition: "all 0.2s" }}>
+            {priorityLabel}
+          </button>
+        </div>
       </div>
 
       <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1rem", marginBottom: "1.5rem", fontSize: "0.875rem", color: "var(--va-text-muted)" }}>

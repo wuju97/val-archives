@@ -27,6 +27,9 @@ export default function CanonPage() {
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState("");
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
+  const [placementResult, setPlacementResult] = useState<{ placement: string; context: string; suggestion: string } | null>(null);
+  const [checkingPlacement, setCheckingPlacement] = useState(false);
+  const [lastAddedContent, setLastAddedContent] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setArchive(loadArchive()); }, []);
@@ -133,6 +136,19 @@ export default function CanonPage() {
     saveArchive(updated); setArchive(updated);
     setPasteText(""); setPasteTitle("");
     flash(`✓ "${title}" added to ${catName}`);
+    // Trigger placement analysis
+    if (hasGeminiKey()) {
+      const existingEntries = (updated.canonCategories ?? [])
+        .find(c => c.id === activeCatId)?.entries
+        .slice(0, -1).map(e => e.content) ?? [];
+      if (existingEntries.length > 0) {
+        setCheckingPlacement(true); setPlacementResult(null);
+        setLastAddedContent(pasteText.trim().slice(0, 60));
+        geminiCanonPlacement(pasteText.trim(), existingEntries, catName).then(result => {
+          setPlacementResult(result); setCheckingPlacement(false);
+        });
+      }
+    }
   }
 
   function handleAddCustomCat() {
@@ -201,6 +217,34 @@ export default function CanonPage() {
           <Link href="/dashboard" style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>← Home</Link>
           <div>
             <h1 style={{ fontSize: "1.75rem", fontWeight: "bold" }}>🏛 Canon Archives</h1>
+            {checkingPlacement && (
+              <p style={{ fontSize: "0.8rem", color: "#c4b5fd", marginTop: "0.375rem" }}>✨ Analyzing canon placement...</p>
+            )}
+            {placementResult && placementResult.placement && (
+              <div style={{ background: "var(--va-surface)", border: "1px solid #7c3aed", borderRadius: "0.75rem", padding: "1rem", marginTop: "0.75rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
+                  <h3 style={{ fontWeight: "bold", color: "#c4b5fd", fontSize: "0.875rem" }}>✨ Canon Placement Analysis</h3>
+                  <button onClick={() => setPlacementResult(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)" }}>×</button>
+                </div>
+                {lastAddedContent && <p style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", marginBottom: "0.5rem", fontStyle: "italic" }}>For: "{lastAddedContent}..."</p>}
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                  <div style={{ background: "var(--va-bg)", borderRadius: "0.375rem", padding: "0.625rem" }}>
+                    <p style={{ fontSize: "0.7rem", color: "#7c3aed", fontWeight: "600", marginBottom: "0.125rem" }}>📍 Where it belongs</p>
+                    <p style={{ fontSize: "0.8rem", color: "var(--va-text)" }}>{placementResult.placement}</p>
+                  </div>
+                  <div style={{ background: "var(--va-bg)", borderRadius: "0.375rem", padding: "0.625rem" }}>
+                    <p style={{ fontSize: "0.7rem", color: "#7c3aed", fontWeight: "600", marginBottom: "0.125rem" }}>🔗 Why</p>
+                    <p style={{ fontSize: "0.8rem", color: "var(--va-text)" }}>{placementResult.context}</p>
+                  </div>
+                  {placementResult.suggestion && (
+                    <div style={{ background: "var(--va-bg)", borderRadius: "0.375rem", padding: "0.625rem" }}>
+                      <p style={{ fontSize: "0.7rem", color: "#f59e0b", fontWeight: "600", marginBottom: "0.125rem" }}>⚠️ Continuity Notes</p>
+                      <p style={{ fontSize: "0.8rem", color: "var(--va-text)" }}>{placementResult.suggestion}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginTop: "0.1rem" }}>
               Source library — stored as-is and fed directly into Master Prompt
             </p>

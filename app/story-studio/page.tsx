@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { hasGeminiKey, geminiVerifyCategories } from "../../lib/geminiEngine";
 import {
-  loadArchive,
+  loadArchive, saveArchive, regenerateMasterPrompt,
   CATEGORY_LABELS,
   CATEGORY_ICONS,
   MASTER_PROMPT_ORDER,
@@ -16,6 +16,9 @@ export default function StoryStudioPage() {
   const [totalEntries, setTotalEntries] = useState(0);
   const [search, setSearch] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResults, setVerifyResults] = useState<Array<{ id: string; text: string; currentCategory: string; suggestedCategory: string; reason: string; changed: boolean }>>([]);
+  const [showVerify, setShowVerify] = useState(false);
 
   useEffect(() => {
     const archive = loadArchive();
@@ -37,7 +40,75 @@ export default function StoryStudioPage() {
 
       <Link href="/dashboard" style={{ color: "var(--va-text-muted)", fontSize: "0.875rem", display: "block", marginBottom: "1.5rem" }}>← Home</Link>
 
-      <h1 style={{ fontSize: "3rem", fontWeight: "bold", marginBottom: "0.5rem" }}>📖 Story Studio</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+        <h1 style={{ fontSize: "3rem", fontWeight: "bold" }}>📖 Story Studio</h1>
+        {hasGeminiKey() && totalEntries > 0 && (
+          <button onClick={async () => {
+            setVerifying(true); setShowVerify(false); setVerifyResults([]);
+            const archive = loadArchive();
+            const entries = archive.entries.map(e => ({ id: e.id, text: e.text, category: e.category }));
+            const ALL_CATS = Object.keys(CATEGORY_LABELS);
+            const results = await geminiVerifyCategories(entries, ALL_CATS);
+            setVerifyResults(results.map(r => ({ ...r, changed: false })));
+            setShowVerify(true); setVerifying(false);
+          }} disabled={verifying}
+          style={{ background: "#7c3aed", color: "white", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: verifying ? 0.6 : 1 }}>
+            {verifying ? "✨ Checking..." : "✨ AI Verify Categories"}
+          </button>
+        )}
+      </div>
+
+      {showVerify && (
+        <div style={{ background: "var(--va-surface)", border: "1px solid #7c3aed", borderRadius: "0.75rem", padding: "1.25rem", marginBottom: "1.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.875rem" }}>
+            <div>
+              <h3 style={{ fontWeight: "bold", color: "#c4b5fd", marginBottom: "0.25rem" }}>✨ Category Audit</h3>
+              <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)" }}>
+                {verifyResults.length === 0 ? "All entries are in the correct categories ✓" : `${verifyResults.length} entries may need moving`}
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              {verifyResults.some(r => r.changed) && (
+                <button onClick={() => {
+                  const archive = loadArchive();
+                  const toMove = verifyResults.filter(r => r.changed);
+                  let updated = { ...archive };
+                  toMove.forEach(r => {
+                    updated.entries = updated.entries.map(e =>
+                      e.id === r.id ? { ...e, category: r.suggestedCategory as StoryCategory, updatedAt: new Date().toISOString() } : e
+                    );
+                  });
+                  saveArchive(regenerateMasterPrompt(updated));
+                  setShowVerify(false); setVerifyResults([]);
+                }} style={{ background: "#7c3aed", color: "white", padding: "0.375rem 0.875rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.8rem" }}>
+                  Apply Accepted
+                </button>
+              )}
+              <button onClick={() => setShowVerify(false)}
+                style={{ background: "var(--va-border)", color: "var(--va-text-muted)", padding: "0.375rem 0.75rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontSize: "0.8rem" }}>
+                Close
+              </button>
+            </div>
+          </div>
+          {verifyResults.map((r, i) => (
+            <div key={r.id} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", background: "var(--va-bg)", border: `1px solid ${r.changed ? "#7c3aed" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.75rem", marginBottom: "0.5rem" }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: "0.8rem", color: "var(--va-text)", marginBottom: "0.25rem" }}>{r.text.slice(0, 80)}{r.text.length > 80 ? "..." : ""}</p>
+                <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>
+                  <span style={{ textDecoration: "line-through" }}>{r.currentCategory}</span>
+                  <span style={{ color: "#7c3aed", margin: "0 0.5rem" }}>→</span>
+                  <span style={{ color: "#c4b5fd" }}>{r.suggestedCategory}</span>
+                  <span style={{ marginLeft: "0.5rem" }}>({r.reason})</span>
+                </p>
+              </div>
+              <button onClick={() => setVerifyResults(prev => prev.map((item, idx) => idx === i ? { ...item, changed: !item.changed } : item))}
+                style={{ background: r.changed ? "#7c3aed" : "var(--va-border)", color: r.changed ? "white" : "var(--va-text-muted)", padding: "0.25rem 0.625rem", borderRadius: "0.25rem", border: "none", cursor: "pointer", fontSize: "0.75rem", fontWeight: "600", flexShrink: 0 }}>
+                {r.changed ? "✓ Accept" : "Reject"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <p style={{ color: "var(--va-text-muted)", marginBottom: "2rem" }}>
         {loaded ? `${totalEntries} ${totalEntries === 1 ? "entry" : "entries"} across your archive` : "Loading..."}
       </p>
