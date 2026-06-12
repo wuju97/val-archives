@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Val Archives theme variables - defaults (overridden by theme script) */
+:root {
+  --va-bg: rgb(8, 8, 8);
+  --va-surface: rgb(17, 24, 39);
+  --va-border: rgb(31, 41, 55);
+  --va-text: rgb(249, 250, 251);
+  --va-text-muted: rgb(107, 114, 128);
+  --va-accent: #3b82f6;
+}
+
+html {
+  background: var(--va-bg);
+  color: var(--va-text);
+}
+
+body {
+  background: var(--va-bg);
+  color: var(--va-text);
+  font-family: Arial, Helvetica, sans-serif;
+  transition: background 0.2s ease, color 0.2s ease;
+}
