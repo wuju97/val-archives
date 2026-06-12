@@ -74,7 +74,15 @@ export default function PensievePage() {
               onKeyDown={async e => {
                 if (e.key === "Enter" && aiQuery.trim()) {
                   setAiSearching(true); setAiMode(true);
-                  const results = await geminiSemanticSearch(aiQuery, archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })));
+                  // Include canon entries in search
+            const canonEntries = (archive.canonCategories ?? []).flatMap(cat =>
+              cat.entries.map(e => ({ id: e.id, text: e.content, category: "canon-" + cat.name }))
+            );
+            const allEntries = [
+              ...archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })),
+              ...canonEntries,
+            ];
+            const results = await geminiSemanticSearch(aiQuery, allEntries);
                   setAiResults(results); setAiSearching(false);
                 }
               }}
@@ -83,7 +91,15 @@ export default function PensievePage() {
             <button onClick={async () => {
               if (!aiQuery.trim()) return;
               setAiSearching(true); setAiMode(true);
-              const results = await geminiSemanticSearch(aiQuery, archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })));
+              // Include canon entries in search
+            const canonEntries = (archive.canonCategories ?? []).flatMap(cat =>
+              cat.entries.map(e => ({ id: e.id, text: e.content, category: "canon-" + cat.name }))
+            );
+            const allEntries = [
+              ...archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })),
+              ...canonEntries,
+            ];
+            const results = await geminiSemanticSearch(aiQuery, allEntries);
               setAiResults(results); setAiSearching(false);
             }} disabled={!aiQuery.trim() || aiSearching}
               style={{ background: "#7c3aed", color: "white", padding: "0.625rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: (!aiQuery.trim() || aiSearching) ? 0.5 : 1, whiteSpace: "nowrap" }}>

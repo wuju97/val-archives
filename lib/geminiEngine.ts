@@ -479,7 +479,8 @@ export async function geminiTargetedDelete(
   }
 }
 
-// ─── FEATURE: Semantic Search ─────────────────────────────────────────────────
+// ─── FEATURE: Semantic Search (Batch) ────────────────────────────────────────
+// Handles large vaults by processing in batches of 60 entries
 
 export async function geminiSemanticSearch(
   query: string,
@@ -487,30 +488,37 @@ export async function geminiSemanticSearch(
 ): Promise<Array<{ id: string; text: string; category: string; relevance: string }>> {
   if (!hasGeminiKey() || entries.length === 0) return [];
 
-  // Send in batches of 80 to avoid token limits
-  const batch = entries.slice(0, 80);
-  const entriesList = batch.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 150)).join("\n");
+  const BATCH_SIZE = 60;
+  const allResults: Array<{ id: string; text: string; category: string; relevance: string }> = [];
 
-  const prompt = "A user is searching their story/RPG archive for: \"" + query + "\"\n\n"
-    + "Find all entries that are relevant to this question or topic — including entries that are related by meaning even if they don't use the exact words.\n"
-    + "Be inclusive — return anything that could help answer the question.\n\n"
-    + "Entries:\n" + entriesList + "\n\n"
-    + "Return ONLY a JSON array of relevant entries with their index and a brief relevance note:\n"
-    + '[{"index": 0, "relevance": "why this is relevant"}]\n'
-    + "If nothing is relevant, return [].";
+  for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+    const batch = entries.slice(i, i + BATCH_SIZE);
+    const entriesList = batch.map((e, idx) => idx + ". [" + e.category + "] " + e.text.slice(0, 150)).join("\n");
 
-  try {
-    const result = await geminiCall(prompt);
-    const clean = result.replace(/```json|```/g, "").trim();
-    const parsed: Array<{ index: number; relevance: string }> = JSON.parse(clean);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(p => p.index >= 0 && p.index < batch.length)
-      .map(p => ({ ...batch[p.index], relevance: p.relevance }));
-  } catch {
-    return [];
+    const prompt = "A user is searching their story/RPG archive for: \"" + query + "\"\n\n"
+      + "Find all entries relevant to this question — including entries related by meaning even if they don\'t use exact words.\n\n"
+      + "Entries:\n" + entriesList + "\n\n"
+      + "Return ONLY a JSON array of relevant entries:\n"
+      + '[{"index": 0, "relevance": "why this is relevant"}]\n'
+      + "If nothing is relevant, return [].";
+
+    try {
+      const result = await geminiCall(prompt);
+      const clean = result.replace(/```json|```/g, "").trim();
+      const parsed: Array<{ index: number; relevance: string }> = JSON.parse(clean);
+      if (Array.isArray(parsed)) {
+        parsed
+          .filter(p => p.index >= 0 && p.index < batch.length)
+          .forEach(p => allResults.push({ ...batch[p.index], relevance: p.relevance }));
+      }
+    } catch {
+      // Skip failed batch
+    }
   }
+
+  return allResults;
 }
+
 
 // ─── FEATURE: Organize Rule Book ─────────────────────────────────────────────
 
@@ -651,4 +659,71 @@ export async function geminiCheckTimelineSeparation(
   } catch {
     return { hasConflicts: false, conflicts: [] };
   }
+}
+
+// ─── FEATURE: AI-First Batch Classifier ──────────────────────────────────────
+// Replaces keyword scoring entirely. Handles any amount of text accurately.
+// Splits into chunks, processes each, combines results.
+
+export async function geminiClassifyText(
+  text: string,
+  allCategories: string[]
+): Promise<Array<{ text: string; category: string }>> {
+  if (!hasGeminiKey()) return [];
+
+  // Split text into sentences/paragraphs for classification
+  const chunks = text
+    .split(/\n\n+/)
+    .flatMap(para => para.split(/(?<=[.!?])\s+/))
+    .map(s => s.trim())
+    .filter(s => s.length > 15);
+
+  if (chunks.length === 0) return [];
+
+  // Process in batches of 30 sentences
+  const BATCH_SIZE = 30;
+  const results: Array<{ text: string; category: string }> = [];
+
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE);
+    const entriesList = batch.map((c, idx) => idx + ". " + c).join("\n");
+
+    const prompt = "You are an expert story/RPG archive classifier. Categorize each entry into the SINGLE most appropriate category.\n\n"
+      + "Available categories:\n" + allCategories.map(c => "- " + c).join("\n") + "\n\n"
+      + "Rules:\n"
+      + "- Each entry gets exactly ONE category\n"
+      + "- Choose the most specific category that fits\n"
+      + "- If it mentions a character trait/personality → emotional-architecture\n"
+      + "- If it describes what happened → timeline-continuity\n"
+      + "- If it names a character and their role → characters\n"
+      + "- If it describes a place → locations\n"
+      + "- If it describes magic/powers → magic-supernatural\n"
+      + "- If it describes a rule or law → rules\n"
+      + "- If it describes a quest or goal → quests-plotlines\n"
+      + "- If it describes a relationship → relationships\n"
+      + "- If it describes history/past events → history\n"
+      + "- If it describes world lore/myths → lore-mythology\n"
+      + "- If it's about the player character → player-character\n\n"
+      + "Entries to classify:\n" + entriesList + "\n\n"
+      + "Return ONLY a JSON array:\n"
+      + '[{"index": 0, "category": "category-name"}, ...]';
+
+    try {
+      const result = await geminiCall(prompt);
+      const clean = result.replace(/```json|```/g, "").trim();
+      const parsed: Array<{ index: number; category: string }> = JSON.parse(clean);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(p => {
+          if (p.index >= 0 && p.index < batch.length) {
+            results.push({ text: batch[p.index], category: p.category });
+          }
+        });
+      }
+    } catch {
+      // If AI fails for this batch, add uncategorized
+      batch.forEach(text => results.push({ text, category: "meta-information" }));
+    }
+  }
+
+  return results;
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { hasGeminiKey, geminiSmartCategoryReview, geminiGenerateSavePrompt, geminiErrorMessage } from "../../lib/geminiEngine";
+import { hasGeminiKey, geminiSmartCategoryReview, geminiGenerateSavePrompt, geminiErrorMessage, geminiClassifyText } from "../../lib/geminiEngine";
 import {
   addEntry, replaceEntry, loadArchive, saveArchive,
   detectContradiction, regenerateMasterPrompt,
@@ -1199,6 +1199,7 @@ export default function InboxPage() {
   const [showSavePrompt, setShowSavePrompt] = useState(false);
   const [copiedSave, setCopiedSave] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [aiClassifying, setAiClassifying] = useState(false);
   const [reviewResults, setReviewResults] = useState<Array<{
     text: string; originalCategory: string; suggestedCategory: string; reason: string; changed: boolean; accepted: boolean;
   }>>([]);
@@ -1336,7 +1337,29 @@ export default function InboxPage() {
         style={{ width: "100%", height: "14rem", background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1rem", outline: "none", resize: "vertical", fontSize: "0.875rem", color: "var(--va-text)", boxSizing: "border-box", lineHeight: "1.6" }} />
 
       <div style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}>
-        <button onClick={analyzeInput} disabled={!input.trim()} style={{ background: "var(--va-accent)", color: "white", padding: "0.5rem 1.5rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", opacity: !input.trim() ? 0.4 : 1 }}>Analyze</button>
+        <button onClick={async () => {
+          if (!input.trim()) return;
+          if (hasGeminiKey()) {
+            // AI-first classification
+            setAiClassifying(true);
+            setSuggestions([]);
+            const ALL_CATS = Object.values(CATEGORY_LABELS).length > 0
+              ? Object.keys(CATEGORY_LABELS)
+              : ["characters","relationships","locations","history","lore-mythology","magic-supernatural","science-technology","political-systems","organizations","economy","cultures-society","species-races","factions","mysteries","quests-plotlines","timeline-continuity","conflict-combat","items-equipment","creatures-wildlife","themes-tone","writing-style","session-notes","meta-information","branching-canon","emotional-architecture","information-architecture","rules","player-character","custom","world-overview","geography"];
+            const aiResults = await geminiClassifyText(input, ALL_CATS);
+            if (aiResults.length > 0) {
+              setSuggestions(aiResults as Suggestion[]);
+              setAiClassifying(false);
+              return;
+            }
+            setAiClassifying(false);
+          }
+          // Fallback to keyword classifier
+          analyzeInput();
+        }} disabled={!input.trim() || aiClassifying}
+        style={{ background: "var(--va-accent)", color: "white", padding: "0.5rem 1.5rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", opacity: (!input.trim() || aiClassifying) ? 0.4 : 1 }}>
+          {aiClassifying ? "✨ AI Classifying..." : hasGeminiKey() ? "✨ Analyze with AI" : "Analyze"}
+        </button>
         <button disabled={!suggestions.length} onClick={importSuggestions} style={{ background: "#16a34a", color: "white", padding: "0.5rem 1.5rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", opacity: !suggestions.length ? 0.4 : 1 }}>Import All into Vault</button>
         {suggestions.length > 0 && hasGeminiKey() && (
           <button onClick={async () => {

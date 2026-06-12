@@ -91,23 +91,62 @@ export default function CanonPage() {
         if (ext === "pdf") {
           content = await new Promise((resolve) => {
             const reader = new FileReader();
-            reader.onload = (e) => {
-              const bytes = new Uint8Array(e.target?.result as ArrayBuffer);
-              // Extract text streams from PDF
-              let raw = "";
-              for (let i = 0; i < bytes.length; i++) {
-                const b = bytes[i];
-                if (b >= 32 && b < 127) raw += String.fromCharCode(b);
-                else if (b === 10 || b === 13) raw += "\n";
+            reader.onload = async (e) => {
+              try {
+                const bytes = new Uint8Array(e.target?.result as ArrayBuffer);
+                const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+
+                // Method 1: Extract BT...ET text blocks (standard PDF text)
+                const btBlocks: string[] = [];
+                const btRegex = /BT([\s\S]*?)ET/g;
+                let btMatch;
+                while ((btMatch = btRegex.exec(text)) !== null) {
+                  const block = btMatch[1];
+                  // Extract strings from Tj, TJ, ' operators
+                  const strRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*(?:Tj|'|")/g;
+                  const arrRegex = /\[((?:[^\[\]]|\[[\s\S]*?\])*)\]\s*TJ/g;
+                  let sm;
+                  while ((sm = strRegex.exec(block)) !== null) {
+                    const decoded = sm[1].replace(/\\(\d{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
+                      .replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t")
+                      .replace(/\\\\/g, "\\").replace(/\\'/g, "'");
+                    if (decoded.trim().length > 0) btBlocks.push(decoded);
+                  }
+                  while ((sm = arrRegex.exec(block)) !== null) {
+                    const arr = sm[1];
+                    const parts: string[] = [];
+                    const pRegex = /\(((?:[^()\\]|\\[\s\S])*)\)/g;
+                    let pm;
+                    while ((pm = pRegex.exec(arr)) !== null) {
+                      parts.push(pm[1].replace(/\\(\d{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8))));
+                    }
+                    if (parts.join("").trim()) btBlocks.push(parts.join(""));
+                  }
+                }
+
+                if (btBlocks.length > 10) {
+                  resolve(btBlocks.join(" ").replace(/\s+/g, " ").trim());
+                  return;
+                }
+
+                // Method 2: Extract readable ASCII strings (fallback)
+                const lines = text
+                  .replace(/[^\x20-\x7E\n\r]/g, " ")
+                  .split(/[\n\r]+/)
+                  .map(l => l.trim())
+                  .filter(l => l.length > 10 && !/^[\d\s\W]+$/.test(l) && /[a-zA-Z]{3,}/.test(l));
+
+                if (lines.length > 5) {
+                  resolve(lines.join("\n"));
+                  return;
+                }
+
+                resolve(`[PDF: ${file.name} — This PDF uses encoded/image-based text that cannot be extracted automatically. Please copy and paste the text content manually using the Copy & Paste tab.]`);
+              } catch {
+                resolve(`[PDF: ${file.name} — Could not read file.]`);
               }
-              // Pull out readable text blocks
-              const lines = raw
-                .replace(/[^\x20-\x7E\n]/g, " ")
-                .split("\n")
-                .map(l => l.trim())
-                .filter(l => l.length > 8 && !/^[\d\s\W]+$/.test(l));
-              resolve(lines.join("\n") || `[PDF: ${file.name} — text could not be extracted. Try copy-pasting the text instead.]`);
             };
+            reader.onerror = () => resolve(`[PDF: ${file.name} — File read error.]`);
             reader.readAsArrayBuffer(file);
           });
         } else {
@@ -119,8 +158,8 @@ export default function CanonPage() {
         setArchive(updated);
         a = updated;
         flash(`✓ "${file.name}" added to ${catName}`);
-      } catch {
-        flash(`✗ Could not read "${file.name}"`);
+      } catch (err) {
+        flash(`✗ Could not read "${file.name}" — ${err instanceof Error ? err.message : "unknown error"}`);
       }
     }
     setImporting(false);
