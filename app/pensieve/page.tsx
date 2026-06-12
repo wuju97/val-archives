@@ -65,6 +65,56 @@ export default function PensievePage() {
       <h1 style={{ fontSize: "3rem", fontWeight: "bold", marginBottom: "0.5rem" }}>🌀 Pensieve</h1>
       <p style={{ ...S.muted, marginBottom: "2rem" }}>{archive.entries.length} {archive.entries.length === 1 ? "memory" : "memories"} in vault</p>
 
+      {/* AI Semantic Search */}
+      {hasGeminiKey() && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <input value={aiQuery}
+              onChange={e => { setAiQuery(e.target.value); if (!e.target.value.trim()) { setAiResults(null); setAiMode(false); } }}
+              onKeyDown={async e => {
+                if (e.key === "Enter" && aiQuery.trim()) {
+                  setAiSearching(true); setAiMode(true);
+                  const results = await geminiSemanticSearch(aiQuery, archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })));
+                  setAiResults(results); setAiSearching(false);
+                }
+              }}
+              placeholder="✨ Ask anything — e.g. What do I know about Hermione's relationship with Valefor?"
+              style={{ flex: 1, background: "var(--va-surface)", border: "1px solid #7c3aed", borderRadius: "0.5rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem" }} />
+            <button onClick={async () => {
+              if (!aiQuery.trim()) return;
+              setAiSearching(true); setAiMode(true);
+              const results = await geminiSemanticSearch(aiQuery, archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })));
+              setAiResults(results); setAiSearching(false);
+            }} disabled={!aiQuery.trim() || aiSearching}
+              style={{ background: "#7c3aed", color: "white", padding: "0.625rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: (!aiQuery.trim() || aiSearching) ? 0.5 : 1, whiteSpace: "nowrap" }}>
+              {aiSearching ? "✨ Searching..." : "✨ AI Search"}
+            </button>
+            {aiMode && (
+              <button onClick={() => { setAiMode(false); setAiResults(null); setAiQuery(""); }}
+                style={{ background: "var(--va-border)", color: "var(--va-text-muted)", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontSize: "0.8rem" }}>
+                Clear
+              </button>
+            )}
+          </div>
+          {aiMode && aiResults !== null && (
+            <p style={{ fontSize: "0.75rem", color: "#c4b5fd", marginTop: "0.375rem" }}>
+              {aiResults.length > 0 ? `✨ Found ${aiResults.length} relevant ${aiResults.length === 1 ? "entry" : "entries"}` : "✨ No relevant entries found"}
+            </p>
+          )}
+          {aiMode && aiResults !== null && aiResults.length > 0 && (
+            <div style={{ marginTop: "1rem", display: "flex", flexDirection: "column", gap: "0.625rem" }}>
+              {aiResults.map(result => (
+                <div key={result.id} style={{ background: "var(--va-surface)", border: "1px solid #7c3aed33", borderRadius: "0.75rem", padding: "1rem" }}>
+                  <span style={{ fontSize: "0.7rem", color: "#c4b5fd", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>{result.category}</span>
+                  <p style={{ fontSize: "0.875rem", color: "var(--va-text)", lineHeight: "1.6", margin: "0.375rem 0" }}>{result.text}</p>
+                  <p style={{ fontSize: "0.75rem", color: "#7c3aed", fontStyle: "italic" }}>✨ {result.relevance}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "1rem" }}>
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search memories..." style={S.input} />
         <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value as StoryCategory | "all")} style={S.select}>
