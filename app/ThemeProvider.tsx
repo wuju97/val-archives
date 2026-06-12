@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 
 export function applyStoredTheme() {
   try {
@@ -27,17 +28,20 @@ export function applyStoredTheme() {
 }
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  // Reapply theme every time the route changes
   useEffect(() => {
     applyStoredTheme();
+  }, [pathname]);
 
+  useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === "valArchivesTheme") applyStoredTheme();
     };
     const handleUpdate = () => applyStoredTheme();
-
     window.addEventListener("storage", handleStorage);
     window.addEventListener("va-theme-update", handleUpdate);
-
     return () => {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("va-theme-update", handleUpdate);
