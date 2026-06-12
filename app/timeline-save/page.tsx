@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { hasGeminiKey, geminiCheckTimelineSeparation } from "../../lib/geminiEngine";
 import {
   loadArchive, saveArchive,
   addTimelineSave, deleteTimelineSave, renameTimelineSave,
@@ -24,6 +25,8 @@ export default function TimelineSavePage() {
   // Rename
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [separationWarning, setSeparationWarning] = useState<{ timeline: string; conflicts: Array<{ timeline: string; issue: string }> } | null>(null);
+  const [checkingSeparation, setCheckingSeparation] = useState(false);
 
   useEffect(() => { setArchive(loadArchive()); }, []);
 
@@ -32,6 +35,23 @@ export default function TimelineSavePage() {
 
   function update(updated: typeof archive) {
     saveArchive(updated); setArchive(updated);
+  }
+
+  async function handleCheckSeparation(saveId: string, saveName: string, saveContent: string) {
+    if (!hasGeminiKey() || !archive) return;
+    setCheckingSeparation(true); setSeparationWarning(null);
+    const otherSaves = (archive.timelineSaves ?? [])
+      .filter(s => s.id !== saveId)
+      .map(s => ({ name: s.name, content: s.content }));
+    if (otherSaves.length === 0) { setCheckingSeparation(false); return; }
+    const result = await geminiCheckTimelineSeparation(
+      { name: saveName, content: saveContent },
+      otherSaves
+    );
+    if (result.hasConflicts) {
+      setSeparationWarning({ timeline: saveName, conflicts: result.conflicts });
+    }
+    setCheckingSeparation(false);
   }
 
   function handleAddSave() {
