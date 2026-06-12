@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { hasGeminiKey, geminiSemanticSearch } from "../../lib/geminiEngine";
 import {
   loadArchive, saveArchive, updateEntry, deleteEntry,
   regenerateMasterPrompt, CATEGORY_LABELS, CATEGORY_ICONS, StoryCategory,
@@ -12,6 +13,10 @@ export default function PensievePage() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<StoryCategory | "all">("all");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [aiQuery, setAiQuery] = useState("");
+  const [aiResults, setAiResults] = useState<Array<{ id: string; text: string; category: string; relevance: string }> | null>(null);
+  const [aiSearching, setAiSearching] = useState(false);
+  const [aiMode, setAiMode] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);

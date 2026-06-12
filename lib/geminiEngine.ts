@@ -478,3 +478,36 @@ export async function geminiTargetedDelete(
     return [];
   }
 }
+
+// ─── FEATURE: Semantic Search ─────────────────────────────────────────────────
+
+export async function geminiSemanticSearch(
+  query: string,
+  entries: Array<{ id: string; text: string; category: string }>
+): Promise<Array<{ id: string; text: string; category: string; relevance: string }>> {
+  if (!hasGeminiKey() || entries.length === 0) return [];
+
+  // Send in batches of 80 to avoid token limits
+  const batch = entries.slice(0, 80);
+  const entriesList = batch.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 150)).join("\n");
+
+  const prompt = "A user is searching their story/RPG archive for: \"" + query + "\"\n\n"
+    + "Find all entries that are relevant to this question or topic — including entries that are related by meaning even if they don't use the exact words.\n"
+    + "Be inclusive — return anything that could help answer the question.\n\n"
+    + "Entries:\n" + entriesList + "\n\n"
+    + "Return ONLY a JSON array of relevant entries with their index and a brief relevance note:\n"
+    + '[{"index": 0, "relevance": "why this is relevant"}]\n'
+    + "If nothing is relevant, return [].";
+
+  try {
+    const result = await geminiCall(prompt);
+    const clean = result.replace(/```json|```/g, "").trim();
+    const parsed: Array<{ index: number; relevance: string }> = JSON.parse(clean);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(p => p.index >= 0 && p.index < batch.length)
+      .map(p => ({ ...batch[p.index], relevance: p.relevance }));
+  } catch {
+    return [];
+  }
+}
