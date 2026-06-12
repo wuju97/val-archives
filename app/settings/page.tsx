@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -197,6 +197,8 @@ export default function SettingsPage() {
     const updated = { ...theme, ...updates };
     setTheme(updated);
     applyTheme(updated);
+    // Auto-save so theme persists on navigation
+    localStorage.setItem("valArchivesTheme", JSON.stringify(updated));
   }
 
   function applyBgPreset(preset: typeof BG_PRESETS[0]) {
