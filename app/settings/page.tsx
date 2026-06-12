@@ -152,7 +152,11 @@ const INSTRUCTIONS = [
   },
   {
     title: "🗄️ Vault Switcher",
-    description: "Create multiple isolated vaults — one per game or project. Switch at localhost:3000/vaults. Export any vault as a .json file to back up or move to another browser. Import to restore exactly. The vault name shown in the switcher syncs with whatever you name your archive on the dashboard when you save.",
+    description: "Create multiple isolated vaults — one per game or project. Switch at the /vaults page. Export any vault as a .json file to back up or move to another browser. Import to restore exactly. The vault name shown in the switcher syncs with whatever you name your archive on the dashboard when you save.",
+  },
+  {
+    title: "🌐 Website & PC App",
+    description: "Val Archives is live at val-archives.vercel.app — share this link with anyone. No login needed, no VS Code, works in any browser on any device. Each person's data stays in their own browser. For a desktop experience, download the PC app from the Download button at the bottom of the dashboard — it opens Val Archives in a standalone window. The PC app requires an internet connection since it loads the live website.",
   },
   {
     title: "➕ Add Tab",
