@@ -1,4 +1,4 @@
-"use client";
+ "use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -73,6 +73,7 @@ function loadTheme(): ThemeSettings {
 }
 
 function applyTheme(theme: ThemeSettings) {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("va-theme-update"));
   const root = document.documentElement;
 
   // If brightness is non-zero, use brightness interpolation
