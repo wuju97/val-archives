@@ -1071,3 +1071,90 @@ export function migrateOldVault(): void {
     setActiveVaultId(id);
   } catch {}
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UNDO / REDO HISTORY SYSTEM
+// Keeps last 20 archive states in localStorage
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const HISTORY_KEY = "valArchivesHistory";
+const FUTURE_KEY = "valArchivesFuture";
+const MAX_HISTORY = 20;
+
+export function pushHistory(state: ArchiveData): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const history: ArchiveData[] = raw ? JSON.parse(raw) : [];
+    history.push(state);
+    if (history.length > MAX_HISTORY) history.shift();
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    // Clear future when new action is taken
+    localStorage.removeItem(FUTURE_KEY);
+  } catch {}
+}
+
+export function undoArchive(): ArchiveData | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const history: ArchiveData[] = raw ? JSON.parse(raw) : [];
+    if (history.length === 0) return null;
+    const previous = history.pop()!;
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    // Push current state to future
+    const currentRaw = localStorage.getItem(STORAGE_KEY);
+    if (currentRaw) {
+      const futureRaw = localStorage.getItem(FUTURE_KEY);
+      const future: ArchiveData[] = futureRaw ? JSON.parse(futureRaw) : [];
+      future.push(JSON.parse(currentRaw));
+      localStorage.setItem(FUTURE_KEY, JSON.stringify(future));
+    }
+    return previous;
+  } catch { return null; }
+}
+
+export function redoArchive(): ArchiveData | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const futureRaw = localStorage.getItem(FUTURE_KEY);
+    const future: ArchiveData[] = futureRaw ? JSON.parse(futureRaw) : [];
+    if (future.length === 0) return null;
+    const next = future.pop()!;
+    localStorage.setItem(FUTURE_KEY, JSON.stringify(future));
+    // Push current to history
+    const currentRaw = localStorage.getItem(STORAGE_KEY);
+    if (currentRaw) {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      const history: ArchiveData[] = raw ? JSON.parse(raw) : [];
+      history.push(JSON.parse(currentRaw));
+      if (history.length > MAX_HISTORY) history.shift();
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    }
+    return next;
+  } catch { return null; }
+}
+
+export function canUndo(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const history: ArchiveData[] = raw ? JSON.parse(raw) : [];
+    return history.length > 0;
+  } catch { return false; }
+}
+
+export function canRedo(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem(FUTURE_KEY);
+    const future: ArchiveData[] = raw ? JSON.parse(raw) : [];
+    return future.length > 0;
+  } catch { return false; }
+}
+
+export function clearHistory(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(HISTORY_KEY);
+  localStorage.removeItem(FUTURE_KEY);
+}

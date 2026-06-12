@@ -447,3 +447,34 @@ export async function geminiSmartCategoryReview(
     return suggestions.map(s => ({ text: s.text, originalCategory: s.category, suggestedCategory: s.category, reason: "", changed: false }));
   }
 }
+
+// ─── FEATURE: AI Targeted Delete ─────────────────────────────────────────────
+
+export async function geminiTargetedDelete(
+  query: string,
+  entries: Array<{ id: string; text: string; category: string }>
+): Promise<Array<{ id: string; text: string; category: string; reason: string }>> {
+  if (!hasGeminiKey() || entries.length === 0) return [];
+
+  const entriesList = entries.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 120)).join("\n");
+
+  const prompt = "A user wants to delete vault entries related to this topic: \"" + query + "\"\n\n"
+    + "Review these entries and identify ONLY the ones that are directly relevant to the topic.\n"
+    + "Be conservative — only include entries that clearly match. Do not include tangentially related entries.\n\n"
+    + "Entries:\n" + entriesList + "\n\n"
+    + "Return ONLY a JSON array of matching entry indices (0-based) with reasons:\n"
+    + '[{"index": 0, "reason": "brief reason why this matches"}]\n'
+    + "If nothing matches, return an empty array: []";
+
+  try {
+    const result = await geminiCall(prompt);
+    const clean = result.replace(/```json|```/g, "").trim();
+    const parsed: Array<{ index: number; reason: string }> = JSON.parse(clean);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(p => p.index >= 0 && p.index < entries.length)
+      .map(p => ({ ...entries[p.index], reason: p.reason }));
+  } catch {
+    return [];
+  }
+}

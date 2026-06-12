@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt } from "@/lib/archiveEngine";
+import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt, saveArchive, pushHistory, undoArchive, redoArchive, canUndo, canRedo } from "@/lib/archiveEngine";
 import {
-  getGeminiKey, setGeminiKey, clearGeminiKey, testGeminiConnection,
-  geminiChat, geminiErrorMessage,
+  getGeminiKey, setGeminiKey, clearGeminiKey, testGeminiConnection, hasGeminiKey,
+  geminiChat, geminiErrorMessage, geminiTargetedDelete,
 } from "../../lib/geminiEngine";
 
 const ACCENT_COLORS = [
@@ -183,6 +183,11 @@ export default function SettingsPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [deleteQuery, setDeleteQuery] = useState("");
+  const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; text: string; category: string; reason: string }>>([]);
+  const [deletingTargets, setDeletingTargets] = useState(false);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [undoStatus, setUndoStatus] = useState("");
 
   useEffect(() => {
     const loaded = loadTheme();
@@ -238,7 +243,7 @@ export default function SettingsPage() {
     { id: "personalisation", label: "🎨 Personalisation" },
     { id: "instructions",    label: "📖 Instructions" },
     { id: "ai",              label: "✨ AI (Gemini)" },
-    { id: "danger",          label: "⚠️ Danger Zone" },
+    { id: "danger",          label: "🚨 Alert Zone" },
   ] as const;
 
   return (
@@ -284,7 +289,7 @@ export default function SettingsPage() {
         </aside>
 
         {/* Content */}
-        <main style={{ flex: 1, padding: "2rem", maxWidth: activeSection === "instructions" ? "100%" : "42rem" }}>
+        <main style={{ flex: 1, padding: "2rem", maxWidth: (activeSection === "instructions" || activeSection === "danger") ? "100%" : "42rem" }}>
 
           {/* ── Display ── */}
           {activeSection === "display" ? (
@@ -653,9 +658,91 @@ export default function SettingsPage() {
           {activeSection === "danger" ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
               <div>
-                <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>Danger Zone</h2>
-                <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Irreversible actions. Be careful.</p>
+                <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>🚨 Alert Zone</h2>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Powerful and irreversible actions. Be careful.</p>
               </div>
+
+              {/* Undo / Redo */}
+              <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem", width: "100%" }}>
+                <h3 style={{ fontWeight: "bold", marginBottom: "0.5rem" }}>↩️ Undo / Redo</h3>
+                <p style={{ fontSize: "0.875rem", color: "var(--va-text-muted)", marginBottom: "1rem", lineHeight: "1.6" }}>
+                  Undo or redo your last vault action — including imports, deletes, and saves. Keeps the last 20 states.
+                  You can also use <strong>Ctrl+Z</strong> and <strong>Ctrl+Y</strong> anywhere on the site.
+                </p>
+                {undoStatus && <p style={{ fontSize: "0.875rem", color: "#4ade80", marginBottom: "0.75rem" }}>{undoStatus}</p>}
+                <div style={{ display: "flex", gap: "0.75rem" }}>
+                  <button onClick={() => {
+                    const prev = undoArchive();
+                    if (prev) { saveArchive(prev); setUndoStatus("✓ Undone"); setTimeout(() => setUndoStatus(""), 2000); }
+                    else { setUndoStatus("Nothing to undo"); setTimeout(() => setUndoStatus(""), 2000); }
+                  }} style={{ background: "var(--va-border)", color: "var(--va-text)", padding: "0.625rem 1.25rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
+                    ↩️ Undo
+                  </button>
+                  <button onClick={() => {
+                    const next = redoArchive();
+                    if (next) { saveArchive(next); setUndoStatus("✓ Redone"); setTimeout(() => setUndoStatus(""), 2000); }
+                    else { setUndoStatus("Nothing to redo"); setTimeout(() => setUndoStatus(""), 2000); }
+                  }} style={{ background: "var(--va-border)", color: "var(--va-text)", padding: "0.625rem 1.25rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
+                    ↪️ Redo
+                  </button>
+                </div>
+              </div>
+
+              {/* AI Targeted Delete */}
+              {hasGeminiKey() && (
+                <div style={{ background: "var(--va-surface)", border: "1px solid #b45309", borderRadius: "0.75rem", padding: "1.25rem", width: "100%" }}>
+                  <h3 style={{ fontWeight: "bold", marginBottom: "0.5rem", color: "#fbbf24" }}>✨ AI Targeted Delete</h3>
+                  <p style={{ fontSize: "0.875rem", color: "var(--va-text-muted)", marginBottom: "1rem", lineHeight: "1.6" }}>
+                    Describe what you want to delete in plain English. Gemini will find only the relevant entries and show them to you before deleting anything.
+                  </p>
+                  <input value={deleteQuery} onChange={e => { setDeleteQuery(e.target.value); setDeleteTargets([]); setDeleteConfirmed(false); }}
+                    placeholder='e.g. "everything about Draco Malfoy" or "all quest entries"'
+                    style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.75rem", boxSizing: "border-box" }} />
+                  <button onClick={async () => {
+                    if (!deleteQuery.trim()) return;
+                    setDeletingTargets(true); setDeleteTargets([]); setDeleteConfirmed(false);
+                    const archive = loadArchive();
+                    const entries = archive.entries.map(e => ({ id: e.id, text: e.text, category: e.category }));
+                    const targets = await geminiTargetedDelete(deleteQuery, entries);
+                    setDeleteTargets(targets);
+                    setDeletingTargets(false);
+                  }} disabled={!deleteQuery.trim() || deletingTargets}
+                  style={{ background: "#b45309", color: "white", padding: "0.5rem 1.25rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: (!deleteQuery.trim() || deletingTargets) ? 0.5 : 1 }}>
+                    {deletingTargets ? "✨ Scanning..." : "✨ Find Entries to Delete"}
+                  </button>
+                  {deleteTargets.length > 0 && (
+                    <div style={{ marginTop: "1rem" }}>
+                      <p style={{ fontSize: "0.875rem", color: "#fbbf24", marginBottom: "0.5rem", fontWeight: "600" }}>
+                        Found {deleteTargets.length} matching {deleteTargets.length === 1 ? "entry" : "entries"} — review before deleting:
+                      </p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginBottom: "0.875rem", maxHeight: "200px", overflowY: "auto" }}>
+                        {deleteTargets.map(t => (
+                          <div key={t.id} style={{ background: "var(--va-bg)", border: "1px solid #b45309", borderRadius: "0.375rem", padding: "0.625rem 0.875rem" }}>
+                            <p style={{ fontSize: "0.8rem", color: "var(--va-text)", marginBottom: "0.25rem" }}>{t.text.slice(0, 100)}{t.text.length > 100 ? "..." : ""}</p>
+                            <p style={{ fontSize: "0.7rem", color: "#fbbf24" }}>[{t.category}] — {t.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={() => {
+                        const archive = loadArchive();
+                        pushHistory(archive);
+                        const ids = new Set(deleteTargets.map(t => t.id));
+                        const updated = { ...archive, entries: archive.entries.filter(e => !ids.has(e.id)) };
+                        const refreshed = regenerateMasterPrompt(updated);
+                        saveArchive(refreshed);
+                        setDeleteTargets([]); setDeleteQuery(""); setDeleteConfirmed(true);
+                        setTimeout(() => setDeleteConfirmed(false), 3000);
+                      }} style={{ background: "#b91c1c", color: "white", padding: "0.5rem 1.25rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem" }}>
+                        🗑️ Delete These {deleteTargets.length} {deleteTargets.length === 1 ? "Entry" : "Entries"}
+                      </button>
+                      {deleteConfirmed && <p style={{ fontSize: "0.875rem", color: "#4ade80", marginTop: "0.5rem" }}>✓ Deleted. Use Undo if needed.</p>}
+                    </div>
+                  )}
+                  {deleteTargets.length === 0 && !deletingTargets && deleteQuery && (
+                    <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", marginTop: "0.75rem" }}>Click "Find Entries to Delete" to scan your vault.</p>
+                  )}
+                </div>
+              )}
 
               {/* Export Vault */}
               <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.5rem" }}>

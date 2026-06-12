@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import {
   loadArchive, saveArchive, addCustomTab, removeCustomTab,
   regenerateMasterPrompt, setPriority, getPriorityLevel, ArchiveData,
-  getActiveVaultId, saveVaultById,
+  getActiveVaultId, saveVaultById, pushHistory,
+  undoArchive, redoArchive,
 } from "@/lib/archiveEngine";
 import { hasGeminiKey, geminiCall } from "../../lib/geminiEngine";
 
@@ -252,6 +253,24 @@ export default function DashboardPage() {
   const [vaultFont, setVaultFont] = useState("inherit");
   const [showFontPicker, setShowFontPicker] = useState(false);
 
+  // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        const prev = undoArchive();
+        if (prev) { saveArchive(prev); setArchive(prev); setArchiveName(prev.archiveName); }
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        const next = redoArchive();
+        if (next) { saveArchive(next); setArchive(next); setArchiveName(next.archiveName); }
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
+
   useEffect(() => {
     const loaded = loadArchive();
     setArchive(loaded);
@@ -290,6 +309,7 @@ export default function DashboardPage() {
 
   function handleSave() {
     if (!archive) return;
+    pushHistory(archive);
     const updated = { ...archive, archiveName };
     saveArchive(updated);
     const vaultId = getActiveVaultId();
