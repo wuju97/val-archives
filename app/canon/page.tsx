@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { hasGeminiKey, geminiCanonPlacement } from "../../lib/geminiEngine";
 import {
   loadArchive, saveArchive,
   addCanonCategory, removeCanonCategory,

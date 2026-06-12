@@ -511,3 +511,144 @@ export async function geminiSemanticSearch(
     return [];
   }
 }
+
+// ─── FEATURE: Organize Rule Book ─────────────────────────────────────────────
+
+export async function geminiOrganizeRules(
+  rules: string[]
+): Promise<{ organized: string[]; summary: string }> {
+  if (!hasGeminiKey() || rules.length === 0) return { organized: rules, summary: "" };
+
+  const rulesList = rules.map((r, i) => i + ". " + r).join("\n");
+
+  const prompt = "You are organizing a rulebook for an RPG/story campaign. Here are the current rules:\n\n"
+    + rulesList + "\n\n"
+    + "Do the following:\n"
+    + "1. Remove any exact duplicates\n"
+    + "2. Group similar rules together (e.g. combat rules, magic rules, character rules, world rules, GM rules)\n"
+    + "3. Within each group, order rules from most important to least\n"
+    + "4. Keep each rule's wording exactly as written — do not paraphrase or change meaning\n"
+    + "5. Add a short GROUP HEADER before each group in ALL CAPS (e.g. === COMBAT RULES ===)\n\n"
+    + "Return ONLY a JSON object:\n"
+    + '{"organized": ["rule1", "=== GROUP HEADER ===", "rule2", ...], "summary": "brief summary of what was reorganized"}';
+
+  try {
+    const result = await geminiCall(prompt);
+    const clean = result.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
+    if (parsed.organized && Array.isArray(parsed.organized)) return parsed;
+    return { organized: rules, summary: "" };
+  } catch {
+    return { organized: rules, summary: "" };
+  }
+}
+
+// ─── FEATURE: Verify Story Categories ────────────────────────────────────────
+
+export async function geminiVerifyCategories(
+  entries: Array<{ id: string; text: string; category: string }>,
+  allCategories: string[]
+): Promise<Array<{ id: string; text: string; currentCategory: string; suggestedCategory: string; reason: string; changed: boolean }>> {
+  if (!hasGeminiKey() || entries.length === 0) return [];
+
+  // Work in batches of 40
+  const batch = entries.slice(0, 40);
+  const entriesList = batch.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 100)).join("\n");
+
+  const prompt = "You are auditing a story/RPG archive. Review these entries and identify any that are clearly in the wrong category.\n\n"
+    + "Available categories: " + allCategories.join(", ") + "\n\n"
+    + "Entries:\n" + entriesList + "\n\n"
+    + "Only flag entries that are CLEARLY in the wrong category. Be conservative.\n"
+    + "Return ONLY a JSON array of entries that need moving (skip correct ones):\n"
+    + '[{"index": 0, "suggestedCategory": "better-category", "reason": "brief reason"}]\n'
+    + "If all are correct, return [].";
+
+  try {
+    const result = await geminiCall(prompt);
+    const clean = result.replace(/```json|```/g, "").trim();
+    const parsed: Array<{ index: number; suggestedCategory: string; reason: string }> = JSON.parse(clean);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(p => p.index >= 0 && p.index < batch.length)
+      .map(p => ({
+        id: batch[p.index].id,
+        text: batch[p.index].text,
+        currentCategory: batch[p.index].category,
+        suggestedCategory: p.suggestedCategory,
+        reason: p.reason,
+        changed: false,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+// ─── FEATURE: Canon Chronological Placement ───────────────────────────────────
+
+export async function geminiCanonPlacement(
+  newContent: string,
+  existingCanon: string[],
+  categoryName: string
+): Promise<{ placement: string; context: string; suggestion: string }> {
+  if (!hasGeminiKey()) return { placement: "", context: "", suggestion: "" };
+
+  const canonSummary = existingCanon.slice(0, 10).map((c, i) => (i + 1) + ". " + c.slice(0, 200)).join("\n");
+
+  const prompt = "You are a story/RPG canon archivist. A new piece of content has been added to the \"" + categoryName + "\" canon category.\n\n"
+    + "Existing canon entries (in current order):\n" + canonSummary + "\n\n"
+    + "New content added:\n" + newContent.slice(0, 500) + "\n\n"
+    + "Analyze where this new content fits chronologically or narratively within the existing canon.\n"
+    + "Tell the user:\n"
+    + "1. WHERE it belongs (before entry X, after entry Y, or at the beginning/end)\n"
+    + "2. WHY it belongs there (what events connect it)\n"
+    + "3. Any continuity notes (things to be aware of when placing it)\n\n"
+    + "Return ONLY a JSON object:\n"
+    + '{"placement": "After entry 3, before entry 4", "context": "explanation of why", "suggestion": "any continuity notes or suggestions"}';
+
+  try {
+    const result = await geminiCall(prompt);
+    const clean = result.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
+    return {
+      placement: parsed.placement || "",
+      context: parsed.context || "",
+      suggestion: parsed.suggestion || "",
+    };
+  } catch {
+    return { placement: "", context: "", suggestion: "" };
+  }
+}
+
+// ─── FEATURE: Timeline Separation Check ──────────────────────────────────────
+
+export async function geminiCheckTimelineSeparation(
+  currentTimeline: { name: string; content: string },
+  otherTimelines: Array<{ name: string; content: string }>
+): Promise<{ hasConflicts: boolean; conflicts: Array<{ timeline: string; issue: string }> }> {
+  if (!hasGeminiKey() || otherTimelines.length === 0) return { hasConflicts: false, conflicts: [] };
+
+  const others = otherTimelines.slice(0, 5).map(t => "Timeline \"" + t.name + "\":\n" + t.content.slice(0, 300)).join("\n\n");
+
+  const prompt = "You are checking if a new timeline save conflicts with or bleeds into existing timelines.\n\n"
+    + "NEW TIMELINE: \"" + currentTimeline.name + "\"\n"
+    + currentTimeline.content.slice(0, 400) + "\n\n"
+    + "EXISTING TIMELINES:\n" + others + "\n\n"
+    + "Check for:\n"
+    + "1. Contradictions (events that can't both be true)\n"
+    + "2. Content that accidentally belongs to a different timeline\n"
+    + "3. Character states that conflict between timelines\n\n"
+    + "Return ONLY a JSON object:\n"
+    + '{"hasConflicts": true/false, "conflicts": [{"timeline": "name", "issue": "description of conflict"}]}';
+
+  try {
+    const result = await geminiCall(prompt);
+    const clean = result.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
+    return {
+      hasConflicts: parsed.hasConflicts ?? false,
+      conflicts: parsed.conflicts ?? [],
+    };
+  } catch {
+    return { hasConflicts: false, conflicts: [] };
+  }
+}

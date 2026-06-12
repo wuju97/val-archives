@@ -11,6 +11,8 @@ import { hasGeminiKey, geminiEnhanceRule } from "@/lib/geminiEngine";
 export default function RuleBookPage() {
   const [archive, setArchive] = useState(loadArchive());
   const [input, setInput] = useState("");
+  const [organizing, setOrganizing] = useState(false);
+  const [organizeResult, setOrganizeResult] = useState("");
   const [added, setAdded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
