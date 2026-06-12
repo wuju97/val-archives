@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect } from "react";
+import { useEffect } from "react";
 
-// Use this everywhere to apply theme
 export function applyStoredTheme() {
   try {
     const t = JSON.parse(localStorage.getItem("valArchivesTheme") || "{}");
@@ -17,27 +16,34 @@ export function applyStoredTheme() {
     }
 
     const f = b / 100;
-    const r = document.documentElement;
-    r.style.setProperty("--va-bg", interp("#080808","#e5e7eb",f));
-    r.style.setProperty("--va-surface", interp("#111827","#f3f4f6",f));
-    r.style.setProperty("--va-border", interp("#1f2937","#d1d5db",f));
-    r.style.setProperty("--va-text", interp("#f9fafb","#111827",f));
-    r.style.setProperty("--va-text-muted", interp("#6b7280","#4b5563",f));
-    r.style.setProperty("--va-accent", a);
+    const bg = interp("#080808","#e5e7eb",f);
+    const surface = interp("#111827","#f3f4f6",f);
+    const border = interp("#1f2937","#d1d5db",f);
+    const text = interp("#f9fafb","#111827",f);
+    const muted = interp("#6b7280","#4b5563",f);
+
+    // Inject a <style> tag that overrides :root — this beats CSS file specificity
+    let styleEl = document.getElementById("va-theme-style");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "va-theme-style";
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `:root {
+      --va-bg: ${bg} !important;
+      --va-surface: ${surface} !important;
+      --va-border: ${border} !important;
+      --va-text: ${text} !important;
+      --va-text-muted: ${muted} !important;
+      --va-accent: ${a} !important;
+    }`;
   } catch {}
 }
 
-// Use useLayoutEffect to apply before paint — prevents flash
-const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
-
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Apply on every render before paint
-  useIsomorphicLayoutEffect(() => {
-    applyStoredTheme();
-  });
-
   useEffect(() => {
-    // Listen for storage changes (other tabs)
+    applyStoredTheme();
+
     const handleStorage = (e: StorageEvent) => {
       if (e.key === "valArchivesTheme") applyStoredTheme();
     };
@@ -45,9 +51,15 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
 
     window.addEventListener("storage", handleStorage);
     window.addEventListener("va-theme-update", handleUpdate);
+
+    // Also reapply on any route change by watching document title changes
+    const observer = new MutationObserver(() => applyStoredTheme());
+    observer.observe(document.head, { childList: true, subtree: true });
+
     return () => {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("va-theme-update", handleUpdate);
+      observer.disconnect();
     };
   }, []);
 
