@@ -250,6 +250,7 @@ export default function DashboardPage() {
   const [newTabEmoji, setNewTabEmoji] = useState("📖");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [vaultFont, setVaultFont] = useState("inherit");
+  const [showFontPicker, setShowFontPicker] = useState(false);
 
   useEffect(() => {
     const loaded = loadArchive();
@@ -407,8 +408,35 @@ export default function DashboardPage() {
               <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", opacity: 0.7 }}>
                 Last save: {lastSave} · {archive.entries.length} entries
               </p>
+              <button onClick={() => setShowFontPicker(!showFontPicker)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem", padding: 0 }}>
+                Aa Font ▾
+              </button>
               <Link href="/home" style={{ color: "var(--va-accent)", fontSize: "0.75rem", opacity: 0.7 }}>✨ AI setup</Link>
             </div>
+            {showFontPicker && (
+              <div style={{ marginTop: "0.5rem", background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "0.75rem", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.375rem", maxWidth: "480px" }}>
+                {[
+                  { name: "Default", value: "inherit" },
+                  { name: "Serif", value: "Georgia, serif" },
+                  { name: "Mono", value: "monospace" },
+                  { name: "Cursive", value: "cursive" },
+                  { name: "Cinzel", value: "'Cinzel', Georgia, serif" },
+                  { name: "Playfair", value: "'Playfair Display', Georgia, serif" },
+                  { name: "Raleway", value: "'Raleway', sans-serif" },
+                  { name: "Oswald", value: "'Oswald', sans-serif" },
+                  { name: "Lora", value: "'Lora', Georgia, serif" },
+                  { name: "Bebas Neue", value: "'Bebas Neue', sans-serif" },
+                  { name: "Uncial", value: "'Uncial Antiqua', cursive" },
+                  { name: "Medieval", value: "'MedievalSharp', cursive" },
+                ].map(font => (
+                  <button key={font.value} onClick={() => { setVaultFont(font.value); localStorage.setItem("valArchivesVaultFont", font.value); setShowFontPicker(false); }}
+                    style={{ background: vaultFont === font.value ? "var(--va-accent)" : "var(--va-border)", color: vaultFont === font.value ? "white" : "var(--va-text)", border: "none", borderRadius: "0.375rem", padding: "0.4rem 0.5rem", cursor: "pointer", fontFamily: font.value, fontSize: "0.8rem", textAlign: "left" }}>
+                    {font.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           {cards.length < 5 && (
             <button onClick={() => setShowAddCard(!showAddCard)}
@@ -496,4 +524,4 @@ export default function DashboardPage() {
       </aside>
     </div>
   );
-}
+}  
