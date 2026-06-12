@@ -415,23 +415,43 @@ export default function DashboardPage() {
               <Link href="/home" style={{ color: "var(--va-accent)", fontSize: "0.75rem", opacity: 0.7 }}>✨ AI setup</Link>
             </div>
             {showFontPicker && (
-              <div style={{ marginTop: "0.5rem", background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "0.75rem", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.375rem", maxWidth: "480px" }}>
+              <div style={{ marginTop: "0.5rem", background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "0.75rem", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.375rem", maxWidth: "520px", maxHeight: "300px", overflowY: "auto" }}>
                 {[
                   { name: "Default", value: "inherit" },
                   { name: "Serif", value: "Georgia, serif" },
                   { name: "Mono", value: "monospace" },
-                  { name: "Cursive", value: "cursive" },
-                  { name: "Cinzel", value: "'Cinzel', Georgia, serif" },
-                  { name: "Playfair", value: "'Playfair Display', Georgia, serif" },
-                  { name: "Raleway", value: "'Raleway', sans-serif" },
-                  { name: "Oswald", value: "'Oswald', sans-serif" },
-                  { name: "Lora", value: "'Lora', Georgia, serif" },
-                  { name: "Bebas Neue", value: "'Bebas Neue', sans-serif" },
+                  { name: "Cinzel", value: "'Cinzel', serif" },
+                  { name: "Playfair", value: "'Playfair Display', serif" },
+                  { name: "Cormorant", value: "'Cormorant Garamond', serif" },
+                  { name: "IM Fell", value: "'IM Fell English', serif" },
                   { name: "Uncial", value: "'Uncial Antiqua', cursive" },
-                  { name: "Medieval", value: "'MedievalSharp', cursive" },
+                  { name: "Pirata", value: "'Pirata One', cursive" },
+                  { name: "Almendra", value: "'Almendra', serif" },
+                  { name: "Crimson", value: "'Crimson Text', serif" },
+                  { name: "Merriweather", value: "'Merriweather', serif" },
+                  { name: "Libre Bask", value: "'Libre Baskerville', serif" },
+                  { name: "Spectral", value: "'Spectral', serif" },
+                  { name: "Lora", value: "'Lora', serif" },
+                  { name: "Philosopher", value: "'Philosopher', serif" },
+                  { name: "Caudex", value: "'Caudex', serif" },
+                  { name: "Raleway", value: "'Raleway', sans-serif" },
+                  { name: "Josefin", value: "'Josefin Sans', sans-serif" },
+                  { name: "Oswald", value: "'Oswald', sans-serif" },
+                  { name: "Righteous", value: "'Righteous', sans-serif" },
+                  { name: "Poiret One", value: "'Poiret One', cursive" },
+                  { name: "Bebas", value: "'Bebas Neue', sans-serif" },
+                  { name: "Orbitron", value: "'Orbitron', sans-serif" },
+                  { name: "Exo 2", value: "'Exo 2', sans-serif" },
+                  { name: "Press Start", value: "'Press Start 2P', cursive" },
+                  { name: "Abril", value: "'Abril Fatface', cursive" },
+                  { name: "Dancing", value: "'Dancing Script', cursive" },
+                  { name: "Pacifico", value: "'Pacifico', cursive" },
+                  { name: "Caveat", value: "'Caveat', cursive" },
+                  { name: "Satisfy", value: "'Satisfy', cursive" },
+                  { name: "Marker", value: "'Permanent Marker', cursive" },
                 ].map(font => (
                   <button key={font.value} onClick={() => { setVaultFont(font.value); localStorage.setItem("valArchivesVaultFont", font.value); setShowFontPicker(false); }}
-                    style={{ background: vaultFont === font.value ? "var(--va-accent)" : "var(--va-border)", color: vaultFont === font.value ? "white" : "var(--va-text)", border: "none", borderRadius: "0.375rem", padding: "0.4rem 0.5rem", cursor: "pointer", fontFamily: font.value, fontSize: "0.8rem", textAlign: "left" }}>
+                    style={{ background: vaultFont === font.value ? "var(--va-accent)" : "var(--va-border)", color: vaultFont === font.value ? "white" : "var(--va-text)", border: "none", borderRadius: "0.375rem", padding: "0.4rem 0.5rem", cursor: "pointer", fontFamily: font.value, fontSize: "0.85rem", textAlign: "left" }}>
                     {font.name}
                   </button>
                 ))}
@@ -524,4 +544,4 @@ export default function DashboardPage() {
       </aside>
     </div>
   );
-}  
+}

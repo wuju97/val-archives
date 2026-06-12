@@ -29,6 +29,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Playfair+Display:wght@400;700;900&family=Raleway:wght@400;700;900&family=Oswald:wght@400;700&family=Lora:wght@400;700&family=Bebas+Neue&family=Uncial+Antiqua&family=Merriweather:wght@400;700;900&family=IM+Fell+English&family=Crimson+Text:wght@400;700&family=Josefin+Sans:wght@400;700&family=Exo+2:wght@400;700;900&family=Orbitron:wght@400;700;900&family=Press+Start+2P&family=Pirata+One&family=Almendra:wght@400;700&family=Caudex:wght@400;700&family=Philosopher:wght@400;700&family=Libre+Baskerville:wght@400;700&family=Spectral:wght@400;700&family=Cormorant+Garamond:wght@400;700;900&family=Abril+Fatface&family=Righteous&family=Poiret+One&family=Permanent+Marker&family=Pacifico&family=Satisfy&family=Dancing+Script:wght@400;700&family=Caveat:wght@400;700&display=swap" rel="stylesheet" />
+      </head>
+      <head>
         <script
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
