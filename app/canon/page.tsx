@@ -1,10 +1,10 @@
-"use client";
+ "use client";
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { hasGeminiKey, geminiCanonPlacement } from "../../lib/geminiEngine";
 import {
-  loadArchive, saveArchive,
+  loadArchive, saveArchive, ArchiveData,
   addCanonCategory, removeCanonCategory,
   addCanonEntry, removeCanonEntry,
   getPriorityLevel, setPriority,
@@ -54,7 +54,7 @@ export default function CanonPage() {
 
   function flash(text: string) {
     setMsg(text);
-    setTimeout(() => setMsg(""), 3000);
+    setTimeout(() => setMsg(""), 6000);
   }
 
   // Ensure a built-in category exists in storage
@@ -109,8 +109,17 @@ export default function CanonPage() {
                     .trim();
                   if (pageText) pages.push(pageText);
                 }
-                const fullText = pages.join("\n\n");
-                resolve(fullText.trim() || `[PDF: ${file.name} — No text content found. This may be a scanned/image PDF.]`);
+                const fullText = pages.join("\n\n").trim();
+                if (!fullText) {
+                  resolve(`[PDF: ${file.name} — No text content found. This may be a scanned/image PDF.]`);
+                  return;
+                }
+                // Truncate to 80,000 chars to fit localStorage (keeps most content)
+                if (fullText.length > 80000) {
+                  resolve(fullText.slice(0, 80000) + `\n\n[...truncated at 80,000 characters to fit storage. Full file: ${file.name}]`);
+                } else {
+                  resolve(fullText);
+                }
               } catch {
                 // Fallback: basic text extraction
                 const bytes = new Uint8Array(e.target?.result as ArrayBuffer);
@@ -143,13 +152,35 @@ export default function CanonPage() {
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  function saveWithFallback(data: ArchiveData) {
+    try {
+      saveArchive(data);
+    } catch {
+      // localStorage full — save directly to IndexedDB
+      const vaultKey = "valArchivesData_v2";
+      const serialized = JSON.stringify(data);
+      if (typeof indexedDB !== "undefined") {
+        const req = indexedDB.open("valArchivesDB", 1);
+        req.onupgradeneeded = (e) => {
+          (e.target as IDBOpenDBRequest).result.createObjectStore("vaults");
+        };
+        req.onsuccess = (e) => {
+          const db = (e.target as IDBOpenDBRequest).result;
+          const tx = db.transaction("vaults", "readwrite");
+          tx.objectStore("vaults").put(serialized, vaultKey);
+        };
+      }
+    }
+    setArchive(data);
+  }
+
   function handlePaste() {
     if (!pasteText.trim()) return;
     const title = pasteTitle.trim() || `Note — ${new Date().toLocaleDateString()}`;
     const catName = activeCat.name;
     let a = ensureBuiltin(activeCatId, catName);
     const updated = addCanonEntry(a, activeCatId, title, pasteText.trim());
-    saveArchive(updated); setArchive(updated);
+    saveWithFallback(updated);
     setPasteText(""); setPasteTitle("");
     flash(`✓ "${title}" added to ${catName}`);
     // Trigger placement analysis

@@ -956,11 +956,85 @@ export function loadVaultById(vaultId: string): ArchiveData {
   return createEmptyArchive();
 }
 
+// Async version that checks IndexedDB — use this for canon-heavy vaults
+export async function loadVaultByIdAsync(vaultId: string): Promise<ArchiveData> {
+  if (typeof window === "undefined") return createEmptyArchive();
+  
+  // Try localStorage first (fast)
+  try {
+    const raw = localStorage.getItem(getVaultStorageKey(vaultId));
+    if (raw) return { ...createEmptyArchive(), ...JSON.parse(raw) };
+  } catch {}
+  
+  // Try IndexedDB (handles large data)
+  try {
+    if (typeof indexedDB !== "undefined") {
+      return new Promise((resolve) => {
+        const req = indexedDB.open("valArchivesDB", 1);
+        req.onsuccess = (e) => {
+          const db = (e.target as IDBOpenDBRequest).result;
+          if (!db.objectStoreNames.contains("vaults")) {
+            resolve(createEmptyArchive());
+            return;
+          }
+          const tx = db.transaction("vaults", "readonly");
+          const getReq = tx.objectStore("vaults").get(getVaultStorageKey(vaultId));
+          getReq.onsuccess = () => {
+            if (getReq.result) {
+              try {
+                resolve({ ...createEmptyArchive(), ...JSON.parse(getReq.result) });
+                return;
+              } catch {}
+            }
+            resolve(createEmptyArchive());
+          };
+          getReq.onerror = () => resolve(createEmptyArchive());
+        };
+        req.onerror = () => resolve(createEmptyArchive());
+      });
+    }
+  } catch {}
+  
+  return createEmptyArchive();
+}
+
 export function saveVaultById(vaultId: string, data: ArchiveData): void {
   if (typeof window === "undefined") return;
   const prepared = { ...data, lastSaved: new Date().toISOString() };
-  localStorage.setItem(getVaultStorageKey(vaultId), JSON.stringify(prepared));
-  // Update meta
+  const serialized = JSON.stringify(prepared);
+  
+  // Always try localStorage first (fast)
+  let savedToLocal = false;
+  try {
+    localStorage.setItem(getVaultStorageKey(vaultId), serialized);
+    savedToLocal = true;
+  } catch {
+    // localStorage full — remove old entry and retry, then fall back to IndexedDB only
+    try {
+      localStorage.removeItem(getVaultStorageKey(vaultId));
+      localStorage.setItem(getVaultStorageKey(vaultId), serialized);
+      savedToLocal = true;
+    } catch {
+      savedToLocal = false;
+    }
+  }
+  
+  // Always save to IndexedDB (handles large files)
+  if (typeof indexedDB !== "undefined") {
+    const dbName = "valArchivesDB";
+    const req = indexedDB.open(dbName, 1);
+    req.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains("vaults")) db.createObjectStore("vaults");
+    };
+    req.onsuccess = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      const tx = db.transaction("vaults", "readwrite");
+      tx.objectStore("vaults").put(serialized, getVaultStorageKey(vaultId));
+    };
+  }
+  
+  // Update meta (always localStorage - small data)
   const index = getVaultIndex().map(v =>
     v.id === vaultId ? { ...v, lastSaved: prepared.lastSaved, entryCount: data.entries.length, name: data.archiveName } : v
   );

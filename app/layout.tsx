@@ -36,7 +36,54 @@ export default function RootLayout({
         <script
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=JSON.parse(localStorage.getItem('valArchivesTheme')||'{}');var b=typeof t.brightness==='number'?t.brightness:0;var a=t.accentColor||'#3b82f6';function L(a,b,t){return Math.round(a+(b-a)*t);}function H(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];}function I(h1,h2,t){var c1=H(h1),c2=H(h2);return'rgb('+L(c1[0],c2[0],t)+','+L(c1[1],c2[1],t)+','+L(c1[2],c2[2],t)+')';}var f=b/100,r=document.documentElement;r.style.setProperty('--va-bg',I('#080808','#e5e7eb',f));r.style.setProperty('--va-surface',I('#111827','#f3f4f6',f));r.style.setProperty('--va-border',I('#1f2937','#d1d5db',f));r.style.setProperty('--va-text',I('#f9fafb','#111827',f));r.style.setProperty('--va-text-muted',I('#6b7280','#4b5563',f));r.style.setProperty('--va-accent',a);}catch(e){}})();`,
+            __html: `
+(function(){
+  function va(){
+    try{
+      var t=JSON.parse(localStorage.getItem('valArchivesTheme')||'{}');
+      var b=typeof t.brightness==='number'?t.brightness:0;
+      var a=t.accentColor||'#3b82f6';
+      function L(a,b,t){return Math.round(a+(b-a)*t);}
+      function H(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];}
+      function I(h1,h2,t){var c1=H(h1),c2=H(h2);return'rgb('+L(c1[0],c2[0],t)+','+L(c1[1],c2[1],t)+','+L(c1[2],c2[2],t)+')';}
+      var f=b/100,r=document.documentElement;
+      r.style.setProperty('--va-bg',I('#080808','#e5e7eb',f));
+      r.style.setProperty('--va-surface',I('#111827','#f3f4f6',f));
+      r.style.setProperty('--va-border',I('#1f2937','#d1d5db',f));
+      r.style.setProperty('--va-text',I('#f9fafb','#111827',f));
+      r.style.setProperty('--va-text-muted',I('#6b7280','#4b5563',f));
+      r.style.setProperty('--va-accent',a);
+    }catch(e){}
+  }
+  va();
+  // Migrate localStorage to IndexedDB on first run
+  (function migrate(){
+    try {
+      if(localStorage.getItem('valArchives_idb_migrated')==='1') return;
+      var db = indexedDB.open('valArchivesDB',1);
+      db.onupgradeneeded = function(e){ e.target.result.createObjectStore('vaults'); };
+      db.onsuccess = function(e){
+        var idb = e.target.result;
+        var keys = [];
+        for(var i=0;i<localStorage.length;i++){
+          var k=localStorage.key(i);
+          if(k && (k.startsWith('valArchivesData_')||k==='valArchivesVaultIndex'||k==='valArchivesDashboardCards')){
+            keys.push(k);
+          }
+        }
+        keys.forEach(function(k){
+          var v=localStorage.getItem(k);
+          if(v){var tx=idb.transaction('vaults','readwrite');tx.objectStore('vaults').put(v,k);}
+        });
+        localStorage.setItem('valArchives_idb_migrated','1');
+      };
+    } catch(e){}
+  })();
+  // Reapply after any dynamic content loads
+  document.addEventListener('DOMContentLoaded', va);
+  window.addEventListener('popstate', va);
+})();
+`,
           }}
         />
       </head>
