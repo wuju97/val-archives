@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { hasGeminiKey, geminiCanonPlacement, ExtractedVaultEntry } from "../../lib/geminiEngine";
-import { useExtraction } from "../ExtractionContext";
+import { useExtraction, ExtractionQueueItem } from "../ExtractionContext";
 import {
   loadArchive, saveArchive, ArchiveData,
   addCanonCategory, removeCanonCategory,
@@ -67,7 +67,7 @@ const BUILTIN_CATEGORIES = [
 ];
 
 export default function CanonPage() {
-  const { job, startExtraction, saveResults, clearJob } = useExtraction();
+  const { queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning } = useExtraction();
   const [archive, setArchive] = useState(loadArchive());
   const [activeCatId, setActiveCatId] = useState<string>("pdf-files");
   const [customCatName, setCustomCatName] = useState("");
@@ -144,58 +144,38 @@ export default function CanonPage() {
   function openExtractModal() {
     const allEntries = getAllCanonEntries();
     if (allEntries.length === 0) { flash("✗ No canon entries to extract from. Upload some files first."); return; }
-    if (!hasGeminiKey()) { flash("✗ Add your Groq API key in Settings → AI to use this feature."); return; }
-    // Default to first entry
-    setExtractSourceId(allEntries[0].id);
+    if (!hasGeminiKey()) { flash("✗ Add your API key in Settings → AI to use this feature."); return; }
+    if (allEntries.length > 0) setExtractSourceId(allEntries[0].id);
     setExtractedEntries([]);
     setSelectedEntries(new Set());
     setExtractDone(false);
     setExtractProgress("");
+    setViewingQueueItem(null);
     setShowExtractModal(true);
   }
 
-  async function runExtraction() {
+  async function addFileToQueue() {
     const allEntries = getAllCanonEntries();
     const entry = allEntries.find(e => e.id === extractSourceId);
     if (!entry) return;
 
-    setExtracting(true); setExtractProgress("Starting extraction...");
-    setExtractedEntries([]);
-    setExtractDone(false);
-    setExtractCurrentPart(0);
-    setExtractTotalParts(0);
-    setExtractFactsFound(0);
-
-    // Load full content from IDB if stored there
     let fullContent = entry.content;
     if (entry.content === IDB_PLACEHOLDER) {
-      setExtractProgress("Loading full content from storage...");
       const idbContent = await loadCanonContentFromIDB(entry.id);
       if (idbContent) {
         fullContent = idbContent;
       } else {
-        setExtractProgress("Error: Could not load content. Try re-uploading the file.");
-        setExtracting(false);
+        flash("✗ Could not load file content. Try re-uploading.");
         return;
       }
     }
 
-    // Start global extraction — persists even if you navigate away
-    await startExtraction(entry.id, fullContent, entry.filename);
-    setExtracting(false);
+    addToQueue(entry.id, fullContent, entry.filename);
+    flash(`✓ "${entry.filename}" added to extraction queue`);
   }
 
-  // Sync global job results back to local state when done
-  useEffect(() => {
-    if (job && job.status === "done" && job.results.length > 0 && extractedEntries.length === 0) {
-      setExtractedEntries(job.results);
-      setSelectedEntries(new Set(job.results.map((_, i) => i)));
-      setExtractDone(true);
-      setExtractCurrentPart(job.currentPart);
-      setExtractTotalParts(job.totalParts);
-      setExtractFactsFound(job.factsFound);
-    }
-  }, [job]);
+  const [viewingQueueItem, setViewingQueueItem] = useState<string | null>(null);
+
 
   function toggleEntry(i: number) {
     setSelectedEntries(prev => {
@@ -207,13 +187,13 @@ export default function CanonPage() {
   }
 
   function saveSelectedEntries() {
-    const count = saveResults(selectedEntries);
+    if (!viewingQueueItem) return;
+    const count = saveItemResults(viewingQueueItem, selectedEntries);
     setArchive(loadArchive());
-    setShowExtractModal(false);
-    clearJob();
+    setViewingQueueItem(null);
     setExtractedEntries([]);
     setExtractDone(false);
-    flash(`✓ ${count} entries added to your vault from canon extraction.`);
+    flash(`✓ ${count} entries added to your vault.`);
   }
 
   // ── File upload ─────────────────────────────────────────────────────────────
@@ -437,35 +417,61 @@ export default function CanonPage() {
                   ))}
                 </select>
 
-                {extracting && (
-                  <div style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.5rem", padding: "1rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-                      <p style={{ color: "#c4b5fd", fontSize: "0.875rem", fontWeight: "600" }}>
-                        {extractTotalParts > 0 ? `Part ${extractCurrentPart} of ${extractTotalParts}` : "Starting..."}
-                      </p>
-                      <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                        {extractFactsFound} facts found
-                      </p>
-                    </div>
-                    <div style={{ height: "6px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.5rem" }}>
-                      <div style={{ 
-                        height: "100%", background: "#7c3aed", borderRadius: "9999px", transition: "width 0.5s",
-                        width: extractTotalParts > 0 ? `${Math.min(100, (extractCurrentPart / extractTotalParts) * 100)}%` : "3%"
-                      }} />
-                    </div>
-                    <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>{extractProgress}</p>
-                    <p style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", marginTop: "0.375rem" }}>
-                      💡 You can close this panel and keep using the site — extraction continues in the background.
+                {/* Queue status */}
+                {queue.length > 0 && (
+                  <div style={{ marginBottom: "0.75rem" }}>
+                    <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", fontWeight: "600", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Extraction Queue ({queue.length})
                     </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                      {queue.map(item => (
+                        <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: item.status === "running" ? "0.375rem" : 0 }}>
+                            <span style={{ fontSize: "0.78rem", color: "var(--va-text)", fontWeight: "600", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {item.status === "running" ? "⏳" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"} {item.filename.replace(/\.(txt|pdf)$/i, "")}
+                            </span>
+                            <div style={{ display: "flex", gap: "0.375rem", alignItems: "center", flexShrink: 0 }}>
+                              {item.status === "done" && (
+                                <button onClick={() => { setViewingQueueItem(item.id); setExtractedEntries(item.results); setSelectedEntries(new Set(item.results.map((_,i) => i))); setExtractDone(true); }}
+                                  style={{ background: "var(--va-accent)", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600" }}>
+                                  Save {item.factsFound}
+                                </button>
+                              )}
+                              {(item.status === "queued" || item.status === "done" || item.status === "error") && (
+                                <button onClick={() => removeFromQueue(item.id)}
+                                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem", padding: "0.1rem" }}>×</button>
+                              )}
+                            </div>
+                          </div>
+                          {item.status === "running" && (
+                            <>
+                              <div style={{ height: "3px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.25rem" }}>
+                                <div style={{ height: "100%", background: "#7c3aed", borderRadius: "9999px", transition: "width 0.5s", width: item.totalParts > 0 ? `${Math.min(100, (item.currentPart / item.totalParts) * 100)}%` : "5%" }} />
+                              </div>
+                              <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", margin: 0 }}>Part {item.currentPart} of {item.totalParts} · {item.factsFound} facts</p>
+                            </>
+                          )}
+                          {item.status === "done" && (
+                            <p style={{ fontSize: "0.68rem", color: "#4ade80", margin: 0 }}>{item.factsFound} facts extracted</p>
+                          )}
+                          {item.status === "error" && (
+                            <p style={{ fontSize: "0.68rem", color: "#f87171", margin: 0 }}>{item.message}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {queue.some(i => i.status === "done") && (
+                      <button onClick={clearCompleted} style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", background: "none", border: "none", cursor: "pointer", marginTop: "0.375rem" }}>
+                        Clear completed
+                      </button>
+                    )}
                   </div>
                 )}
 
-                {!extracting && (
-                  <button onClick={runExtraction}
+                <button onClick={addFileToQueue}
                     style={{ width: "100%", background: "var(--va-accent)", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
-                    ✨ Start Extraction
-                  </button>
-                )}
+                    ✨ Add to Queue
+                </button>
               </div>
             )}
 
