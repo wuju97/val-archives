@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { hasGeminiKey, geminiQualityCall } from "@/lib/geminiEngine";
+import { loadArchive, saveArchive, getPriorityLevel, setPriority } from "@/lib/archiveEngine";
 
 // ─── Storage (separate from vault — stored in localStorage under its own key) ─
 const STORAGE_KEY = "valArchivesRuleBook";
@@ -67,6 +68,7 @@ const LARGE_THRESHOLD = 5000;
 
 export default function RuleBookPage() {
   const [rules, setRules] = useState<RulePrompt[]>([]);
+  const [archive, setArchive] = useState(loadArchive());
   const [activeTab, setActiveTab] = useState<"library" | "typed" | "paste">("library");
   const [typedTitle, setTypedTitle] = useState("");
   const [typedContent, setTypedContent] = useState("");
@@ -82,6 +84,19 @@ export default function RuleBookPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setRules(loadRules()); }, []);
+
+  const priority = getPriorityLevel(archive, "rulebook");
+  function handlePriorityClick() {
+    const current = getPriorityLevel(archive, "rulebook");
+    let updated;
+    if (current === "none") updated = setPriority(archive, "rulebook", "blue");
+    else if (current === "blue") updated = setPriority(archive, "rulebook", "red");
+    else updated = setPriority(archive, "rulebook", "none");
+    saveArchive(updated);
+    setArchive(updated);
+  }
+  const priorityColor = priority === "red" ? "#ef4444" : priority === "blue" ? "#3b82f6" : "var(--va-border)";
+  const priorityLabel = priority === "red" ? "🔴 First Priority" : priority === "blue" ? "🔵 Second Priority" : "○ Set Priority";
 
   function showFlash(msg: string) {
     setFlash(msg);
@@ -275,6 +290,10 @@ export default function RuleBookPage() {
             </p>
           </div>
         </div>
+        <button onClick={handlePriorityClick}
+          style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: `2px solid ${priorityColor}`, background: priority !== "none" ? priorityColor : "transparent", color: priority !== "none" ? "white" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600", transition: "all 0.2s" }}>
+          {priorityLabel}
+        </button>
       </div>
 
       {/* Info banner */}
@@ -481,4 +500,4 @@ export default function RuleBookPage() {
       )}
     </div>
   );
-} 
+}
