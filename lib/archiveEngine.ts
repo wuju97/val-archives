@@ -549,18 +549,50 @@ export function saveArchive(data: ArchiveData): void {
   if (typeof window === "undefined") return;
   const prepared = regenerateMasterPrompt(data);
   prepared.lastSaved = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(prepared));
+  const serialized = JSON.stringify(prepared);
+
+  // Try localStorage first
+  let savedToLocal = false;
+  try {
+    localStorage.setItem(STORAGE_KEY, serialized);
+    savedToLocal = true;
+  } catch {
+    // localStorage quota exceeded — clear old entry and retry
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(STORAGE_KEY, serialized);
+      savedToLocal = true;
+    } catch {
+      savedToLocal = false;
+    }
+  }
+
+  // Always save to IndexedDB (no size limit)
+  if (typeof indexedDB !== "undefined") {
+    try {
+      const req = indexedDB.open("valArchivesDB", 1);
+      req.onupgradeneeded = (e) => {
+        const db = (e.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains("vaults")) db.createObjectStore("vaults");
+      };
+      req.onsuccess = (e) => {
+        const db = (e.target as IDBOpenDBRequest).result;
+        const tx = db.transaction("vaults", "readwrite");
+        tx.objectStore("vaults").put(serialized, STORAGE_KEY);
+      };
+    } catch {}
+  }
 }
 
 export function loadArchive(): ArchiveData {
   if (typeof window === "undefined") return createEmptyArchive();
+  // Try localStorage first (fast)
   const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return createEmptyArchive();
-  try {
-    return JSON.parse(saved) as ArchiveData;
-  } catch {
-    return createEmptyArchive();
+  if (saved) {
+    try { return JSON.parse(saved) as ArchiveData; } catch {}
   }
+  // Return empty — IndexedDB load is async and handled separately
+  return createEmptyArchive();
 }
 
 export function clearArchive(): void {
