@@ -5,8 +5,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const GEMINI_KEY_STORAGE = "valArchivesGeminiKey";
-const GEMINI_MODEL = "gemini-1.5-flash-002";
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1/models";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
 
