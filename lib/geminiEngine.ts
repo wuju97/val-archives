@@ -1,33 +1,61 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// GROQ ENGINE — Central AI layer for Val Archives
-// Uses Groq API with llama-3.3-70b-versatile
-// Free tier: no daily limit, 30 requests/minute
-// Get your free key at console.groq.com
+// DUAL AI ENGINE — Val Archives
+// Cerebras: fast tasks (extraction, classification, search)
+// Gemini: quality tasks (refine prompts, enhance, chat)
+// Get Cerebras key at cloud.cerebras.ai (free, 1M tokens/day)
+// Get Gemini key at aistudio.google.com (free, 250 req/day)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const GROQ_KEY_STORAGE = "valArchivesGeminiKey"; // reuse same storage key so existing users don't lose their setup
-const GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
-const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
+// ─── Cerebras (fast) ──────────────────────────────────────────────────────────
+const CEREBRAS_KEY_STORAGE = "valArchivesGeminiKey"; // keep same key name for backwards compat
+const CEREBRAS_MODEL = "llama-3.3-70b";
+const CEREBRAS_API_BASE = "https://api.cerebras.ai/v1/chat/completions";
+
+// ─── Gemini (quality) ─────────────────────────────────────────────────────────
+const GEMINI_KEY_STORAGE = "valArchivesGeminiKeyQuality";
+const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
 
+// Cerebras key (primary — used for most features)
 export function getGeminiKey(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(GROQ_KEY_STORAGE) || null;
+  return localStorage.getItem(CEREBRAS_KEY_STORAGE) || null;
 }
 
 export function setGeminiKey(key: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(GROQ_KEY_STORAGE, key.trim());
+  localStorage.setItem(CEREBRAS_KEY_STORAGE, key.trim());
 }
 
 export function clearGeminiKey(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(GROQ_KEY_STORAGE);
+  localStorage.removeItem(CEREBRAS_KEY_STORAGE);
 }
 
 export function hasGeminiKey(): boolean {
   return !!getGeminiKey();
+}
+
+// Gemini key (quality tasks — refine, enhance, chat)
+export function getGeminiQualityKey(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(GEMINI_KEY_STORAGE) || null;
+}
+
+export function setGeminiQualityKey(key: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GEMINI_KEY_STORAGE, key.trim());
+}
+
+export function clearGeminiQualityKey(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(GEMINI_KEY_STORAGE);
+}
+
+export function hasGeminiQualityKey(): boolean {
+  return !!getGeminiQualityKey();
 }
 
 // ─── Core API Call ────────────────────────────────────────────────────────────
@@ -57,14 +85,14 @@ export async function geminiCall(
 
   messages.push({ role: "user", content: prompt });
 
-  const response = await fetch(GROQ_API_BASE, {
+  const response = await fetch(CEREBRAS_API_BASE, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
+      model: CEREBRAS_MODEL,
       messages,
       temperature: 0.7,
       max_tokens: 8192,
@@ -99,6 +127,73 @@ export async function testGeminiConnection(): Promise<{ ok: boolean; message: st
     return { ok: false, message: msg };
   }
 }
+// ─── Gemini Quality API Call ──────────────────────────────────────────────────
+// Used for quality tasks: refine prompts, enhance, chat
+
+export async function geminiQualityCall(
+  prompt: string,
+  systemInstruction?: string,
+  history?: Array<{ role: "user" | "model"; text: string }>
+): Promise<string> {
+  const key = getGeminiQualityKey();
+  if (!key) {
+    // Fall back to Cerebras if no Gemini key
+    return geminiCall(prompt, systemInstruction, history);
+  }
+
+  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+
+  if (history) {
+    for (const msg of history) {
+      contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+    }
+  }
+  contents.push({ role: "user", parts: [{ text: prompt }] });
+
+  const body: Record<string, unknown> = { contents };
+  if (systemInstruction) {
+    body.systemInstruction = { parts: [{ text: systemInstruction }] };
+  }
+  body.generationConfig = { temperature: 0.7, maxOutputTokens: 4096 };
+
+  const response = await fetch(
+    `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const msg = err?.error?.message || `HTTP ${response.status}`;
+    if (response.status === 403) throw new Error("INVALID_KEY");
+    if (response.status === 429) throw new Error("RATE_LIMIT");
+    throw new Error(`API_ERROR: ${msg}`);
+  }
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("EMPTY_RESPONSE");
+  return text.trim();
+}
+
+// Test Gemini quality connection
+export async function testGeminiQualityConnection(): Promise<{ ok: boolean; message: string }> {
+  try {
+    const result = await geminiQualityCall("Reply with exactly: CONNECTED");
+    return { ok: true, message: result.includes("CONNECTED") ? "Connected successfully" : "Connected" };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    if (msg === "NO_KEY") return { ok: false, message: "No Gemini API key set" };
+    if (msg === "INVALID_KEY") return { ok: false, message: "Invalid Gemini API key" };
+    if (msg === "RATE_LIMIT") return { ok: false, message: "Rate limit hit — try again in a minute" };
+    return { ok: false, message: msg };
+  }
+}
+
+
 
 // ─── FEATURE: Refine Inbox Classification ─────────────────────────────────────
 
@@ -151,7 +246,7 @@ ${masterPrompt}
 Return ONLY the refined prompt, no commentary:`;
 
   try {
-    return await geminiCall(prompt);
+    return await geminiQualityCall(prompt);
   } catch {
     return masterPrompt;
   }
@@ -183,7 +278,7 @@ Entry to enhance:
 Return ONLY the enhanced entry text, no commentary:`;
 
   try {
-    return await geminiCall(prompt);
+    return await geminiQualityCall(prompt);
   } catch {
     return text;
   }
@@ -243,7 +338,7 @@ ${forgePrompt}
 Return ONLY the refined prompt:`;
 
   try {
-    return await geminiCall(prompt);
+    return await geminiQualityCall(prompt);
   } catch {
     return forgePrompt;
   }
@@ -294,7 +389,7 @@ ${saveContent.slice(0, 1000)}
 Return 3 branch suggestions, one per line, starting with "What if":`;
 
   try {
-    return await geminiCall(prompt);
+    return await geminiQualityCall(prompt);
   } catch {
     return "";
   }
@@ -317,7 +412,7 @@ You can help with: storytelling, character analysis, world-building, quest plann
 ARCHIVE CONTEXT:
 ${masterPrompt.slice(0, 8000)}`;
 
-  return geminiCall(message, systemInstruction, history);
+  return geminiQualityCall(message, systemInstruction, history);
 }
 
 // ─── FEATURE: Auto-enhance Rule ──────────────────────────────────────────────
@@ -331,7 +426,7 @@ Original: "${rule}"
 Return ONLY the improved rule:`;
 
   try {
-    return await geminiCall(prompt);
+    return await geminiQualityCall(prompt);
   } catch {
     return rule;
   }
@@ -370,7 +465,7 @@ Generate a complete session save extraction prompt. It should:
 Return ONLY the prompt text, ready to copy and send:`;
 
   try {
-    return await geminiCall(prompt);
+    return await geminiQualityCall(prompt);
   } catch {
     return "";
   }
@@ -402,7 +497,7 @@ ${customPrompt}
 Return ONLY the enhanced instructions, no commentary:`;
 
   try {
-    return await geminiCall(prompt);
+    return await geminiQualityCall(prompt);
   } catch {
     return customPrompt;
   }

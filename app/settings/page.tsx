@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt, saveArchive, pushHistory, undoArchive, redoArchive } from "@/lib/archiveEngine";
 import {
   getGeminiKey, setGeminiKey, clearGeminiKey, testGeminiConnection, hasGeminiKey,
+  getGeminiQualityKey, setGeminiQualityKey, clearGeminiQualityKey, testGeminiQualityConnection, hasGeminiQualityKey,
   geminiChat, geminiErrorMessage, geminiTargetedDelete,
 } from "../../lib/geminiEngine";
 
@@ -125,6 +126,9 @@ export default function SettingsPage() {
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [testingApi, setTestingApi] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [qualityApiKey, setQualityApiKey] = useState("");
+  const [testingQualityApi, setTestingQualityApi] = useState(false);
+  const [qualityApiStatus, setQualityApiStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -141,6 +145,8 @@ export default function SettingsPage() {
     applyTheme(loaded);
     const savedKey = getGeminiKey();
     if (savedKey) setApiKey(savedKey);
+    const savedQualityKey = getGeminiQualityKey();
+    if (savedQualityKey) setQualityApiKey(savedQualityKey);
   }, []);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
@@ -178,7 +184,7 @@ export default function SettingsPage() {
     { id: "display",         label: "🌙 Display" },
     { id: "personalisation", label: "🎨 Personalisation" },
     { id: "instructions",    label: "📖 Instructions" },
-    { id: "ai",              label: "✨ AI (Groq)" },
+    { id: "ai",              label: "✨ AI" },
     { id: "danger",          label: "🚨 Alert Zone" },
   ] as const;
 
@@ -356,19 +362,20 @@ export default function SettingsPage() {
           {activeSection === "ai" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%" }}>
               <div>
-                <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>✨ AI — Groq</h2>
-                <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Connect Groq AI to enhance every feature. Your API key stays in your browser only — never shared.</p>
+                <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>✨ AI Setup</h2>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Two AI engines — Cerebras for speed, Gemini for quality. Both free. Both stay in your browser only.</p>
               </div>
 
-              {/* API Key */}
+              {/* Cerebras Key */}
               <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" }}>
-                <h3 style={{ fontWeight: "bold", marginBottom: "0.5rem" }}>🔑 API Key</h3>
+                <h3 style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>⚡ Cerebras API Key</h3>
                 <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", marginBottom: "0.875rem" }}>
-                  Get your free key at <strong>console.groq.com</strong> → API Keys → Create API key.<br />
-                  <span style={{ color: "#4ade80" }}>✓ No daily limits — much more generous than other free AI APIs.</span>
+                  For: Inbox, Extract to Vault, Search, Classification, and all fast tasks.<br />
+                  Get free key at <strong>cloud.cerebras.ai</strong> → API Keys → Create API key.<br />
+                  <span style={{ color: "#4ade80" }}>✓ 1M tokens/day free — no daily request cap.</span>
                 </p>
                 <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.625rem" }}>
-                  <input type={apiKeyVisible ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="gsk_..."
+                  <input type={apiKeyVisible ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="csk_..."
                     style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", fontFamily: "monospace" }} />
                   <button onClick={() => setApiKeyVisible(!apiKeyVisible)}
                     style={{ background: "var(--va-border)", border: "none", borderRadius: "0.375rem", padding: "0 0.875rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem" }}>
@@ -376,7 +383,7 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <button onClick={() => { if (apiKey.trim()) { setGeminiKey(apiKey.trim()); setApiStatus({ ok: true, message: "Key saved" }); setTimeout(() => setApiStatus(null), 2000); } }} disabled={!apiKey.trim()}
+                  <button onClick={() => { if (apiKey.trim()) { setGeminiKey(apiKey.trim()); setApiStatus({ ok: true, message: "Cerebras key saved" }); setTimeout(() => setApiStatus(null), 2000); } }} disabled={!apiKey.trim()}
                     style={{ background: "var(--va-accent)", color: "white", padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: !apiKey.trim() ? 0.4 : 1 }}>
                     Save Key
                   </button>
@@ -396,19 +403,65 @@ export default function SettingsPage() {
                 )}
               </div>
 
+              {/* Gemini Quality Key */}
+              <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" }}>
+                <h3 style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>✨ Gemini API Key <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "normal" }}>optional</span></h3>
+                <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", marginBottom: "0.875rem" }}>
+                  For: Master Prompt refine, Custom Prompt enhance, Prompt Forge refine, Chat.<br />
+                  Get free key at <strong>aistudio.google.com</strong> → Get API key → Create API key.<br />
+                  <span style={{ color: "#fbbf24" }}>If not set, Cerebras handles these tasks instead.</span>
+                </p>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.625rem" }}>
+                  <input type="password" value={qualityApiKey} onChange={(e) => setQualityApiKey(e.target.value)} placeholder="AIzaSy..."
+                    style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", fontFamily: "monospace" }} />
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <button onClick={() => { if (qualityApiKey.trim()) { setGeminiQualityKey(qualityApiKey.trim()); setQualityApiStatus({ ok: true, message: "Gemini key saved" }); setTimeout(() => setQualityApiStatus(null), 2000); } }} disabled={!qualityApiKey.trim()}
+                    style={{ background: "#7c3aed", color: "white", padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: !qualityApiKey.trim() ? 0.4 : 1 }}>
+                    Save Key
+                  </button>
+                  <button onClick={async () => { setTestingQualityApi(true); setQualityApiStatus(null); if (qualityApiKey.trim()) setGeminiQualityKey(qualityApiKey.trim()); const result = await testGeminiQualityConnection(); setQualityApiStatus(result); setTestingQualityApi(false); }} disabled={!qualityApiKey.trim() || testingQualityApi}
+                    style={{ background: "var(--va-border)", color: "var(--va-text)", padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontSize: "0.875rem", opacity: (!qualityApiKey.trim() || testingQualityApi) ? 0.4 : 1 }}>
+                    {testingQualityApi ? "Testing..." : "Test Connection"}
+                  </button>
+                  <button onClick={() => { clearGeminiQualityKey(); setQualityApiKey(""); setQualityApiStatus({ ok: false, message: "Key removed" }); setTimeout(() => setQualityApiStatus(null), 2000); }}
+                    style={{ background: "none", border: "1px solid var(--va-border)", color: "var(--va-text-muted)", padding: "0.5rem 1rem", borderRadius: "0.375rem", cursor: "pointer", fontSize: "0.875rem" }}>
+                    Remove Key
+                  </button>
+                </div>
+                {qualityApiStatus && (
+                  <p style={{ marginTop: "0.5rem", fontSize: "0.875rem", color: qualityApiStatus.ok ? "#4ade80" : "#f87171" }}>
+                    {qualityApiStatus.ok ? "✓" : "✗"} {qualityApiStatus.message}
+                  </p>
+                )}
+              </div>
+
               {/* What Groq does */}
               <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" }}>
-                <h3 style={{ fontWeight: "bold", marginBottom: "0.75rem" }}>⚡ What Groq Does</h3>
+                <h3 style={{ fontWeight: "bold", marginBottom: "0.75rem" }}>⚡ What Each AI Does</h3>
+                <p style={{ fontSize: "0.75rem", color: "var(--va-accent)", marginBottom: "0.5rem" }}>⚡ Cerebras (fast)</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.8rem", color: "var(--va-text-muted)", marginBottom: "0.75rem" }}>
+                  {[
+                    ["📥 Inbox", "AI classification and Smart Review"],
+                    ["🏛 Canon Archives", "✨ Extract to Vault — reads files and fills Story Studio"],
+                    ["🌀 Pensieve", "AI semantic search across your vault"],
+                    ["📋 Rule Book", "✨ Organize and enhance rules"],
+                    ["🗑️ Alert Zone", "AI Targeted Delete"],
+                  ].map(([feature, desc]) => (
+                    <div key={feature} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                      <span style={{ flexShrink: 0, width: "120px", color: "var(--va-text)", fontWeight: "600" }}>{feature}</span>
+                      <span>{desc}</span>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: "0.75rem", color: "#c4b5fd", marginBottom: "0.5rem" }}>✨ Gemini (quality)</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.8rem", color: "var(--va-text-muted)" }}>
                   {[
-                    ["📥 Inbox", "Reviews auto-classification and corrects wrong categories"],
-                    ["👑 Master Prompt", "Refines the compiled prompt for clarity and coherence"],
-                    ["📖 Story entries", "✨ button to enhance any entry with more detail"],
-                    ["📋 Rule Book", "✨ button to make rules clearer and more precise"],
-                    ["🏛 Canon Archives", "✨ Extract to Vault — reads files and fills Story Studio automatically"],
-                    ["⏳ Timeline Save", "✨ button to suggest interesting branch ideas"],
-                    ["⚒ Prompt Forge", "✨ button to refine the forged output"],
-                    ["💬 Chat below", "Talk to the AI with your full archive as context"],
+                    ["👑 Master Prompt", "✨ Refine for clarity and coherence"],
+                    ["🕰 Custom Prompt", "✨ Enhance global instructions"],
+                    ["⚒ Prompt Forge", "✨ Refine the forged output"],
+                    ["📖 Story entries", "✨ Enhance any entry with more detail"],
+                    ["💬 Chat below", "Talk to AI with your full archive as context"],
                   ].map(([feature, desc]) => (
                     <div key={feature} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
                       <span style={{ flexShrink: 0, width: "120px", color: "var(--va-text)", fontWeight: "600" }}>{feature}</span>
@@ -427,7 +480,7 @@ export default function SettingsPage() {
                 <div style={{ height: "320px", overflowY: "auto", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.875rem", marginBottom: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                   {chatMessages.length === 0 ? (
                     <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", textAlign: "center", marginTop: "4rem" }}>
-                      {getGeminiKey() ? "Ask anything about your archive..." : "Add your Groq API key above to start chatting."}
+                      {getGeminiKey() ? "Ask anything about your archive..." : "Add your Cerebras key above to start chatting. Add Gemini key for smarter responses."}
                     </p>
                   ) : (
                     chatMessages.map((msg, i) => (
