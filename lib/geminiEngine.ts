@@ -725,9 +725,85 @@ export interface ExtractedVaultEntry {
   category: string;
 }
 
-// Helper: wait ms milliseconds
 function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Upload a file to Gemini Files API and return the file URI
+async function uploadFileToGemini(
+  fileContent: string,
+  filename: string,
+  mimeType: string = "text/plain"
+): Promise<string> {
+  const key = getGeminiKey();
+  if (!key) throw new Error("NO_KEY");
+
+  // Convert content to blob
+  const blob = new Blob([fileContent], { type: mimeType });
+  const arrayBuffer = await blob.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
+
+  // Step 1: initiate resumable upload
+  const initRes = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${key}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(uint8.length),
+        "X-Goog-Upload-Header-Content-Type": mimeType,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { display_name: filename } }),
+    }
+  );
+
+  if (!initRes.ok) {
+    const err = await initRes.json().catch(() => ({}));
+    throw new Error(`Upload init failed: ${err?.error?.message || initRes.status}`);
+  }
+
+  const uploadUrl = initRes.headers.get("X-Goog-Upload-URL");
+  if (!uploadUrl) throw new Error("No upload URL returned");
+
+  // Step 2: upload the actual content
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "X-Goog-Upload-Command": "upload, finalize",
+      "X-Goog-Upload-Offset": "0",
+      "Content-Type": mimeType,
+    },
+    body: uint8,
+  });
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.json().catch(() => ({}));
+    throw new Error(`Upload failed: ${err?.error?.message || uploadRes.status}`);
+  }
+
+  const fileData = await uploadRes.json();
+  const uri = fileData?.file?.uri;
+  if (!uri) throw new Error("No file URI in upload response");
+
+  return uri;
+}
+
+// Delete a file from Gemini Files API
+async function deleteGeminiFile(fileUri: string): Promise<void> {
+  const key = getGeminiKey();
+  if (!key) return;
+  // Extract file name from URI
+  const match = fileUri.match(/files\/([^/]+)$/);
+  if (!match) return;
+  const fileName = match[1];
+  try {
+    await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/files/${fileName}?key=${key}`,
+      { method: "DELETE" }
+    );
+  } catch {}
 }
 
 export async function geminiExtractCanonToVault(
@@ -737,85 +813,114 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  // Split into 4 large sections instead of 20 small ones
-  // This means only 4 API calls total — well within rate limits
-  const totalLen = Math.min(content.length, 60000); // cap at 60k chars
-  const sectionSize = Math.floor(totalLen / 4);
-  const sections: string[] = [
-    content.slice(0, sectionSize),
-    content.slice(sectionSize, sectionSize * 2),
-    content.slice(sectionSize * 2, sectionSize * 3),
-    content.slice(sectionSize * 3, totalLen),
-  ].filter(s => s.trim().length > 100);
+  const key = getGeminiKey();
+  if (!key) return [];
 
-  const allEntries: ExtractedVaultEntry[] = [];
-  const seen = new Set<string>();
+  let fileUri: string | null = null;
 
-  for (let i = 0; i < sections.length; i++) {
-    if (onProgress) {
-      onProgress(`Analysing section ${i + 1} of ${sections.length}... (${allEntries.length} facts found so far)`);
-    }
+  try {
+    // Step 1: Upload the content as a file to Gemini
+    if (onProgress) onProgress("Uploading file to Gemini...");
 
-    const section = sections[i];
+    fileUri = await uploadFileToGemini(content, filename, "text/plain");
 
-    const prompt = `You are extracting facts from a story/book to build a story archive database.
+    if (onProgress) onProgress("File uploaded. Extracting facts...");
 
-Source: "${filename}"
-Section ${i + 1} of ${sections.length}:
----
-${section}
----
+    // Wait a moment for the file to be processed
+    await wait(2000);
 
-Extract every specific, named fact worth storing. Include:
+    // Step 2: Single API call with the file reference
+    const prompt = `You are building a story archive database. Extract every specific, named fact from this document.
+
+Extract:
 - Named characters: who they are, appearance, role, personality, abilities
 - Named locations and what they are
-- Relationships between named characters
+- Relationships between named characters  
 - Magic, spells, special abilities, powers
-- Organizations, schools, groups
+- Organizations, schools, groups, factions
 - Key events that happened
 - World rules and lore
 - Items and artifacts
-- Creatures
+- Creatures and animals
 
-Each entry = one clear self-contained sentence or short description.
+Rules:
+- Each entry = one clear self-contained sentence
+- Only extract things that are explicitly in the text
+- Be thorough — extract as many facts as possible
+- Skip generic statements, only specific named facts
 
-Categories:
+Categories to use:
 characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society
 
-Return ONLY a JSON array, no other text:
-[{"text": "fact here", "category": "category-name"}]
+Return ONLY a JSON array, no other text, no markdown fences:
+[{"text": "fact here", "category": "category-name"}]`;
 
-If nothing to extract, return: []`;
-
-    try {
-      const result = await geminiCall(prompt);
-      const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      const jsonMatch = clean.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed)) {
-          for (const entry of parsed) {
-            if (!entry.text || !entry.category) continue;
-            const key = entry.text.trim().toLowerCase().slice(0, 80);
-            if (!seen.has(key) && entry.text.trim().length > 10) {
-              seen.add(key);
-              allEntries.push({ text: entry.text.trim(), category: entry.category });
-            }
-          }
-        }
+    const body = {
+      contents: [{
+        role: "user",
+        parts: [
+          { file_data: { mime_type: "text/plain", file_uri: fileUri } },
+          { text: prompt }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 8192,
       }
-    } catch (e) {
-      if (onProgress) {
-        onProgress(`Section ${i + 1} failed: ${e instanceof Error ? e.message : "error"} — continuing...`);
+    };
+
+    const response = await fetch(
+      `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      const msg = err?.error?.message || `HTTP ${response.status}`;
+      throw new Error(msg);
+    }
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("Empty response from Gemini");
+
+    if (onProgress) onProgress("Processing results...");
+
+    // Parse JSON from response
+    const clean = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const jsonMatch = clean.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error("No JSON found in response");
+
+    const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) throw new Error("Invalid JSON structure");
+
+    // Deduplicate
+    const seen = new Set<string>();
+    const results: ExtractedVaultEntry[] = [];
+    for (const entry of parsed) {
+      if (!entry.text || !entry.category) continue;
+      const key = entry.text.trim().toLowerCase().slice(0, 80);
+      if (!seen.has(key) && entry.text.trim().length > 10) {
+        seen.add(key);
+        results.push({ text: entry.text.trim(), category: entry.category });
       }
     }
 
-    // Wait 5 seconds between calls to avoid rate limiting
-    if (i < sections.length - 1) {
-      if (onProgress) onProgress(`Waiting before next section...`);
-      await wait(5000);
+    if (onProgress) onProgress(`Done — found ${results.length} facts!`);
+    return results;
+
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    if (onProgress) onProgress(`Error: ${msg}`);
+    return [];
+  } finally {
+    // Always clean up the uploaded file
+    if (fileUri) {
+      await deleteGeminiFile(fileUri);
     }
   }
-
-  return allEntries;
 }
