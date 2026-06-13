@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { hasGeminiKey, geminiCanonPlacement, geminiExtractCanonToVault, ExtractedVaultEntry } from "../../lib/geminiEngine";
+import { hasGeminiKey, geminiCanonPlacement, ExtractedVaultEntry } from "../../lib/geminiEngine";
+import { useExtraction } from "../ExtractionContext";
 import {
   loadArchive, saveArchive, ArchiveData,
   addCanonCategory, removeCanonCategory,
@@ -66,6 +67,7 @@ const BUILTIN_CATEGORIES = [
 ];
 
 export default function CanonPage() {
+  const { job, startExtraction, saveResults, clearJob } = useExtraction();
   const [archive, setArchive] = useState(loadArchive());
   const [activeCatId, setActiveCatId] = useState<string>("pdf-files");
   const [customCatName, setCustomCatName] = useState("");
@@ -87,6 +89,9 @@ export default function CanonPage() {
   const [extractedEntries, setExtractedEntries] = useState<ExtractedVaultEntry[]>([]);
   const [selectedEntries, setSelectedEntries] = useState<Set<number>>(new Set());
   const [extractDone, setExtractDone] = useState(false);
+  const [extractTotalParts, setExtractTotalParts] = useState(0);
+  const [extractCurrentPart, setExtractCurrentPart] = useState(0);
+  const [extractFactsFound, setExtractFactsFound] = useState(0);
 
   useEffect(() => { setArchive(loadArchive()); }, []);
 
@@ -154,11 +159,14 @@ export default function CanonPage() {
     const entry = allEntries.find(e => e.id === extractSourceId);
     if (!entry) return;
 
-    setExtracting(true);
+    setExtracting(true); setExtractProgress("Starting extraction...");
     setExtractedEntries([]);
     setExtractDone(false);
+    setExtractCurrentPart(0);
+    setExtractTotalParts(0);
+    setExtractFactsFound(0);
 
-    // Load full content from IDB if it was stored there
+    // Load full content from IDB if stored there
     let fullContent = entry.content;
     if (entry.content === IDB_PLACEHOLDER) {
       setExtractProgress("Loading full content from storage...");
@@ -172,19 +180,22 @@ export default function CanonPage() {
       }
     }
 
-    const results = await geminiExtractCanonToVault(
-      fullContent,
-      entry.filename,
-      (msg) => setExtractProgress(msg)
-    );
-
-    setExtractedEntries(results);
-    // Select all by default
-    setSelectedEntries(new Set(results.map((_, i) => i)));
+    // Start global extraction — persists even if you navigate away
+    await startExtraction(entry.id, fullContent, entry.filename);
     setExtracting(false);
-    setExtractDone(true);
-    setExtractProgress("");
   }
+
+  // Sync global job results back to local state when done
+  useEffect(() => {
+    if (job && job.status === "done" && job.results.length > 0 && extractedEntries.length === 0) {
+      setExtractedEntries(job.results);
+      setSelectedEntries(new Set(job.results.map((_, i) => i)));
+      setExtractDone(true);
+      setExtractCurrentPart(job.currentPart);
+      setExtractTotalParts(job.totalParts);
+      setExtractFactsFound(job.factsFound);
+    }
+  }, [job]);
 
   function toggleEntry(i: number) {
     setSelectedEntries(prev => {
@@ -196,17 +207,12 @@ export default function CanonPage() {
   }
 
   function saveSelectedEntries() {
-    let a = loadArchive();
-    let count = 0;
-    for (const i of selectedEntries) {
-      const entry = extractedEntries[i];
-      if (!entry) continue;
-      a = addEntry(a, entry.text, entry.category as any);
-      count++;
-    }
-    saveArchive(a);
-    setArchive(a);
+    const count = saveResults(selectedEntries);
+    setArchive(loadArchive());
     setShowExtractModal(false);
+    clearJob();
+    setExtractedEntries([]);
+    setExtractDone(false);
     flash(`✓ ${count} entries added to your vault from canon extraction.`);
   }
 
@@ -390,9 +396,11 @@ export default function CanonPage() {
             <span style={{ fontSize: "1rem" }}>⏳</span>
             <span style={{ fontWeight: "700", fontSize: "0.8rem", color: "#c4b5fd" }}>Extracting to Vault...</span>
           </div>
-          <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", margin: 0, lineHeight: "1.5" }}>{extractProgress || "Starting..."}</p>
+          <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", margin: 0, lineHeight: "1.5" }}>
+            {extractTotalParts > 0 ? `Part ${extractCurrentPart} of ${extractTotalParts} — ${extractFactsFound} facts found` : extractProgress || "Starting..."}
+          </p>
           <div style={{ marginTop: "0.5rem", height: "3px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden" }}>
-            <div style={{ height: "100%", background: "#7c3aed", borderRadius: "9999px", width: extractProgress.includes("part") ? `${Math.min(100, parseInt(extractProgress.match(/part (\d+)/)?.[1] || "0") / parseInt(extractProgress.match(/of (\d+)/)?.[1] || "1") * 100)}%` : "10%", transition: "width 0.5s" }} />
+            <div style={{ height: "100%", background: "#7c3aed", borderRadius: "9999px", width: extractTotalParts > 0 ? `${Math.min(100, (extractCurrentPart / extractTotalParts) * 100)}%` : "10%", transition: "width 0.5s" }} />
           </div>
         </div>
       )}
@@ -433,18 +441,16 @@ export default function CanonPage() {
                   <div style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.5rem", padding: "1rem" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
                       <p style={{ color: "#c4b5fd", fontSize: "0.875rem", fontWeight: "600" }}>
-                        {extractProgress.includes("part") 
-                          ? `Part ${extractProgress.match(/part (\d+)/)?.[1] || "?"} of ${extractProgress.match(/of (\d+)/)?.[1] || "?"}`
-                          : "Processing..."}
+                        {extractTotalParts > 0 ? `Part ${extractCurrentPart} of ${extractTotalParts}` : "Starting..."}
                       </p>
                       <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                        {extractProgress.match(/\((\d+) facts/)?.[1] || "0"} facts found
+                        {extractFactsFound} facts found
                       </p>
                     </div>
                     <div style={{ height: "6px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.5rem" }}>
                       <div style={{ 
                         height: "100%", background: "#7c3aed", borderRadius: "9999px", transition: "width 0.5s",
-                        width: extractProgress.includes("part") ? `${Math.min(100, parseInt(extractProgress.match(/part (\d+)/)?.[1] || "0") / parseInt(extractProgress.match(/of (\d+)/)?.[1] || "1") * 100)}%` : "5%"
+                        width: extractTotalParts > 0 ? `${Math.min(100, (extractCurrentPart / extractTotalParts) * 100)}%` : "3%"
                       }} />
                     </div>
                     <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>{extractProgress}</p>
