@@ -8,7 +8,7 @@
 
 // ─── Cerebras (fast) ──────────────────────────────────────────────────────────
 const CEREBRAS_KEY_STORAGE = "valArchivesGeminiKey"; // keep same key name for backwards compat
-const CEREBRAS_MODEL = "llama-3.3-70b";
+const CEREBRAS_MODEL = "llama3.3-70b";
 const CEREBRAS_API_BASE = "https://api.cerebras.ai/v1/chat/completions";
 
 // ─── Gemini (quality) ─────────────────────────────────────────────────────────
