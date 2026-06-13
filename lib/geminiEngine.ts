@@ -709,45 +709,39 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  const totalLen = content.length; // no cap — process full file
-  // Use 8 fixed sections — large enough for good coverage, few enough to avoid rate limits
-  const NUM_SECTIONS = 8;
-  const sectionSize = Math.floor(totalLen / NUM_SECTIONS);
-  const sections: string[] = [];
-  for (let i = 0; i < NUM_SECTIONS; i++) {
-    const s = content.slice(i * sectionSize, (i + 1) * sectionSize);
-    if (s.trim().length > 100) sections.push(s);
+  if (onProgress) onProgress("Preparing extraction...");
+
+  // Split into 120k char chunks (fits in Groq 128k context window)
+  const MAX_CHARS = 120000;
+  const chunks: string[] = [];
+  for (let i = 0; i < content.length; i += MAX_CHARS) {
+    chunks.push(content.slice(i, i + MAX_CHARS));
   }
 
   const allEntries: ExtractedVaultEntry[] = [];
   const seen = new Set<string>();
 
-  for (let i = 0; i < sections.length; i++) {
+  for (let i = 0; i < chunks.length; i++) {
     if (onProgress) {
-      onProgress(`Section ${i + 1} of ${sections.length} — ${allEntries.length} facts found so far...`);
+      onProgress("Processing part " + (i + 1) + " of " + chunks.length + "... (" + allEntries.length + " facts found)");
     }
 
-    const prompt = `Extract story facts from this text for a world-building archive database.
-
-Source: "${filename}", section ${i + 1} of ${sections.length}
----
-${sections[i]}
----
-
-Extract EVERY named character, location, relationship, magical ability, organization, creature, item, and world fact.
-Be thorough — aim for 15-30 entries per section.
-Each entry = one clear self-contained sentence.
-
-Examples:
-- "Harry Potter is a young boy who lives with his aunt and uncle at 4 Privet Drive" → characters
-- "Hogwarts is a school for witchcraft and wizardry" → locations
-- "Petunia Dursley is Harry Potter's aunt and Lily Potter's sister" → relationships
-- "Owls are used to deliver mail in the wizarding world" → world-overview
-
-Categories: characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society
-
-Return ONLY a JSON array:
-[{"text": "fact here", "category": "category-name"}]`;
+    const prompt = "Extract story facts from this text for a world-building archive database.\n\n"
+      + "Source: \"" + filename + "\", part " + (i + 1) + " of " + chunks.length + "\n"
+      + "---\n"
+      + chunks[i]
+      + "\n---\n\n"
+      + "Extract EVERY named character, location, relationship, magical ability, organization, creature, item, and world fact.\n"
+      + "Be very thorough — extract as many facts as possible.\n"
+      + "Each entry = one clear self-contained sentence.\n\n"
+      + "Examples:\n"
+      + "- \"Harry Potter is a young boy who lives with his aunt and uncle at 4 Privet Drive\" category: characters\n"
+      + "- \"Hogwarts is a school for witchcraft and wizardry\" category: locations\n"
+      + "- \"Hermione Granger is a highly intelligent witch and one of Harry Potter best friends\" category: characters\n"
+      + "- \"Owls are used to deliver mail in the wizarding world\" category: world-overview\n\n"
+      + "Categories: characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society\n\n"
+      + "Return ONLY a JSON array, nothing else:\n"
+      + '[{"text": "fact here", "category": "category-name"}]';
 
     let attempts = 0;
     let success = false;
@@ -755,7 +749,8 @@ Return ONLY a JSON array:
     while (attempts < 3 && !success) {
       try {
         const result = await geminiCall(prompt);
-        const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        const fence = String.fromCharCode(96,96,96);
+        const clean = result.split(fence + "json").join("").split(fence).join("").trim();
         const jsonMatch = clean.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
@@ -775,22 +770,22 @@ Return ONLY a JSON array:
         attempts++;
         const msg = e instanceof Error ? e.message : "error";
         if (msg.includes("RATE_LIMIT") || msg.includes("429")) {
-          const waitSec = attempts * 15;
-          if (onProgress) onProgress(`Rate limit — waiting ${waitSec}s...`);
+          const waitSec = attempts * 20;
+          if (onProgress) onProgress("Rate limit — waiting " + waitSec + "s before retry...");
           await wait(waitSec * 1000);
         } else {
-          if (onProgress) onProgress(`Section ${i + 1} error: ${msg}`);
+          if (onProgress) onProgress("Part " + (i + 1) + " error: " + msg);
           break;
         }
       }
     }
 
-    if (i < sections.length - 1) {
-      if (onProgress) onProgress(`Waiting before next section...`);
-      await wait(6000);
+    if (i < chunks.length - 1) {
+      if (onProgress) onProgress("Waiting before next part...");
+      await wait(5000);
     }
   }
 
-  if (onProgress) onProgress(`Complete — ${allEntries.length} facts extracted!`);
+  if (onProgress) onProgress("Complete — " + allEntries.length + " facts extracted!");
   return allEntries;
 }
