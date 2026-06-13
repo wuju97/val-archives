@@ -710,9 +710,9 @@ export async function geminiExtractCanonToVault(
   if (!hasGeminiKey()) return [];
 
   const totalLen = content.length; // no cap — process full file
+  const NUM_SECTIONS = Math.max(5, Math.ceil(totalLen / 15000));
   const sectionSize = Math.floor(totalLen / NUM_SECTIONS);
   const sections: string[] = [];
-  const NUM_SECTIONS = Math.max(5, Math.ceil(totalLen / 15000));
   for (let i = 0; i < NUM_SECTIONS; i++) {
     const s = content.slice(i * sectionSize, (i + 1) * sectionSize);
     if (s.trim().length > 100) sections.push(s);
@@ -774,7 +774,7 @@ Return ONLY a JSON array:
         attempts++;
         const msg = e instanceof Error ? e.message : "error";
         if (msg.includes("RATE_LIMIT") || msg.includes("429")) {
-          const waitSec = attempts * 10;
+          const waitSec = attempts * 15;
           if (onProgress) onProgress(`Rate limit — waiting ${waitSec}s...`);
           await wait(waitSec * 1000);
         } else {
@@ -786,7 +786,7 @@ Return ONLY a JSON array:
 
     if (i < sections.length - 1) {
       if (onProgress) onProgress(`Waiting before next section...`);
-      await wait(3000);
+      await wait(6000);
     }
   }
 
