@@ -736,7 +736,6 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  // Split into 5 sections
   const totalLen = Math.min(content.length, 75000);
   const sectionSize = Math.floor(totalLen / 5);
   const sections: string[] = [];
@@ -753,21 +752,33 @@ export async function geminiExtractCanonToVault(
       onProgress(`Section ${i + 1} of ${sections.length} — ${allEntries.length} facts found so far...`);
     }
 
-    const prompt = `Extract story facts from this text for a story archive database.
+    const prompt = `Read this excerpt from "${filename}" and extract facts for a story wiki/archive.
 
-Source: "${filename}", section ${i + 1} of ${sections.length}
+TEXT:
 ---
 ${sections[i]}
 ---
 
-Extract named characters, locations, relationships, magic/abilities, organizations, events, world rules, items, creatures.
-One fact per entry, self-contained sentence.
+You MUST extract facts from this text. This is a Harry Potter novel — it is full of extractable facts.
+
+For EVERY named person, place, object, spell, creature, or event you find, create an entry.
+
+Examples of what to extract:
+- "Vernon Dursley is a large beefy man who works as director of Grunnings, a drill company" → characters
+- "Privet Drive, number four, is where the Dursley family lives in Surrey" → locations  
+- "Petunia Dursley is Vernon Dursley's wife and Lily Potter's sister" → relationships
+- "Dudley Dursley is the spoiled young son of Vernon and Petunia Dursley" → characters
+- "Lily Potter is Petunia Dursley's sister and Harry Potter's mother" → relationships
+- "Harry Potter survived Voldemort's killing curse as a baby" → characters
+- "Hogwarts is a school for witchcraft and wizardry" → locations
+- "Owls are used to deliver mail in the wizarding world" → world-overview
+
+Be generous. Extract EVERYTHING named and specific. Aim for at least 10-20 entries per section.
 
 Categories: characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society
 
-Return ONLY a JSON array:
-[{"text": "fact", "category": "category-name"}]
-Empty array [] if nothing to extract.`;
+Return ONLY a JSON array, nothing else:
+[{"text": "fact here", "category": "category-name"}]`;
 
     let attempts = 0;
     let success = false;
@@ -796,7 +807,7 @@ Empty array [] if nothing to extract.`;
         const msg = e instanceof Error ? e.message : "error";
         if (msg.includes("RATE_LIMIT") || msg.includes("429") || msg.includes("quota")) {
           const waitSec = attempts * 15;
-          if (onProgress) onProgress(`Rate limit hit — waiting ${waitSec}s before retry...`);
+          if (onProgress) onProgress(`Rate limit — waiting ${waitSec}s...`);
           await wait(waitSec * 1000);
         } else {
           if (onProgress) onProgress(`Section ${i + 1} error: ${msg}`);
@@ -805,7 +816,6 @@ Empty array [] if nothing to extract.`;
       }
     }
 
-    // Wait 8 seconds between sections to stay under rate limits
     if (i < sections.length - 1) {
       if (onProgress) onProgress(`Waiting before next section...`);
       await wait(8000);
