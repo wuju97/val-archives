@@ -1,28 +1,29 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// GEMINI ENGINE — Central AI layer for Val Archives
-// All calls use the user's own API key stored in localStorage
-// Gracefully does nothing if no key is present
+// GROQ ENGINE — Central AI layer for Val Archives
+// Uses Groq API with llama-3.3-70b-versatile
+// Free tier: no daily limit, 30 requests/minute
+// Get your free key at console.groq.com
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const GEMINI_KEY_STORAGE = "valArchivesGeminiKey";
-const GEMINI_MODEL = "gemini-2.0-flash-exp";
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const GROQ_KEY_STORAGE = "valArchivesGeminiKey"; // reuse same storage key so existing users don't lose their setup
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
 
 export function getGeminiKey(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(GEMINI_KEY_STORAGE) || null;
+  return localStorage.getItem(GROQ_KEY_STORAGE) || null;
 }
 
 export function setGeminiKey(key: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(GEMINI_KEY_STORAGE, key.trim());
+  localStorage.setItem(GROQ_KEY_STORAGE, key.trim());
 }
 
 export function clearGeminiKey(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(GEMINI_KEY_STORAGE);
+  localStorage.removeItem(GROQ_KEY_STORAGE);
 }
 
 export function hasGeminiKey(): boolean {
@@ -39,47 +40,47 @@ export async function geminiCall(
   const key = getGeminiKey();
   if (!key) throw new Error("NO_KEY");
 
-  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+  const messages: Array<{ role: string; content: string }> = [];
+
+  if (systemInstruction) {
+    messages.push({ role: "system", content: systemInstruction });
+  }
 
   if (history) {
     for (const msg of history) {
-      contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+      messages.push({
+        role: msg.role === "model" ? "assistant" : "user",
+        content: msg.text,
+      });
     }
   }
 
-  contents.push({ role: "user", parts: [{ text: prompt }] });
+  messages.push({ role: "user", content: prompt });
 
-  const body: Record<string, unknown> = { contents };
-
-  if (systemInstruction) {
-    body.systemInstruction = { parts: [{ text: systemInstruction }] };
-  }
-
-  body.generationConfig = {
-    temperature: 0.7,
-    maxOutputTokens: 2048,
-  };
-
-  const response = await fetch(
-    `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }
-  );
+  const response = await fetch(GROQ_API_BASE, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages,
+      temperature: 0.7,
+      max_tokens: 4096,
+    }),
+  });
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     const msg = err?.error?.message || `HTTP ${response.status}`;
-    if (response.status === 400) throw new Error(`BAD_REQUEST: ${msg}`);
-    if (response.status === 403) throw new Error("INVALID_KEY");
+    if (response.status === 401) throw new Error("INVALID_KEY");
     if (response.status === 429) throw new Error("RATE_LIMIT");
     throw new Error(`API_ERROR: ${msg}`);
   }
 
   const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text = data?.choices?.[0]?.message?.content;
   if (!text) throw new Error("EMPTY_RESPONSE");
   return text.trim();
 }
@@ -340,7 +341,7 @@ Return ONLY the improved rule:`;
 
 export function geminiErrorMessage(error: unknown): string {
   const msg = error instanceof Error ? error.message : "Unknown error";
-  if (msg === "NO_KEY") return "Add your Gemini API key in Settings → AI to enable this feature.";
+  if (msg === "NO_KEY") return "Add your Groq API key in Settings → AI to enable this feature.";
   if (msg === "INVALID_KEY") return "Invalid API key. Check Settings → AI.";
   if (msg === "RATE_LIMIT") return "Rate limit reached. Wait a moment and try again.";
   if (msg.startsWith("BAD_REQUEST")) return `Request error: ${msg.replace("BAD_REQUEST: ", "")}`;
@@ -355,8 +356,6 @@ export async function geminiGenerateSavePrompt(masterPrompt: string): Promise<st
   const prompt = `You are an expert RPG/story session archivist. Based on the archive context below, generate a highly specific session save extraction prompt.
 
 The prompt should ask the AI to extract information that is specifically relevant to THIS archive — naming actual characters, locations, quests, and relationships from the archive rather than using generic placeholders.
-
-Make it comprehensive but focused on what matters for THIS specific story/campaign.
 
 Archive context:
 ${masterPrompt.slice(0, 4000)}
@@ -409,7 +408,7 @@ Return ONLY the enhanced instructions, no commentary:`;
   }
 }
 
-// ─── FEATURE: Smart Category Review (second pass) ────────────────────────────
+// ─── FEATURE: Smart Category Review ──────────────────────────────────────────
 
 export async function geminiSmartCategoryReview(
   suggestions: Array<{ text: string; category: string }>,
@@ -424,15 +423,11 @@ export async function geminiSmartCategoryReview(
   }
 
   const entriesList = suggestions.map((s, i) => (i + 1) + ". [" + s.category + "] " + s.text).join("\n");
-  const catList = allCategories.join(", ");
-  const ctx = archiveContext.slice(0, 800);
-
   const prompt = "You are an expert story/RPG archivist. Review these auto-classified entries and suggest better categories where needed.\n\n"
-    + "Available categories: " + catList + "\n\n"
-    + "Archive context (use this to make better decisions):\n" + ctx + "\n\n"
+    + "Available categories: " + allCategories.join(", ") + "\n\n"
+    + "Archive context:\n" + archiveContext.slice(0, 800) + "\n\n"
     + "Entries to review:\n" + entriesList + "\n\n"
-    + "For each entry, decide if the category is correct or should be changed.\n"
-    + "Return ONLY a JSON array, no other text:\n"
+    + "Return ONLY a JSON array:\n"
     + '[{"text": "exact entry text", "originalCategory": "current", "suggestedCategory": "better or same", "reason": "brief reason if changed, empty string if same", "changed": true}]';
 
   try {
@@ -455,19 +450,18 @@ export async function geminiTargetedDelete(
   if (!hasGeminiKey() || entries.length === 0) return [];
 
   const entriesList = entries.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 120)).join("\n");
-
-  const prompt = "A user wants to delete vault entries related to this topic: \"" + query + "\"\n\n"
-    + "Review these entries and identify ONLY the ones that are directly relevant to the topic.\n"
-    + "Be conservative — only include entries that clearly match. Do not include tangentially related entries.\n\n"
+  const prompt = "A user wants to delete vault entries related to: \"" + query + "\"\n\n"
     + "Entries:\n" + entriesList + "\n\n"
-    + "Return ONLY a JSON array of matching entry indices (0-based) with reasons:\n"
-    + '[{"index": 0, "reason": "brief reason why this matches"}]\n'
-    + "If nothing matches, return an empty array: []";
+    + "Return ONLY a JSON array of matching entry indices:\n"
+    + '[{"index": 0, "reason": "brief reason"}]\n'
+    + "If nothing matches, return: []";
 
   try {
     const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
-    const parsed: Array<{ index: number; reason: string }> = JSON.parse(clean);
+    const jsonMatch = clean.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    const parsed: Array<{ index: number; reason: string }> = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter(p => p.index >= 0 && p.index < entries.length)
@@ -477,7 +471,7 @@ export async function geminiTargetedDelete(
   }
 }
 
-// ─── FEATURE: Semantic Search (Batch) ────────────────────────────────────────
+// ─── FEATURE: Semantic Search ─────────────────────────────────────────────────
 
 export async function geminiSemanticSearch(
   query: string,
@@ -492,25 +486,25 @@ export async function geminiSemanticSearch(
     const batch = entries.slice(i, i + BATCH_SIZE);
     const entriesList = batch.map((e, idx) => idx + ". [" + e.category + "] " + e.text.slice(0, 150)).join("\n");
 
-    const prompt = "A user is searching their story/RPG archive for: \"" + query + "\"\n\n"
-      + "Find all entries relevant to this question — including entries related by meaning even if they don\'t use exact words.\n\n"
+    const prompt = "Search this story archive for: \"" + query + "\"\n\n"
       + "Entries:\n" + entriesList + "\n\n"
-      + "Return ONLY a JSON array of relevant entries:\n"
-      + '[{"index": 0, "relevance": "why this is relevant"}]\n'
-      + "If nothing is relevant, return [].";
+      + "Return ONLY relevant entries as JSON:\n"
+      + '[{"index": 0, "relevance": "why relevant"}]\n'
+      + "If nothing relevant, return [].";
 
     try {
       const result = await geminiCall(prompt);
       const clean = result.replace(/```json|```/g, "").trim();
-      const parsed: Array<{ index: number; relevance: string }> = JSON.parse(clean);
-      if (Array.isArray(parsed)) {
-        parsed
-          .filter(p => p.index >= 0 && p.index < batch.length)
-          .forEach(p => allResults.push({ ...batch[p.index], relevance: p.relevance }));
+      const jsonMatch = clean.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const parsed: Array<{ index: number; relevance: string }> = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) {
+          parsed
+            .filter(p => p.index >= 0 && p.index < batch.length)
+            .forEach(p => allResults.push({ ...batch[p.index], relevance: p.relevance }));
+        }
       }
-    } catch {
-      // Skip failed batch
-    }
+    } catch {}
   }
 
   return allResults;
@@ -524,23 +518,19 @@ export async function geminiOrganizeRules(
   if (!hasGeminiKey() || rules.length === 0) return { organized: rules, summary: "" };
 
   const rulesList = rules.map((r, i) => i + ". " + r).join("\n");
-
-  const prompt = "You are organizing a rulebook for an RPG/story campaign. Here are the current rules:\n\n"
-    + rulesList + "\n\n"
-    + "Do the following:\n"
-    + "1. Remove any exact duplicates\n"
-    + "2. Group similar rules together (e.g. combat rules, magic rules, character rules, world rules, GM rules)\n"
-    + "3. Within each group, order rules from most important to least\n"
-    + "4. Keep each rule's wording exactly as written — do not paraphrase or change meaning\n"
-    + "5. Add a short GROUP HEADER before each group in ALL CAPS (e.g. === COMBAT RULES ===)\n\n"
-    + "Return ONLY a JSON object:\n"
-    + '{"organized": ["rule1", "=== GROUP HEADER ===", "rule2", ...], "summary": "brief summary of what was reorganized"}';
+  const prompt = "Organize this RPG rulebook. Group similar rules, remove duplicates, add group headers in ALL CAPS like === COMBAT RULES ===.\n\n"
+    + "Rules:\n" + rulesList + "\n\n"
+    + "Return ONLY JSON:\n"
+    + '{"organized": ["rule1", "=== GROUP ===", "rule2"], "summary": "what was done"}';
 
   try {
     const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
-    if (parsed.organized && Array.isArray(parsed.organized)) return parsed;
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.organized && Array.isArray(parsed.organized)) return parsed;
+    }
     return { organized: rules, summary: "" };
   } catch {
     return { organized: rules, summary: "" };
@@ -558,18 +548,19 @@ export async function geminiVerifyCategories(
   const batch = entries.slice(0, 40);
   const entriesList = batch.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 100)).join("\n");
 
-  const prompt = "You are auditing a story/RPG archive. Review these entries and identify any that are clearly in the wrong category.\n\n"
+  const prompt = "Audit these story archive entries. Find ones in the wrong category.\n\n"
     + "Available categories: " + allCategories.join(", ") + "\n\n"
     + "Entries:\n" + entriesList + "\n\n"
-    + "Only flag entries that are CLEARLY in the wrong category. Be conservative.\n"
-    + "Return ONLY a JSON array of entries that need moving (skip correct ones):\n"
+    + "Return ONLY entries that need moving:\n"
     + '[{"index": 0, "suggestedCategory": "better-category", "reason": "brief reason"}]\n'
-    + "If all are correct, return [].";
+    + "If all correct, return [].";
 
   try {
     const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
-    const parsed: Array<{ index: number; suggestedCategory: string; reason: string }> = JSON.parse(clean);
+    const jsonMatch = clean.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    const parsed: Array<{ index: number; suggestedCategory: string; reason: string }> = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter(p => p.index >= 0 && p.index < batch.length)
@@ -586,7 +577,7 @@ export async function geminiVerifyCategories(
   }
 }
 
-// ─── FEATURE: Canon Chronological Placement ───────────────────────────────────
+// ─── FEATURE: Canon Placement ─────────────────────────────────────────────────
 
 export async function geminiCanonPlacement(
   newContent: string,
@@ -596,27 +587,25 @@ export async function geminiCanonPlacement(
   if (!hasGeminiKey()) return { placement: "", context: "", suggestion: "" };
 
   const canonSummary = existingCanon.slice(0, 10).map((c, i) => (i + 1) + ". " + c.slice(0, 200)).join("\n");
-
-  const prompt = "You are a story/RPG canon archivist. A new piece of content has been added to the \"" + categoryName + "\" canon category.\n\n"
-    + "Existing canon entries (in current order):\n" + canonSummary + "\n\n"
-    + "New content added:\n" + newContent.slice(0, 500) + "\n\n"
-    + "Analyze where this new content fits chronologically or narratively within the existing canon.\n"
-    + "Tell the user:\n"
-    + "1. WHERE it belongs (before entry X, after entry Y, or at the beginning/end)\n"
-    + "2. WHY it belongs there (what events connect it)\n"
-    + "3. Any continuity notes (things to be aware of when placing it)\n\n"
-    + "Return ONLY a JSON object:\n"
-    + '{"placement": "After entry 3, before entry 4", "context": "explanation of why", "suggestion": "any continuity notes or suggestions"}';
+  const prompt = "A new entry was added to canon category \"" + categoryName + "\".\n\n"
+    + "Existing entries:\n" + canonSummary + "\n\n"
+    + "New content:\n" + newContent.slice(0, 500) + "\n\n"
+    + "Return ONLY JSON:\n"
+    + '{"placement": "where it belongs", "context": "why", "suggestion": "continuity notes"}';
 
   try {
     const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
-    return {
-      placement: parsed.placement || "",
-      context: parsed.context || "",
-      suggestion: parsed.suggestion || "",
-    };
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        placement: parsed.placement || "",
+        context: parsed.context || "",
+        suggestion: parsed.suggestion || "",
+      };
+    }
+    return { placement: "", context: "", suggestion: "" };
   } catch {
     return { placement: "", context: "", suggestion: "" };
   }
@@ -630,27 +619,22 @@ export async function geminiCheckTimelineSeparation(
 ): Promise<{ hasConflicts: boolean; conflicts: Array<{ timeline: string; issue: string }> }> {
   if (!hasGeminiKey() || otherTimelines.length === 0) return { hasConflicts: false, conflicts: [] };
 
-  const others = otherTimelines.slice(0, 5).map(t => "Timeline \"" + t.name + "\":\n" + t.content.slice(0, 300)).join("\n\n");
-
-  const prompt = "You are checking if a new timeline save conflicts with or bleeds into existing timelines.\n\n"
-    + "NEW TIMELINE: \"" + currentTimeline.name + "\"\n"
-    + currentTimeline.content.slice(0, 400) + "\n\n"
-    + "EXISTING TIMELINES:\n" + others + "\n\n"
-    + "Check for:\n"
-    + "1. Contradictions (events that can't both be true)\n"
-    + "2. Content that accidentally belongs to a different timeline\n"
-    + "3. Character states that conflict between timelines\n\n"
-    + "Return ONLY a JSON object:\n"
-    + '{"hasConflicts": true/false, "conflicts": [{"timeline": "name", "issue": "description of conflict"}]}';
+  const others = otherTimelines.slice(0, 5).map(t => "\"" + t.name + "\":\n" + t.content.slice(0, 300)).join("\n\n");
+  const prompt = "Check if this timeline conflicts with existing ones.\n\n"
+    + "NEW: \"" + currentTimeline.name + "\"\n" + currentTimeline.content.slice(0, 400) + "\n\n"
+    + "EXISTING:\n" + others + "\n\n"
+    + "Return ONLY JSON:\n"
+    + '{"hasConflicts": false, "conflicts": [{"timeline": "name", "issue": "description"}]}';
 
   try {
     const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
-    return {
-      hasConflicts: parsed.hasConflicts ?? false,
-      conflicts: parsed.conflicts ?? [],
-    };
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return { hasConflicts: parsed.hasConflicts ?? false, conflicts: parsed.conflicts ?? [] };
+    }
+    return { hasConflicts: false, conflicts: [] };
   } catch {
     return { hasConflicts: false, conflicts: [] };
   }
@@ -679,39 +663,28 @@ export async function geminiClassifyText(
     const batch = chunks.slice(i, i + BATCH_SIZE);
     const entriesList = batch.map((c, idx) => idx + ". " + c).join("\n");
 
-    const prompt = "You are an expert story/RPG archive classifier. Categorize each entry into the SINGLE most appropriate category.\n\n"
-      + "Available categories:\n" + allCategories.map(c => "- " + c).join("\n") + "\n\n"
-      + "Rules:\n"
-      + "- Each entry gets exactly ONE category\n"
-      + "- Choose the most specific category that fits\n"
-      + "- If it mentions a character trait/personality → emotional-architecture\n"
-      + "- If it describes what happened → timeline-continuity\n"
-      + "- If it names a character and their role → characters\n"
-      + "- If it describes a place → locations\n"
-      + "- If it describes magic/powers → magic-supernatural\n"
-      + "- If it describes a rule or law → rules\n"
-      + "- If it describes a quest or goal → quests-plotlines\n"
-      + "- If it describes a relationship → relationships\n"
-      + "- If it describes history/past events → history\n"
-      + "- If it describes world lore/myths → lore-mythology\n"
-      + "- If it's about the player character → player-character\n\n"
-      + "Entries to classify:\n" + entriesList + "\n\n"
-      + "Return ONLY a JSON array:\n"
-      + '[{"index": 0, "category": "category-name"}, ...]';
+    const prompt = "Classify each entry into ONE category.\n\n"
+      + "Categories: " + allCategories.join(", ") + "\n\n"
+      + "Entries:\n" + entriesList + "\n\n"
+      + "Return ONLY JSON:\n"
+      + '[{"index": 0, "category": "category-name"}]';
 
     try {
       const result = await geminiCall(prompt);
       const clean = result.replace(/```json|```/g, "").trim();
-      const parsed: Array<{ index: number; category: string }> = JSON.parse(clean);
-      if (Array.isArray(parsed)) {
-        parsed.forEach(p => {
-          if (p.index >= 0 && p.index < batch.length) {
-            results.push({ text: batch[p.index], category: p.category });
-          }
-        });
+      const jsonMatch = clean.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const parsed: Array<{ index: number; category: string }> = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(p => {
+            if (p.index >= 0 && p.index < batch.length) {
+              results.push({ text: batch[p.index], category: p.category });
+            }
+          });
+        }
       }
     } catch {
-      batch.forEach(text => results.push({ text, category: "meta-information" }));
+      batch.forEach(t => results.push({ text: t, category: "meta-information" }));
     }
   }
 
@@ -736,40 +709,86 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  // Just test with the very first 3000 chars — one call, simple prompt
-  const sample = content.slice(0, 3000);
+  const totalLen = Math.min(content.length, 80000);
+  const sectionSize = Math.floor(totalLen / 5);
+  const sections: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const s = content.slice(i * sectionSize, (i + 1) * sectionSize);
+    if (s.trim().length > 100) sections.push(s);
+  }
 
-  if (onProgress) onProgress("Testing extraction on first section...");
+  const allEntries: ExtractedVaultEntry[] = [];
+  const seen = new Set<string>();
 
-  const prompt = `Extract characters and places from this Harry Potter text as JSON.
-
-TEXT:
-${sample}
-
-Return a JSON array like this:
-[{"text": "Vernon Dursley is Harry Potter's uncle who lives at 4 Privet Drive", "category": "characters"}]
-
-Include every named person and place. Return ONLY the JSON array.`;
-
-  try {
-    const result = await geminiCall(prompt);
-    if (onProgress) onProgress(`Raw response (first 200 chars): ${result.slice(0, 200)}`);
-    
-    const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const jsonMatch = clean.match(/\[[\s\S]*\]/);
-    
-    if (!jsonMatch) {
-      if (onProgress) onProgress(`No JSON found. Full response: ${result.slice(0, 300)}`);
-      return [];
+  for (let i = 0; i < sections.length; i++) {
+    if (onProgress) {
+      onProgress(`Section ${i + 1} of ${sections.length} — ${allEntries.length} facts found so far...`);
     }
 
-    const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
-    if (onProgress) onProgress(`Found ${parsed.length} entries!`);
-    return Array.isArray(parsed) ? parsed.filter(e => e.text && e.text.length > 10) : [];
+    const prompt = `Extract story facts from this text for a world-building archive database.
 
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "unknown";
-    if (onProgress) onProgress(`Error: ${msg}`);
-    return [];
+Source: "${filename}", section ${i + 1} of ${sections.length}
+---
+${sections[i]}
+---
+
+Extract EVERY named character, location, relationship, magical ability, organization, creature, item, and world fact.
+Be thorough — aim for 15-30 entries per section.
+Each entry = one clear self-contained sentence.
+
+Examples:
+- "Harry Potter is a young boy who lives with his aunt and uncle at 4 Privet Drive" → characters
+- "Hogwarts is a school for witchcraft and wizardry" → locations
+- "Petunia Dursley is Harry Potter's aunt and Lily Potter's sister" → relationships
+- "Owls are used to deliver mail in the wizarding world" → world-overview
+
+Categories: characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society
+
+Return ONLY a JSON array:
+[{"text": "fact here", "category": "category-name"}]`;
+
+    let attempts = 0;
+    let success = false;
+
+    while (attempts < 3 && !success) {
+      try {
+        const result = await geminiCall(prompt);
+        const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        const jsonMatch = clean.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed)) {
+            for (const entry of parsed) {
+              if (!entry.text || !entry.category) continue;
+              const k = entry.text.trim().toLowerCase().slice(0, 80);
+              if (!seen.has(k) && entry.text.trim().length > 10) {
+                seen.add(k);
+                allEntries.push({ text: entry.text.trim(), category: entry.category });
+              }
+            }
+          }
+        }
+        success = true;
+      } catch (e) {
+        attempts++;
+        const msg = e instanceof Error ? e.message : "error";
+        if (msg.includes("RATE_LIMIT") || msg.includes("429")) {
+          const waitSec = attempts * 10;
+          if (onProgress) onProgress(`Rate limit — waiting ${waitSec}s...`);
+          await wait(waitSec * 1000);
+        } else {
+          if (onProgress) onProgress(`Section ${i + 1} error: ${msg}`);
+          break;
+        }
+      }
+    }
+
+    if (i < sections.length - 1) {
+      if (onProgress) onProgress(`Waiting before next section...`);
+      await wait(3000);
+    }
   }
-}
+
+  if (onProgress) onProgress(`Complete — ${allEntries.length} facts extracted!`);
+  return allEntries;
+} 
