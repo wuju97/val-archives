@@ -11,6 +11,52 @@ import {
   addEntry, CATEGORY_LABELS,
 } from "@/lib/archiveEngine";
 
+// ─── IDB helpers for large canon content ──────────────────────────────────────
+const CANON_IDB_PREFIX = "valArchivesCanon_";
+
+function openCanonIDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("valArchivesCanonDB", 1);
+    req.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains("canon")) db.createObjectStore("canon");
+    };
+    req.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveCanonContentToIDB(entryId: string, content: string): Promise<void> {
+  try {
+    const db = await openCanonIDB();
+    const tx = db.transaction("canon", "readwrite");
+    tx.objectStore("canon").put(content, CANON_IDB_PREFIX + entryId);
+  } catch {}
+}
+
+async function loadCanonContentFromIDB(entryId: string): Promise<string | null> {
+  try {
+    const db = await openCanonIDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction("canon", "readonly");
+      const req = tx.objectStore("canon").get(CANON_IDB_PREFIX + entryId);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+async function deleteCanonContentFromIDB(entryId: string): Promise<void> {
+  try {
+    const db = await openCanonIDB();
+    const tx = db.transaction("canon", "readwrite");
+    tx.objectStore("canon").delete(CANON_IDB_PREFIX + entryId);
+  } catch {}
+}
+
+const LARGE_CONTENT_THRESHOLD = 5000; // chars — above this goes to IDB
+const IDB_PLACEHOLDER = "[CONTENT_IN_IDB]"; // marker in localStorage version
+
 // ─── Built-in Canon Categories ────────────────────────────────────────────────
 const BUILTIN_CATEGORIES = [
   { id: "pdf-files",      name: "PDF Files",       icon: "📄", desc: "Upload PDF documents" },
@@ -112,8 +158,22 @@ export default function CanonPage() {
     setExtractedEntries([]);
     setExtractDone(false);
 
+    // Load full content from IDB if it was stored there
+    let fullContent = entry.content;
+    if (entry.content === IDB_PLACEHOLDER) {
+      setExtractProgress("Loading full content from storage...");
+      const idbContent = await loadCanonContentFromIDB(entry.id);
+      if (idbContent) {
+        fullContent = idbContent;
+      } else {
+        setExtractProgress("Error: Could not load content. Try re-uploading the file.");
+        setExtracting(false);
+        return;
+      }
+    }
+
     const results = await geminiExtractCanonToVault(
-      entry.content,
+      fullContent,
       entry.filename,
       (msg) => setExtractProgress(msg)
     );
@@ -209,8 +269,23 @@ export default function CanonPage() {
           content = await file.text();
         }
 
-        const updated = addCanonEntry(a, activeCatId, file.name, content);
-        saveWithFallback(updated);
+        const entryId = crypto.randomUUID();
+        const now = new Date().toISOString();
+        // Save large content directly to IDB, store placeholder in localStorage
+        let storedContent = content;
+        if (content.length > LARGE_CONTENT_THRESHOLD) {
+          await saveCanonContentToIDB(entryId, content);
+          storedContent = IDB_PLACEHOLDER;
+        }
+        const updated = addCanonEntry(a, activeCatId, file.name, storedContent);
+        // Fix the last entry id to match our pre-generated one
+        const lastIdx = updated.canonCategories.findIndex(c => c.id === activeCatId);
+        if (lastIdx !== -1) {
+          const entries = updated.canonCategories[lastIdx].entries;
+          entries[entries.length - 1] = { ...entries[entries.length - 1], id: entryId };
+        }
+        saveArchive(updated);
+        setArchive(updated);
         a = updated;
         flash(`✓ "${file.name}" added to ${catName}`);
       } catch (err) {
@@ -253,8 +328,9 @@ export default function CanonPage() {
     setCustomCatName("");
   }
 
-  function handleRemoveEntry(entryId: string) {
+  async function handleRemoveEntry(entryId: string) {
     if (!confirm("Remove this entry?")) return;
+    await deleteCanonContentFromIDB(entryId);
     const updated = removeCanonEntry(archive, activeCatId, entryId);
     saveArchive(updated); setArchive(updated);
   }
@@ -667,7 +743,7 @@ export default function CanonPage() {
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flex: 1, minWidth: 0 }}>
                         <span style={{ fontSize: "1rem" }}>{isTimeline ? "🗓️" : "📄"}</span>
                         <span style={{ fontWeight: "600", fontSize: "0.875rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.filename}</span>
-                        <span style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", flexShrink: 0 }}>{entry.content.length.toLocaleString()} chars</span>
+                        <span style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", flexShrink: 0 }}>{entry.content === IDB_PLACEHOLDER ? "Large file (stored)" : entry.content.length.toLocaleString() + " chars"}</span>
                         {isTimeline && <span style={{ background: "rgba(59,130,246,0.2)", color: "#93c5fd", fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "9999px", flexShrink: 0 }}>VERBATIM</span>}
                       </div>
                       <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
