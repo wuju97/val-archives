@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { hasGeminiKey, geminiSemanticSearch } from "../../lib/geminiEngine";
 import {
-  loadArchive, saveArchive, updateEntry, deleteEntry,
+  loadArchive, loadArchiveAsync, saveArchive, updateEntry, deleteEntry,
   regenerateMasterPrompt, CATEGORY_LABELS, CATEGORY_ICONS, StoryCategory,
 } from "@/lib/archiveEngine";
 
@@ -21,7 +21,14 @@ export default function PensievePage() {
   const [editingText, setEditingText] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  useEffect(() => { setArchive(loadArchive()); }, []);
+  useEffect(() => {
+    const sync = loadArchive();
+    if (sync.entries.length > 0 || (sync.canonCategories ?? []).length > 0) {
+      setArchive(sync);
+    } else {
+      loadArchiveAsync().then(data => { if (data) setArchive(data); });
+    }
+  }, []);
 
   const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as StoryCategory[];
   const categoryCounts: Partial<Record<StoryCategory, number>> = {};
