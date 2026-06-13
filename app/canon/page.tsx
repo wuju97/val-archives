@@ -89,33 +89,43 @@ export default function CanonPage() {
         const ext = file.name.split(".").pop()?.toLowerCase();
 
         if (ext === "pdf") {
-          // Max 50MB for PDF processing
-          if (file.size > 50 * 1024 * 1024) {
-            content = `[PDF: ${file.name} — File too large (${(file.size/1024/1024).toFixed(1)}MB). Please copy and paste the text content via the Copy & Paste tab.]`;
-          } else {
-            content = await new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                try {
-                  const raw = e.target?.result as string;
-                  const lines = raw
-                    .replace(/[^\x20-\x7E\n]/g, " ")
-                    .split("\n")
-                    .map(l => l.trim())
-                    .filter(l => l.length > 8 && /[a-zA-Z]{3,}/.test(l) && !/^[\d\s./\\()*<>{}[\]]+$/.test(l));
-                  if (lines.length > 3) {
-                    resolve(lines.join("\n"));
-                  } else {
-                    resolve(`[PDF: ${file.name} — Text could not be extracted automatically. Please copy and paste the text content via the Copy & Paste tab.]`);
-                  }
-                } catch {
-                  resolve(`[PDF: ${file.name} — Could not read file.]`);
+          content = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+              try {
+                const typedArray = new Uint8Array(e.target?.result as ArrayBuffer);
+                // Load PDF.js from CDN
+                const pdfjsLib = await import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" as any);
+                pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+                const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
+                const pages: string[] = [];
+                for (let i = 1; i <= pdf.numPages; i++) {
+                  const page = await pdf.getPage(i);
+                  const textContent = await page.getTextContent();
+                  const pageText = textContent.items
+                    .map((item: any) => item.str)
+                    .join(" ")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  if (pageText) pages.push(pageText);
                 }
-              };
-              reader.onerror = () => resolve(`[PDF: ${file.name} — File read error.]`);
-              reader.readAsText(file, "latin1");
-            });
-          }
+                const fullText = pages.join("\n\n");
+                resolve(fullText.trim() || `[PDF: ${file.name} — No text content found. This may be a scanned/image PDF.]`);
+              } catch {
+                // Fallback: basic text extraction
+                const bytes = new Uint8Array(e.target?.result as ArrayBuffer);
+                const raw = new TextDecoder("latin1").decode(bytes);
+                const lines = raw
+                  .replace(/[^\x20-\x7E\n]/g, " ")
+                  .split("\n")
+                  .map(l => l.trim())
+                  .filter(l => l.length > 8 && /[a-zA-Z]{3,}/.test(l));
+                resolve(lines.length > 3 ? lines.join("\n") : `[PDF: ${file.name} — Could not extract text. Please use Copy & Paste tab.]`);
+              }
+            };
+            reader.onerror = () => resolve(`[PDF: ${file.name} — File read error.]`);
+            reader.readAsArrayBuffer(file);
+          });
         } else {
           content = await file.text();
         }
