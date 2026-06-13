@@ -725,6 +725,11 @@ export interface ExtractedVaultEntry {
   category: string;
 }
 
+// Helper: wait ms milliseconds
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export async function geminiExtractCanonToVault(
   content: string,
   filename: string,
@@ -732,92 +737,84 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  // Split into ~3000 char chunks with overlap
-  const CHUNK_SIZE = 3000;
-  const OVERLAP = 200;
-  const chunks: string[] = [];
+  // Split into 4 large sections instead of 20 small ones
+  // This means only 4 API calls total — well within rate limits
+  const totalLen = Math.min(content.length, 60000); // cap at 60k chars
+  const sectionSize = Math.floor(totalLen / 4);
+  const sections: string[] = [
+    content.slice(0, sectionSize),
+    content.slice(sectionSize, sectionSize * 2),
+    content.slice(sectionSize * 2, sectionSize * 3),
+    content.slice(sectionSize * 3, totalLen),
+  ].filter(s => s.trim().length > 100);
 
-  for (let i = 0; i < content.length; i += CHUNK_SIZE - OVERLAP) {
-    chunks.push(content.slice(i, i + CHUNK_SIZE));
-    if (i + CHUNK_SIZE >= content.length) break;
-  }
-
-  // Process first 20 chunks max
-  const chunksToProcess = chunks.slice(0, 20);
   const allEntries: ExtractedVaultEntry[] = [];
   const seen = new Set<string>();
-  let successfulChunks = 0;
-  let lastError = "";
 
-  for (let i = 0; i < chunksToProcess.length; i++) {
+  for (let i = 0; i < sections.length; i++) {
     if (onProgress) {
-      onProgress(`Reading section ${i + 1} of ${chunksToProcess.length}... (${allEntries.length} facts found so far)`);
+      onProgress(`Analysing section ${i + 1} of ${sections.length}... (${allEntries.length} facts found so far)`);
     }
 
-    const chunk = chunksToProcess[i];
+    const section = sections[i];
 
     const prompt = `You are extracting facts from a story/book to build a story archive database.
 
 Source: "${filename}"
-Section ${i + 1}:
+Section ${i + 1} of ${sections.length}:
 ---
-${chunk}
+${section}
 ---
 
-Extract specific, concrete facts. Include:
-- Named characters and their descriptions or traits
+Extract every specific, named fact worth storing. Include:
+- Named characters: who they are, appearance, role, personality, abilities
 - Named locations and what they are
-- Relationships between named people
-- Magic, spells, special abilities
-- Organizations or groups
-- Important events
-- World facts and lore
-- Rules of the world
+- Relationships between named characters
+- Magic, spells, special abilities, powers
+- Organizations, schools, groups
+- Key events that happened
+- World rules and lore
+- Items and artifacts
+- Creatures
 
-Each entry = one clear sentence.
+Each entry = one clear self-contained sentence or short description.
 
-Categories to use:
+Categories:
 characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society
 
-Return ONLY valid JSON array, nothing else:
-[{"text": "Harry Potter is a young wizard who survived Voldemort's killing curse as a baby", "category": "characters"}]
+Return ONLY a JSON array, no other text:
+[{"text": "fact here", "category": "category-name"}]
 
-If nothing worth extracting in this section, return: []`;
+If nothing to extract, return: []`;
 
     try {
       const result = await geminiCall(prompt);
-      // Strip any markdown fences
       const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      
-      // Try to find JSON array in the response even if there's extra text
       const jsonMatch = clean.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        lastError = `Section ${i+1}: No JSON found in response`;
-        continue;
-      }
-      
-      const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
-      successfulChunks++;
-      
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (!entry.text || !entry.category) continue;
-          const key = entry.text.trim().toLowerCase().slice(0, 80);
-          if (!seen.has(key) && entry.text.trim().length > 10) {
-            seen.add(key);
-            allEntries.push({ text: entry.text.trim(), category: entry.category });
+      if (jsonMatch) {
+        const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) {
+          for (const entry of parsed) {
+            if (!entry.text || !entry.category) continue;
+            const key = entry.text.trim().toLowerCase().slice(0, 80);
+            if (!seen.has(key) && entry.text.trim().length > 10) {
+              seen.add(key);
+              allEntries.push({ text: entry.text.trim(), category: entry.category });
+            }
           }
         }
       }
     } catch (e) {
-      lastError = `Section ${i+1}: ${e instanceof Error ? e.message : "parse error"}`;
-      // Continue to next chunk
+      if (onProgress) {
+        onProgress(`Section ${i + 1} failed: ${e instanceof Error ? e.message : "error"} — continuing...`);
+      }
     }
-  }
 
-  // If we got nothing and had errors, surface the last error
-  if (allEntries.length === 0 && lastError && onProgress) {
-    onProgress(`Done — 0 entries found. Last error: ${lastError}`);
+    // Wait 5 seconds between calls to avoid rate limiting
+    if (i < sections.length - 1) {
+      if (onProgress) onProgress(`Waiting before next section...`);
+      await wait(5000);
+    }
   }
 
   return allEntries;
