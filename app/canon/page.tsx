@@ -89,13 +89,33 @@ export default function CanonPage() {
         const ext = file.name.split(".").pop()?.toLowerCase();
 
         if (ext === "pdf") {
-          // Store filename as reference — PDF text extraction is unreliable in browser
-          // User can paste the actual content via Copy & Paste tab
-          content = `[PDF File: ${file.name}]\n\nThis PDF has been registered in your Canon Archives. To add the actual text content, open the PDF, select all text (Ctrl+A), copy it, and paste it into the Copy & Paste tab.\n\nFile size: ${(file.size / 1024).toFixed(1)} KB`;
-          const updated = addCanonEntry(a, activeCatId, file.name, content);
-          saveArchive(updated); setArchive(updated); a = updated;
-          flash(`✓ "${file.name}" registered — paste text content via Copy & Paste tab`);
-          continue;
+          // Max 50MB for PDF processing
+          if (file.size > 50 * 1024 * 1024) {
+            content = `[PDF: ${file.name} — File too large (${(file.size/1024/1024).toFixed(1)}MB). Please copy and paste the text content via the Copy & Paste tab.]`;
+          } else {
+            content = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                try {
+                  const raw = e.target?.result as string;
+                  const lines = raw
+                    .replace(/[^\x20-\x7E\n]/g, " ")
+                    .split("\n")
+                    .map(l => l.trim())
+                    .filter(l => l.length > 8 && /[a-zA-Z]{3,}/.test(l) && !/^[\d\s./\\()*<>{}[\]]+$/.test(l));
+                  if (lines.length > 3) {
+                    resolve(lines.join("\n"));
+                  } else {
+                    resolve(`[PDF: ${file.name} — Text could not be extracted automatically. Please copy and paste the text content via the Copy & Paste tab.]`);
+                  }
+                } catch {
+                  resolve(`[PDF: ${file.name} — Could not read file.]`);
+                }
+              };
+              reader.onerror = () => resolve(`[PDF: ${file.name} — File read error.]`);
+              reader.readAsText(file, "latin1");
+            });
+          }
         } else {
           content = await file.text();
         }
