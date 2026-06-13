@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { hasGeminiKey, geminiQualityCall } from "@/lib/geminiEngine";
+import { hasGeminiKey, hasGeminiQualityKey, geminiQualityCall } from "@/lib/geminiEngine";
 import { loadArchive, saveArchive, getPriorityLevel, setPriority } from "@/lib/archiveEngine";
 
 // ─── Storage (separate from vault — stored in localStorage under its own key) ─
@@ -220,7 +220,7 @@ export default function RuleBookPage() {
 
   // ─── AI Refine (additive only — never touches original) ──────────────────────
   async function handleRefine(rule: RulePrompt) {
-    if (!hasGeminiKey()) return;
+    if (!hasGeminiQualityKey()) return;
     setRefiningId(rule.id);
 
     const fullContent = await getFullContent(rule);
@@ -374,7 +374,7 @@ export default function RuleBookPage() {
                       }} style={{ ...S.btn, background: "var(--va-border)", color: "var(--va-text-muted)", padding: "0.375rem 0.625rem", fontSize: "0.75rem" }}>
                         View
                       </button>
-                      {hasGeminiKey() && (
+                      {hasGeminiQualityKey() && (
                         <button onClick={() => handleRefine(rule)} disabled={refiningId === rule.id}
                           style={{ ...S.btn, background: "#7c3aed", color: "white", padding: "0.375rem 0.625rem", fontSize: "0.75rem", opacity: refiningId === rule.id ? 0.6 : 1 }}>
                           {refiningId === rule.id ? "✨..." : "✨ Refine"}
