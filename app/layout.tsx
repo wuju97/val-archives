@@ -38,6 +38,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
 (function(){
+  // ── Theme ──────────────────────────────────────────────────────────────────
   function va(){
     try{
       var t=JSON.parse(localStorage.getItem('valArchivesTheme')||'{}');
@@ -56,28 +57,62 @@ export default function RootLayout({
     }catch(e){}
   }
   va();
-  // Sync IndexedDB back to localStorage on load (handles large vaults)
+
+  // ── Restore ALL vault keys from IndexedDB → localStorage ──────────────────
+  // This runs whenever localStorage is missing vault data (quota wipe, clear, etc.)
+  // It restores every key that starts with "valArchivesData_" or matches known
+  // index/dashboard keys — covering the full vault switcher system.
   (function syncFromIDB(){
     try {
-      if(typeof indexedDB === "undefined") return;
-      var STORAGE_KEY = "valArchivesData_v2";
-      // Only sync if localStorage is empty/missing
-      if(localStorage.getItem(STORAGE_KEY)) return;
-      var req = indexedDB.open("valArchivesDB",1);
+      if(typeof indexedDB === 'undefined') return;
+
+      var req = indexedDB.open('valArchivesDB', 1);
       req.onsuccess = function(e){
         var db = e.target.result;
-        if(!db.objectStoreNames.contains("vaults")) return;
-        var tx = db.transaction("vaults","readonly");
-        var getReq = tx.objectStore("vaults").get(STORAGE_KEY);
-        getReq.onsuccess = function(){
-          if(getReq.result){
-            try{ localStorage.setItem(STORAGE_KEY, getReq.result); }catch(e){}
-          }
+        if(!db.objectStoreNames.contains('vaults')) return;
+        var tx = db.transaction('vaults', 'readonly');
+        var store = tx.objectStore('vaults');
+
+        // Get all keys stored in IndexedDB
+        var keysReq = store.getAllKeys();
+        keysReq.onsuccess = function(){
+          var allKeys = keysReq.result || [];
+          allKeys.forEach(function(k){
+            // Only restore vault data and index keys — skip unrelated keys
+            if(
+              typeof k === 'string' && (
+                k.startsWith('valArchivesData_') ||
+                k === 'valArchivesVaultIndex' ||
+                k === 'valArchivesDashboardCards'
+              )
+            ){
+              // Only restore if localStorage is missing or empty for this key
+              try {
+                var existing = localStorage.getItem(k);
+                if(existing && existing.length > 10) return; // already there
+              } catch(e){}
+
+              var getReq = store.get(k);
+              getReq.onsuccess = function(){
+                if(getReq.result){
+                  try{ localStorage.setItem(k, getReq.result); }
+                  catch(quota){
+                    // localStorage still full — can't restore this key
+                    // Pages using loadVaultByIdAsync() will fall back to IDB directly
+                    console.warn('[ValArchives] Could not restore', k, 'to localStorage — quota exceeded');
+                  }
+                }
+              };
+            }
+          });
         };
       };
-    } catch(e){}
+    } catch(e){
+      console.warn('[ValArchives] IDB sync failed:', e);
+    }
   })();
-  // Migrate localStorage to IndexedDB on first run
+
+  // ── Migrate localStorage → IndexedDB on first run ─────────────────────────
   (function migrate(){
     try {
       if(localStorage.getItem('valArchives_idb_migrated')==='1') return;
@@ -100,7 +135,7 @@ export default function RootLayout({
       };
     } catch(e){}
   })();
-  // Reapply after any dynamic content loads
+
   document.addEventListener('DOMContentLoaded', va);
   window.addEventListener('popstate', va);
 })();

@@ -204,7 +204,7 @@ export interface TimelineBranch {
   name: string;
   content: string;
   createdAt: string;
-  isActive: boolean; // green button — only one active at a time
+  isActive: boolean;
   parentSaveId: string;
 }
 
@@ -213,7 +213,7 @@ export interface TimelineSave {
   name: string;
   content: string;
   createdAt: string;
-  isActive: boolean; // green button
+  isActive: boolean;
   branches: TimelineBranch[];
 }
 
@@ -237,13 +237,13 @@ export interface ArchiveData {
   masterPrompt: string;
   savePrompt: string;
   customPrompt: string;
-  activePriority: string | null;  // "red" priority — single
-  bluePriorities: string[];       // "blue" priorities — multiple
+  activePriority: string | null;
+  bluePriorities: string[];
   inbox: string[];
   customTabs: string[];
   canonCategories: CanonCategory[];
   timelineSaves: TimelineSave[];
-  activeTimelineId: string | null; // id of active save or branch
+  activeTimelineId: string | null;
 }
 
 export interface ContradictionResult {
@@ -253,6 +253,39 @@ export interface ContradictionResult {
 }
 
 const STORAGE_KEY = "valArchivesData_v2";
+
+// ─── IndexedDB helpers ────────────────────────────────────────────────────────
+
+function openIDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") { reject(new Error("No IDB")); return; }
+    const req = indexedDB.open("valArchivesDB", 1);
+    req.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains("vaults")) db.createObjectStore("vaults");
+    };
+    req.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbPut(db: IDBDatabase, key: string, value: string): void {
+  try {
+    const tx = db.transaction("vaults", "readwrite");
+    tx.objectStore("vaults").put(value, key);
+  } catch {}
+}
+
+function idbGet(db: IDBDatabase, key: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction("vaults", "readonly");
+      const req = tx.objectStore("vaults").get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
 
 // ─── Contradiction Detection ──────────────────────────────────────────────────
 
@@ -304,11 +337,9 @@ export function compileMasterPrompt(archive: ArchiveData): string {
   const sections: string[] = [];
   const blues = archive.bluePriorities ?? [];
 
-  // Identify red priority categories
   const redCats = MASTER_PROMPT_ORDER.filter(c =>
     archive.activePriority === `story-${c}`
   );
-  // Identify blue priority categories
   const blueCats = MASTER_PROMPT_ORDER.filter(c =>
     blues.includes(`story-${c}`)
   );
@@ -318,14 +349,12 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     `You are operating within a structured story archive. Use ALL information below as absolute authoritative context. Maintain perfect internal consistency. Prioritize established facts. Never contradict stored information unless explicitly instructed.`
   );
 
-  // RULES always come first (Rule Book)
   const ruleEntries = deduped.filter(e => e.category === "rules");
   if (ruleEntries.length > 0) {
     const body = ruleEntries.map(e => `- ${e.text.trim()}`).join("\n");
     sections.push(`## 📋 CORE RULES — ABSOLUTE PRIORITY\n⚠️ These rules override everything else. Follow them without exception.\n${body}`);
   }
 
-  // RED priority categories go FIRST with strong emphasis
   if (redCats.length > 0) {
     for (const category of redCats) {
       const entries = deduped.filter(e => e.category === category);
@@ -335,7 +364,6 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     }
   }
 
-  // Canon Archives red priority
   if (archive.activePriority === "canon") {
     const allCanon = (archive.canonCategories ?? []).flatMap(c => c.entries.map(e => `[${c.name}] ${e.content.slice(0, 500)}`));
     if (allCanon.length > 0) {
@@ -343,7 +371,6 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     }
   }
 
-  // Canon category-level red priority
   for (const cat of (archive.canonCategories ?? [])) {
     if (archive.activePriority === `canon-${cat.id}`) {
       const content = cat.entries.map(e => `[${e.filename}] ${e.content.slice(0, 400)}`);
@@ -353,11 +380,9 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     }
   }
 
-  // BLUE priority categories — in normal order but with emphasis marker
-  // All other categories in standard order
   for (const category of MASTER_PROMPT_ORDER) {
-    if (category === "rules") continue; // already handled
-    if (redCats.includes(category)) continue; // already handled
+    if (category === "rules") continue;
+    if (redCats.includes(category)) continue;
     const entries = deduped.filter(e => e.category === category);
     if (entries.length === 0) continue;
     const icon = CATEGORY_ICONS[category];
@@ -370,7 +395,6 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     sections.push(`${header}\n${body}`);
   }
 
-  // Canon Archives blue priority (whole tab)
   if (blues.includes("canon")) {
     const allCanon = (archive.canonCategories ?? []).flatMap(c => c.entries.map(e => `[${c.name}] ${e.content.slice(0, 300)}`));
     if (allCanon.length > 0) {
@@ -378,7 +402,6 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     }
   }
 
-  // Canon category-level blue priorities
   for (const cat of (archive.canonCategories ?? [])) {
     if (blues.includes(`canon-${cat.id}`)) {
       const content = cat.entries.map(e => `[${e.filename}] ${e.content.slice(0, 300)}`);
@@ -388,7 +411,6 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     }
   }
 
-  // REPEAT red priority at the bottom for maximum emphasis
   if (redCats.length > 0 || archive.activePriority === "canon") {
     sections.push(`## ⚡ PRIORITY REMINDER`);
     if (redCats.length > 0) {
@@ -401,10 +423,8 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     }
   }
 
-  // Custom Tab entries — grouped by tab name, fed with tab name as header
   const customEntries = deduped.filter(e => e.category === "custom");
   if (customEntries.length > 0) {
-    // Group by tab name prefix [TabName]
     const tabGroups: Record<string, string[]> = {};
     for (const entry of customEntries) {
       const match = entry.text.match(/^\[([^\]]+)\] ([\s\S]+)$/);
@@ -423,7 +443,6 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     }
   }
 
-  // Active Timeline Save
   const activeTimeline = getActiveTimelineContent(archive);
   if (activeTimeline) {
     sections.push(`## 🟢 ACTIVE TIMELINE — ${activeTimeline.name}\n⚡ This is the current active save. All responses must continue from this exact point in the story.\n\n${activeTimeline.content}`);
@@ -517,7 +536,6 @@ export function regenerateMasterPrompt(archive: ArchiveData): ArchiveData {
     return true;
   });
 
-  // Build priority context for master prompt
   let priorityContext = "";
   if (archive.activePriority || (archive.bluePriorities?.length ?? 0) > 0) {
     const lines: string[] = [];
@@ -545,19 +563,23 @@ export function regenerateMasterPrompt(archive: ArchiveData): ArchiveData {
   };
 }
 
+// ─── saveArchive (legacy single-vault) ───────────────────────────────────────
+// ALWAYS writes localStorage first. IndexedDB is a backup mirror only.
+// If localStorage is full, strips large canon content and saves stripped
+// version to localStorage so pages never load blank.
 export function saveArchive(data: ArchiveData): void {
   if (typeof window === "undefined") return;
   const prepared = regenerateMasterPrompt(data);
   prepared.lastSaved = new Date().toISOString();
   const serialized = JSON.stringify(prepared);
 
-  // Try localStorage first
   let savedToLocal = false;
+
+  // Attempt 1: save full data
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
     savedToLocal = true;
   } catch {
-    // localStorage quota exceeded — clear old entry and retry
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.setItem(STORAGE_KEY, serialized);
@@ -567,77 +589,62 @@ export function saveArchive(data: ArchiveData): void {
     }
   }
 
-  // Always save to IndexedDB (no size limit)
-  if (typeof indexedDB !== "undefined") {
+  // Attempt 2: strip large canon entries and retry
+  if (!savedToLocal) {
+    const stripped: ArchiveData = {
+      ...prepared,
+      canonCategories: (prepared.canonCategories ?? []).map(cat => ({
+        ...cat,
+        entries: cat.entries.map(e => ({
+          ...e,
+          content: e.content.length > 500
+            ? e.content.slice(0, 500) + `\n\n[Full content stored separately — id: ${e.id}]`
+            : e.content,
+        })),
+      })),
+    };
     try {
-      const req = indexedDB.open("valArchivesDB", 1);
-      req.onupgradeneeded = (e) => {
-        const db = (e.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains("vaults")) db.createObjectStore("vaults");
-      };
-      req.onsuccess = (e) => {
-        const db = (e.target as IDBOpenDBRequest).result;
-        const tx = db.transaction("vaults", "readwrite");
-        tx.objectStore("vaults").put(serialized, STORAGE_KEY);
-      };
-    } catch {}
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
+      savedToLocal = true;
+    } catch {
+      console.error("[ValArchives] CRITICAL: Cannot write to localStorage.");
+    }
   }
+
+  // Always mirror full data to IndexedDB as backup
+  openIDB().then(db => idbPut(db, STORAGE_KEY, serialized)).catch(() => {});
 }
 
 export function loadArchive(): ArchiveData {
   if (typeof window === "undefined") return createEmptyArchive();
-  // Try localStorage first (fast)
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try { return JSON.parse(saved) as ArchiveData; } catch {}
   }
-  // Return empty — IndexedDB load is async and handled separately
   return createEmptyArchive();
 }
-// Async version that checks IndexedDB if localStorage is empty/missing
+
 export async function loadArchiveAsync(): Promise<ArchiveData> {
   if (typeof window === "undefined") return createEmptyArchive();
 
-  // Try localStorage first (fast)
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try { return JSON.parse(saved) as ArchiveData; } catch {}
   }
 
-  // Try IndexedDB
-  if (typeof indexedDB !== "undefined") {
-    return new Promise((resolve) => {
-      const req = indexedDB.open("valArchivesDB", 1);
-      req.onupgradeneeded = (e) => {
-        const db = (e.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains("vaults")) db.createObjectStore("vaults");
-      };
-      req.onsuccess = (e) => {
-        const db = (e.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains("vaults")) { resolve(createEmptyArchive()); return; }
-        const tx = db.transaction("vaults", "readonly");
-        const getReq = tx.objectStore("vaults").get(STORAGE_KEY);
-        getReq.onsuccess = () => {
-          if (getReq.result) {
-            try {
-              const data = JSON.parse(getReq.result) as ArchiveData;
-              // Restore to localStorage for future fast access (if it fits)
-              try { localStorage.setItem(STORAGE_KEY, getReq.result); } catch {}
-              resolve(data);
-              return;
-            } catch {}
-          }
-          resolve(createEmptyArchive());
-        };
-        getReq.onerror = () => resolve(createEmptyArchive());
-      };
-      req.onerror = () => resolve(createEmptyArchive());
-    });
-  }
+  try {
+    const db = await openIDB();
+    const result = await idbGet(db, STORAGE_KEY);
+    if (result) {
+      const data = JSON.parse(result) as ArchiveData;
+      try { localStorage.setItem(STORAGE_KEY, result); } catch {}
+      return data;
+    }
+  } catch {}
 
   return createEmptyArchive();
 }
-
 
 export function clearArchive(): void {
   if (typeof window === "undefined") return;
@@ -709,7 +716,6 @@ export function removeCustomTab(archive: ArchiveData, tabName: string): ArchiveD
     ),
   };
 }
-
 
 // ─── Timeline Save Management ─────────────────────────────────────────────────
 
@@ -785,12 +791,10 @@ export function renameTimelineBranch(archive: ArchiveData, saveId: string, branc
   };
 }
 
-// Set active timeline — only one at a time (save or branch)
 export function setActiveTimeline(archive: ArchiveData, id: string | null): ArchiveData {
   return { ...archive, activeTimelineId: id };
 }
 
-// Get the active timeline content
 export function getActiveTimelineContent(archive: ArchiveData): { name: string; content: string } | null {
   if (!archive.activeTimelineId) return null;
   for (const save of (archive.timelineSaves ?? [])) {
@@ -801,7 +805,6 @@ export function getActiveTimelineContent(archive: ArchiveData): { name: string; 
   }
   return null;
 }
-
 
 // ─── Priority System ──────────────────────────────────────────────────────────
 
@@ -887,7 +890,6 @@ export function removeCanonEntry(archive: ArchiveData, categoryId: string, entry
   };
 }
 
-
 // ─── Final Prompt Compiler ────────────────────────────────────────────────────
 
 export function compileFinalPrompt(
@@ -937,7 +939,6 @@ export function exportArchiveAsJSON(archive: ArchiveData): string {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // VAULT SWITCHER SYSTEM
-// Each vault is a separate ArchiveData stored under its own localStorage key
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface VaultMeta {
@@ -972,8 +973,6 @@ export function getActiveVaultId(): string | null {
 export function setActiveVaultId(id: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(ACTIVE_VAULT_KEY, id);
-  // Update STORAGE_KEY to point to this vault
-  localStorage.setItem("valArchivesActiveVault", id);
 }
 
 export function getVaultStorageKey(vaultId: string): string {
@@ -1009,10 +1008,9 @@ export function renameVault(vaultId: string, name: string): void {
     v.id === vaultId ? { ...v, name: name.trim() } : v
   );
   setVaultIndex(index);
-  // Also update archiveName inside the vault
-  const key = getVaultStorageKey(vaultId);
   if (typeof window !== "undefined") {
     try {
+      const key = getVaultStorageKey(vaultId);
       const raw = localStorage.getItem(key);
       if (raw) {
         const data = JSON.parse(raw);
@@ -1032,89 +1030,93 @@ export function loadVaultById(vaultId: string): ArchiveData {
   return createEmptyArchive();
 }
 
-// Async version that checks IndexedDB — use this for canon-heavy vaults
 export async function loadVaultByIdAsync(vaultId: string): Promise<ArchiveData> {
   if (typeof window === "undefined") return createEmptyArchive();
-  
-  // Try localStorage first (fast)
+
+  // Try localStorage first
   try {
     const raw = localStorage.getItem(getVaultStorageKey(vaultId));
     if (raw) return { ...createEmptyArchive(), ...JSON.parse(raw) };
   } catch {}
-  
-  // Try IndexedDB (handles large data)
+
+  // Fall back to IndexedDB
   try {
-    if (typeof indexedDB !== "undefined") {
-      return new Promise((resolve) => {
-        const req = indexedDB.open("valArchivesDB", 1);
-        req.onsuccess = (e) => {
-          const db = (e.target as IDBOpenDBRequest).result;
-          if (!db.objectStoreNames.contains("vaults")) {
-            resolve(createEmptyArchive());
-            return;
-          }
-          const tx = db.transaction("vaults", "readonly");
-          const getReq = tx.objectStore("vaults").get(getVaultStorageKey(vaultId));
-          getReq.onsuccess = () => {
-            if (getReq.result) {
-              try {
-                resolve({ ...createEmptyArchive(), ...JSON.parse(getReq.result) });
-                return;
-              } catch {}
-            }
-            resolve(createEmptyArchive());
-          };
-          getReq.onerror = () => resolve(createEmptyArchive());
-        };
-        req.onerror = () => resolve(createEmptyArchive());
-      });
+    const db = await openIDB();
+    const result = await idbGet(db, getVaultStorageKey(vaultId));
+    if (result) {
+      // Restore to localStorage for future fast access
+      try { localStorage.setItem(getVaultStorageKey(vaultId), result); } catch {}
+      return { ...createEmptyArchive(), ...JSON.parse(result) };
     }
   } catch {}
-  
+
   return createEmptyArchive();
 }
 
+// ─── saveVaultById ────────────────────────────────────────────────────────────
+// ALWAYS writes localStorage first — this is the primary store.
+// IndexedDB is a mirror/backup ONLY, never the sole source.
+// If localStorage is full, strips large canon content, saves stripped version
+// to localStorage so pages never load blank, saves full to IDB.
 export function saveVaultById(vaultId: string, data: ArchiveData): void {
   if (typeof window === "undefined") return;
   const prepared = { ...data, lastSaved: new Date().toISOString() };
-  const serialized = JSON.stringify(prepared);
-  
-  // Always try localStorage first (fast)
+  const storageKey = getVaultStorageKey(vaultId);
+  const fullSerialized = JSON.stringify(prepared);
+
   let savedToLocal = false;
+
+  // Attempt 1: save full data
   try {
-    localStorage.setItem(getVaultStorageKey(vaultId), serialized);
+    localStorage.setItem(storageKey, fullSerialized);
     savedToLocal = true;
   } catch {
-    // localStorage full — remove old entry and retry, then fall back to IndexedDB only
     try {
-      localStorage.removeItem(getVaultStorageKey(vaultId));
-      localStorage.setItem(getVaultStorageKey(vaultId), serialized);
+      localStorage.removeItem(storageKey);
+      localStorage.setItem(storageKey, fullSerialized);
       savedToLocal = true;
     } catch {
       savedToLocal = false;
     }
   }
-  
-  // Always save to IndexedDB (handles large files)
-  if (typeof indexedDB !== "undefined") {
-    const dbName = "valArchivesDB";
-    const req = indexedDB.open(dbName, 1);
-    req.onupgradeneeded = (e) => {
-      const db = (e.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains("vaults")) db.createObjectStore("vaults");
+
+  // Attempt 2: strip large canon content and retry
+  if (!savedToLocal) {
+    const stripped: ArchiveData = {
+      ...prepared,
+      canonCategories: (prepared.canonCategories ?? []).map(cat => ({
+        ...cat,
+        entries: cat.entries.map(e => ({
+          ...e,
+          content: e.content.length > 500
+            ? e.content.slice(0, 500) + `\n\n[Full content stored separately — id: ${e.id}]`
+            : e.content,
+        })),
+      })),
     };
-    req.onsuccess = (e) => {
-      const db = (e.target as IDBOpenDBRequest).result;
-      const tx = db.transaction("vaults", "readwrite");
-      tx.objectStore("vaults").put(serialized, getVaultStorageKey(vaultId));
-    };
+    const strippedSerialized = JSON.stringify(stripped);
+    try {
+      localStorage.removeItem(storageKey);
+      localStorage.setItem(storageKey, strippedSerialized);
+      savedToLocal = true;
+      console.warn("[ValArchives] localStorage full — canon content stripped. Full data saved to IndexedDB.");
+    } catch {
+      console.error("[ValArchives] CRITICAL: Cannot write vault to localStorage. Data may be lost on reload.");
+    }
   }
-  
-  // Update meta (always localStorage - small data)
-  const index = getVaultIndex().map(v =>
-    v.id === vaultId ? { ...v, lastSaved: prepared.lastSaved, entryCount: data.entries.length, name: data.archiveName } : v
-  );
-  setVaultIndex(index);
+
+  // Always mirror full data to IndexedDB as backup
+  openIDB().then(db => idbPut(db, storageKey, fullSerialized)).catch(() => {});
+
+  // Update vault index meta
+  try {
+    const index = getVaultIndex().map(v =>
+      v.id === vaultId
+        ? { ...v, lastSaved: prepared.lastSaved, entryCount: data.entries.length, name: data.archiveName }
+        : v
+    );
+    setVaultIndex(index);
+  } catch {}
 }
 
 export function updateVaultMeta(vaultId: string): void {
@@ -1128,7 +1130,6 @@ export function updateVaultMeta(vaultId: string): void {
   } catch {}
 }
 
-// Export vault as downloadable JSON
 export function exportVault(vaultId: string): void {
   if (typeof window === "undefined") return;
   const data = loadVaultById(vaultId);
@@ -1143,11 +1144,9 @@ export function exportVault(vaultId: string): void {
   URL.revokeObjectURL(url);
 }
 
-// Import vault from JSON file — returns the new vault id
 export function importVault(jsonString: string): VaultMeta | null {
   try {
     const parsed = JSON.parse(jsonString);
-    // Support both raw ArchiveData and wrapped export format
     const data: ArchiveData = parsed.vaultData ?? parsed;
     const meta: VaultMeta | undefined = parsed.vaultMeta;
     const id = crypto.randomUUID();
@@ -1169,14 +1168,11 @@ export function importVault(jsonString: string): VaultMeta | null {
   } catch { return null; }
 }
 
-// Migrate old single-vault data to new system if needed
 export function migrateOldVault(): void {
   if (typeof window === "undefined") return;
   const index = getVaultIndex();
-  // Only migrate if no vaults exist yet
   if (index.length > 0) return;
 
-  // Try all possible old storage keys
   const possibleKeys = [
     "valArchivesData_v2",
     "valArchivesData",
@@ -1190,7 +1186,6 @@ export function migrateOldVault(): void {
     if (val && val.length > 10) { oldData = val; break; }
   }
 
-  // Also check all localStorage keys for anything that looks like archive data
   if (!oldData) {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -1206,7 +1201,7 @@ export function migrateOldVault(): void {
 
   try {
     const data: ArchiveData = JSON.parse(oldData);
-    if (!data.entries && !data.archiveName) return; // not valid archive data
+    if (!data.entries && !data.archiveName) return;
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const meta: VaultMeta = {
@@ -1224,7 +1219,6 @@ export function migrateOldVault(): void {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // UNDO / REDO HISTORY SYSTEM
-// Keeps last 20 archive states in localStorage
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const HISTORY_KEY = "valArchivesHistory";
@@ -1239,7 +1233,6 @@ export function pushHistory(state: ArchiveData): void {
     history.push(state);
     if (history.length > MAX_HISTORY) history.shift();
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    // Clear future when new action is taken
     localStorage.removeItem(FUTURE_KEY);
   } catch {}
 }
@@ -1252,7 +1245,6 @@ export function undoArchive(): ArchiveData | null {
     if (history.length === 0) return null;
     const previous = history.pop()!;
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    // Push current state to future
     const currentRaw = localStorage.getItem(STORAGE_KEY);
     if (currentRaw) {
       const futureRaw = localStorage.getItem(FUTURE_KEY);
@@ -1272,7 +1264,6 @@ export function redoArchive(): ArchiveData | null {
     if (future.length === 0) return null;
     const next = future.pop()!;
     localStorage.setItem(FUTURE_KEY, JSON.stringify(future));
-    // Push current to history
     const currentRaw = localStorage.getItem(STORAGE_KEY);
     if (currentRaw) {
       const raw = localStorage.getItem(HISTORY_KEY);

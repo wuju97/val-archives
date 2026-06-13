@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { hasGeminiKey, geminiCanonPlacement } from "../../lib/geminiEngine";
 import {
-  loadArchive, loadArchiveAsync, saveArchive, ArchiveData,
+  loadArchive, saveArchive, ArchiveData,
   addCanonCategory, removeCanonCategory,
   addCanonEntry, removeCanonEntry,
   getPriorityLevel, setPriority,
@@ -42,10 +42,8 @@ export default function CanonPage() {
   ];
   const activeCat = allCats.find(c => c.id === activeCatId) ?? allCats[0];
 
-  // Get entries for active category
   function getEntries() {
     if (activeCat.isBuiltin) {
-      // Built-in cats store in canonCategories with matching id
       const found = customCats.find(c => c.id === activeCatId);
       return found?.entries ?? [];
     }
@@ -57,7 +55,6 @@ export default function CanonPage() {
     setTimeout(() => setMsg(""), 6000);
   }
 
-  // Ensure a built-in category exists in storage
   function ensureBuiltin(id: string, name: string): typeof archive {
     const a = loadArchive();
     if (!(a.canonCategories ?? []).find(c => c.id === id)) {
@@ -75,11 +72,18 @@ export default function CanonPage() {
     return a;
   }
 
+  // ─── saveWithFallback ──────────────────────────────────────────────────────
+  // Just calls saveArchive — which now handles localStorage-full internally.
+  // DO NOT add a catch here that writes only to IndexedDB — that was the original bug.
+  function saveWithFallback(data: ArchiveData) {
+    saveArchive(data);
+    setArchive(data);
+  }
+
   async function handleFileUpload(files: FileList | null) {
     if (!files || !activeCatId) return;
     setImporting(true);
 
-    const builtin = BUILTIN_CATEGORIES.find(b => b.id === activeCatId);
     const catName = activeCat.name;
     let a = ensureBuiltin(activeCatId, catName);
 
@@ -89,7 +93,6 @@ export default function CanonPage() {
         const ext = file.name.split(".").pop()?.toLowerCase();
 
         if (ext === "pdf") {
-          // Use PDF.js via CDN for reliable text extraction
           content = await new Promise<string>((resolve) => {
             const script = document.createElement("script");
             script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
@@ -125,7 +128,6 @@ export default function CanonPage() {
               reader.readAsArrayBuffer(file);
             };
             script.onerror = () => resolve(`[PDF: ${file.name} — Could not load PDF reader. Please use Copy & Paste tab.]`);
-            // Only add script if not already loaded
             if (!(window as any).pdfjsLib) {
               document.head.appendChild(script);
             } else {
@@ -137,8 +139,7 @@ export default function CanonPage() {
         }
 
         const updated = addCanonEntry(a, activeCatId, file.name, content);
-        saveArchive(updated);
-        setArchive(updated);
+        saveWithFallback(updated);
         a = updated;
         flash(`✓ "${file.name}" added to ${catName}`);
       } catch (err) {
@@ -147,28 +148,6 @@ export default function CanonPage() {
     }
     setImporting(false);
     if (fileRef.current) fileRef.current.value = "";
-  }
-
-  function saveWithFallback(data: ArchiveData) {
-    try {
-      saveArchive(data);
-    } catch {
-      // localStorage full — save directly to IndexedDB
-      const vaultKey = "valArchivesData_v2";
-      const serialized = JSON.stringify(data);
-      if (typeof indexedDB !== "undefined") {
-        const req = indexedDB.open("valArchivesDB", 1);
-        req.onupgradeneeded = (e) => {
-          (e.target as IDBOpenDBRequest).result.createObjectStore("vaults");
-        };
-        req.onsuccess = (e) => {
-          const db = (e.target as IDBOpenDBRequest).result;
-          const tx = db.transaction("vaults", "readwrite");
-          tx.objectStore("vaults").put(serialized, vaultKey);
-        };
-      }
-    }
-    setArchive(data);
   }
 
   function handlePaste() {
@@ -180,7 +159,6 @@ export default function CanonPage() {
     saveWithFallback(updated);
     setPasteText(""); setPasteTitle("");
     flash(`✓ "${title}" added to ${catName}`);
-    // Trigger placement analysis
     if (hasGeminiKey()) {
       const existingEntries = (updated.canonCategories ?? [])
         .find(c => c.id === activeCatId)?.entries
@@ -242,10 +220,6 @@ export default function CanonPage() {
   const priorityBorder = (id: string) => {
     const p = getPriorityLevel(archive, id);
     return p === "none" ? "var(--va-border)" : priorityColor(id);
-  };
-  const priorityLabel = (id: string) => {
-    const p = getPriorityLevel(archive, id);
-    return p === "red" ? "🔴" : p === "blue" ? "🔵" : "○";
   };
   const canonPriority = getPriorityLevel(archive, "canon");
 
@@ -363,7 +337,6 @@ export default function CanonPage() {
         {/* MAIN */}
         <main style={{ flex: 1, padding: "1.5rem 2rem", maxWidth: "900px" }}>
 
-          {/* Category header */}
           <div style={{ marginBottom: "1.25rem" }}>
             <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>
               {activeCat.icon} {activeCat.name}
@@ -381,7 +354,6 @@ export default function CanonPage() {
             </div>
           )}
 
-          {/* Input area based on category type */}
           <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem", marginBottom: "1.5rem" }}>
 
             {/* PDF Files */}
@@ -440,7 +412,7 @@ export default function CanonPage() {
               </div>
             )}
 
-            {/* Timeline Events — special */}
+            {/* Timeline Events */}
             {activeCatId === "timeline-events" && (
               <div>
                 <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: "0.5rem", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.8rem", color: "#93c5fd" }}>
@@ -462,12 +434,10 @@ export default function CanonPage() {
               </div>
             )}
 
-            {/* Custom categories — show all input types */}
+            {/* Custom categories */}
             {!BUILTIN_CATEGORIES.find(b => b.id === activeCatId) && (
               <div>
                 <p style={{ fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.75rem" }}>Add to {activeCat.name}</p>
-
-                {/* File upload */}
                 <div onClick={() => fileRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--va-accent)"; }}
                   onDragLeave={(e) => { e.currentTarget.style.borderColor = "var(--va-border)"; }}
@@ -476,7 +446,6 @@ export default function CanonPage() {
                   <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>{importing ? "⏳ Reading..." : "📁 Click to upload file (PDF, TXT, MD)"}</p>
                 </div>
                 <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple style={{ display: "none" }} onChange={(e) => handleFileUpload(e.target.files)} />
-
                 <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1rem" }}>
                   <input value={pasteTitle} onChange={(e) => setPasteTitle(e.target.value)}
                     placeholder="Title (optional)..."
