@@ -67,7 +67,7 @@ export async function geminiCall(
       model: GROQ_MODEL,
       messages,
       temperature: 0.7,
-      max_tokens: 4096,
+      max_tokens: 8192,
     }),
   });
 
@@ -710,7 +710,8 @@ export async function geminiExtractCanonToVault(
   if (!hasGeminiKey()) return [];
 
   const totalLen = content.length; // no cap — process full file
-  const NUM_SECTIONS = Math.max(5, Math.ceil(totalLen / 15000));
+  // Use 8 fixed sections — large enough for good coverage, few enough to avoid rate limits
+  const NUM_SECTIONS = 8;
   const sectionSize = Math.floor(totalLen / NUM_SECTIONS);
   const sections: string[] = [];
   for (let i = 0; i < NUM_SECTIONS; i++) {
