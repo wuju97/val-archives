@@ -56,6 +56,27 @@ export default function RootLayout({
     }catch(e){}
   }
   va();
+  // Sync IndexedDB back to localStorage on load (handles large vaults)
+  (function syncFromIDB(){
+    try {
+      if(typeof indexedDB === "undefined") return;
+      var STORAGE_KEY = "valArchivesData_v2";
+      // Only sync if localStorage is empty/missing
+      if(localStorage.getItem(STORAGE_KEY)) return;
+      var req = indexedDB.open("valArchivesDB",1);
+      req.onsuccess = function(e){
+        var db = e.target.result;
+        if(!db.objectStoreNames.contains("vaults")) return;
+        var tx = db.transaction("vaults","readonly");
+        var getReq = tx.objectStore("vaults").get(STORAGE_KEY);
+        getReq.onsuccess = function(){
+          if(getReq.result){
+            try{ localStorage.setItem(STORAGE_KEY, getReq.result); }catch(e){}
+          }
+        };
+      };
+    } catch(e){}
+  })();
   // Migrate localStorage to IndexedDB on first run
   (function migrate(){
     try {

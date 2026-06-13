@@ -1,10 +1,10 @@
- "use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { hasGeminiKey, geminiCanonPlacement } from "../../lib/geminiEngine";
 import {
-  loadArchive, saveArchive, ArchiveData,
+  loadArchive, loadArchiveAsync, saveArchive, ArchiveData,
   addCanonCategory, removeCanonCategory,
   addCanonEntry, removeCanonEntry,
   getPriorityLevel, setPriority,

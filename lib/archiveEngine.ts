@@ -594,6 +594,50 @@ export function loadArchive(): ArchiveData {
   // Return empty — IndexedDB load is async and handled separately
   return createEmptyArchive();
 }
+// Async version that checks IndexedDB if localStorage is empty/missing
+export async function loadArchiveAsync(): Promise<ArchiveData> {
+  if (typeof window === "undefined") return createEmptyArchive();
+
+  // Try localStorage first (fast)
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try { return JSON.parse(saved) as ArchiveData; } catch {}
+  }
+
+  // Try IndexedDB
+  if (typeof indexedDB !== "undefined") {
+    return new Promise((resolve) => {
+      const req = indexedDB.open("valArchivesDB", 1);
+      req.onupgradeneeded = (e) => {
+        const db = (e.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains("vaults")) db.createObjectStore("vaults");
+      };
+      req.onsuccess = (e) => {
+        const db = (e.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains("vaults")) { resolve(createEmptyArchive()); return; }
+        const tx = db.transaction("vaults", "readonly");
+        const getReq = tx.objectStore("vaults").get(STORAGE_KEY);
+        getReq.onsuccess = () => {
+          if (getReq.result) {
+            try {
+              const data = JSON.parse(getReq.result) as ArchiveData;
+              // Restore to localStorage for future fast access (if it fits)
+              try { localStorage.setItem(STORAGE_KEY, getReq.result); } catch {}
+              resolve(data);
+              return;
+            } catch {}
+          }
+          resolve(createEmptyArchive());
+        };
+        getReq.onerror = () => resolve(createEmptyArchive());
+      };
+      req.onerror = () => resolve(createEmptyArchive());
+    });
+  }
+
+  return createEmptyArchive();
+}
+
 
 export function clearArchive(): void {
   if (typeof window === "undefined") return;
