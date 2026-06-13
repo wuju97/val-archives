@@ -383,126 +383,156 @@ export default function CanonPage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--va-bg)", color: "var(--va-text)", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Extract to Vault Modal ─────────────────────────────────────────── */}
+      {/* ── Floating Progress Indicator (shows during extraction) ──────────── */}
+      {extracting && (
+        <div style={{ position: "fixed", bottom: "1.5rem", right: "1.5rem", zIndex: 2000, background: "var(--va-surface)", border: "1px solid #7c3aed", borderRadius: "0.75rem", padding: "0.875rem 1.125rem", maxWidth: "320px", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "0.375rem" }}>
+            <span style={{ fontSize: "1rem" }}>⏳</span>
+            <span style={{ fontWeight: "700", fontSize: "0.8rem", color: "#c4b5fd" }}>Extracting to Vault...</span>
+          </div>
+          <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", margin: 0, lineHeight: "1.5" }}>{extractProgress || "Starting..."}</p>
+          <div style={{ marginTop: "0.5rem", height: "3px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden" }}>
+            <div style={{ height: "100%", background: "#7c3aed", borderRadius: "9999px", width: extractProgress.includes("part") ? `${Math.min(100, parseInt(extractProgress.match(/part (\d+)/)?.[1] || "0") / parseInt(extractProgress.match(/of (\d+)/)?.[1] || "1") * 100)}%` : "10%", transition: "width 0.5s" }} />
+          </div>
+        </div>
+      )}
+
+      {/* ── Extract to Vault Side Panel ───────────────────────────────────── */}
       {showExtractModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-          <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "1rem", width: "100%", maxWidth: "700px", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1000, width: "min(480px, 95vw)", background: "var(--va-surface)", borderLeft: "1px solid var(--va-border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.3)" }}>
 
-            {/* Modal header */}
-            <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          {/* Panel header */}
+          <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>✨ Extract Canon to Vault</h2>
+              <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                AI reads a canon file and extracts facts into Story Studio
+              </p>
+            </div>
+            <button onClick={() => setShowExtractModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem", padding: "0.25rem" }}>×</button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
+
+            {/* Step 1 — pick file */}
+            {!extractDone && (
               <div>
-                <h2 style={{ fontWeight: "bold", fontSize: "1.1rem" }}>✨ Extract Canon to Vault</h2>
-                <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginTop: "0.2rem" }}>
-                  AI reads a canon file and extracts characters, locations, relationships and more into Story Studio
-                </p>
-              </div>
-              <button onClick={() => setShowExtractModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
-            </div>
-
-            <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
-
-              {/* Step 1 — pick file */}
-              {!extractDone && (
-                <div>
-                  <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a file to extract from:</p>
-                  <select
-                    value={extractSourceId}
-                    onChange={e => setExtractSourceId(e.target.value)}
-                    style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "1rem", outline: "none" }}
-                  >
-                    {allCanonEntries.map(e => (
-                      <option key={e.id} value={e.id}>{e.filename} ({e.content.length.toLocaleString()} chars)</option>
-                    ))}
-                  </select>
-
-                  {extracting && (
-                    <div style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.5rem", padding: "1rem", textAlign: "center" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>⏳</div>
-                      <p style={{ color: "#c4b5fd", fontSize: "0.875rem", fontWeight: "600" }}>{extractProgress || "Extracting..."}</p>
-                      <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>This takes 1-2 minutes for large files</p>
-                    </div>
-                  )}
-
-                  {!extracting && (
-                    <button onClick={runExtraction}
-                      style={{ width: "100%", background: "var(--va-accent)", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
-                      ✨ Start Extraction
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Step 2 — preview results */}
-              {extractDone && extractedEntries.length === 0 && (
-                <div style={{ textAlign: "center", padding: "2rem", color: "var(--va-text-muted)" }}>
-                  <p style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🤷</p>
-                  <p>No usable facts found in this file. Try a different one or use Copy & Paste.</p>
-                  <button onClick={() => setExtractDone(false)} style={{ marginTop: "1rem", background: "var(--va-border)", border: "none", borderRadius: "0.375rem", padding: "0.5rem 1rem", cursor: "pointer", color: "var(--va-text)", fontSize: "0.875rem" }}>
-                    Try Another File
-                  </button>
-                </div>
-              )}
-
-              {extractDone && extractedEntries.length > 0 && (
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                    <p style={{ fontWeight: "600", fontSize: "0.875rem" }}>
-                      Found {extractedEntries.length} entries — {selectedEntries.size} selected
-                    </p>
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
-                      <button onClick={() => setSelectedEntries(new Set(extractedEntries.map((_, i) => i)))}
-                        style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                        Select All
-                      </button>
-                      <button onClick={() => setSelectedEntries(new Set())}
-                        style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                        Deselect All
-                      </button>
-                      <button onClick={() => setExtractDone(false)}
-                        style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                        ← Back
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Entries grouped by category */}
-                  {Object.entries(groupedExtracted).map(([category, items]) => (
-                    <div key={category} style={{ marginBottom: "1rem" }}>
-                      <p style={{ fontSize: "0.7rem", color: "var(--va-accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: "700", marginBottom: "0.4rem" }}>
-                        {(CATEGORY_LABELS as any)[category] ?? category} ({items.length})
-                      </p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                        {items.map(({ entry, index }) => (
-                          <div key={index}
-                            onClick={() => toggleEntry(index)}
-                            style={{ display: "flex", alignItems: "flex-start", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.375rem", border: `1px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "rgba(59,130,246,0.08)" : "var(--va-bg)", cursor: "pointer", transition: "all 0.15s" }}>
-                            <div style={{ width: "16px", height: "16px", borderRadius: "3px", border: `2px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "var(--va-accent)" : "transparent", flexShrink: 0, marginTop: "1px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              {selectedEntries.has(index) && <span style={{ color: "white", fontSize: "10px" }}>✓</span>}
-                            </div>
-                            <p style={{ fontSize: "0.8rem", color: "var(--va-text)", lineHeight: "1.4", margin: 0 }}>{entry.text}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a file to extract from:</p>
+                <select
+                  value={extractSourceId}
+                  onChange={e => setExtractSourceId(e.target.value)}
+                  disabled={extracting}
+                  style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "1rem", outline: "none", opacity: extracting ? 0.6 : 1 }}
+                >
+                  {getAllCanonEntries().map(e => (
+                    <option key={e.id} value={e.id}>{e.filename}</option>
                   ))}
-                </div>
-              )}
-            </div>
+                </select>
 
-            {/* Modal footer */}
-            {extractDone && extractedEntries.length > 0 && (
-              <div style={{ padding: "1rem 1.5rem", borderTop: "1px solid var(--va-border)", display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
-                <button onClick={() => setShowExtractModal(false)}
-                  style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>
-                  Cancel
-                </button>
-                <button onClick={saveSelectedEntries} disabled={selectedEntries.size === 0}
-                  style={{ background: "var(--va-accent)", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem 1.5rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem", opacity: selectedEntries.size === 0 ? 0.4 : 1 }}>
-                  Save {selectedEntries.size} Entries to Vault
+                {extracting && (
+                  <div style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.5rem", padding: "1rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                      <p style={{ color: "#c4b5fd", fontSize: "0.875rem", fontWeight: "600" }}>
+                        {extractProgress.includes("part") 
+                          ? `Part ${extractProgress.match(/part (\d+)/)?.[1] || "?"} of ${extractProgress.match(/of (\d+)/)?.[1] || "?"}`
+                          : "Processing..."}
+                      </p>
+                      <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                        {extractProgress.match(/\((\d+) facts/)?.[1] || "0"} facts found
+                      </p>
+                    </div>
+                    <div style={{ height: "6px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.5rem" }}>
+                      <div style={{ 
+                        height: "100%", background: "#7c3aed", borderRadius: "9999px", transition: "width 0.5s",
+                        width: extractProgress.includes("part") ? `${Math.min(100, parseInt(extractProgress.match(/part (\d+)/)?.[1] || "0") / parseInt(extractProgress.match(/of (\d+)/)?.[1] || "1") * 100)}%` : "5%"
+                      }} />
+                    </div>
+                    <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>{extractProgress}</p>
+                    <p style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", marginTop: "0.375rem" }}>
+                      💡 You can close this panel and keep using the site — extraction continues in the background.
+                    </p>
+                  </div>
+                )}
+
+                {!extracting && (
+                  <button onClick={runExtraction}
+                    style={{ width: "100%", background: "var(--va-accent)", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
+                    ✨ Start Extraction
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Step 2 — no results */}
+            {extractDone && extractedEntries.length === 0 && (
+              <div style={{ textAlign: "center", padding: "2rem", color: "var(--va-text-muted)" }}>
+                <p style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🤷</p>
+                <p>No usable facts found. Try a different file.</p>
+                <button onClick={() => setExtractDone(false)} style={{ marginTop: "1rem", background: "var(--va-border)", border: "none", borderRadius: "0.375rem", padding: "0.5rem 1rem", cursor: "pointer", color: "var(--va-text)", fontSize: "0.875rem" }}>
+                  Try Another File
                 </button>
               </div>
             )}
+
+            {/* Step 3 — results */}
+            {extractDone && extractedEntries.length > 0 && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                  <p style={{ fontWeight: "600", fontSize: "0.875rem" }}>
+                    Found {extractedEntries.length} entries — {selectedEntries.size} selected
+                  </p>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button onClick={() => setSelectedEntries(new Set(extractedEntries.map((_, i) => i)))}
+                      style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                      All
+                    </button>
+                    <button onClick={() => setSelectedEntries(new Set())}
+                      style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                      None
+                    </button>
+                    <button onClick={() => setExtractDone(false)}
+                      style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                      ← Back
+                    </button>
+                  </div>
+                </div>
+
+                {Object.entries(groupedExtracted).map(([category, items]) => (
+                  <div key={category} style={{ marginBottom: "1rem" }}>
+                    <p style={{ fontSize: "0.7rem", color: "var(--va-accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: "700", marginBottom: "0.4rem" }}>
+                      {(CATEGORY_LABELS as any)[category] ?? category} ({items.length})
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                      {items.map(({ entry, index }) => (
+                        <div key={index}
+                          onClick={() => toggleEntry(index)}
+                          style={{ display: "flex", alignItems: "flex-start", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.375rem", border: `1px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "rgba(59,130,246,0.08)" : "var(--va-bg)", cursor: "pointer", transition: "all 0.15s" }}>
+                          <div style={{ width: "16px", height: "16px", borderRadius: "3px", border: `2px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "var(--va-accent)" : "transparent", flexShrink: 0, marginTop: "1px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            {selectedEntries.has(index) && <span style={{ color: "white", fontSize: "10px" }}>✓</span>}
+                          </div>
+                          <p style={{ fontSize: "0.8rem", color: "var(--va-text)", lineHeight: "1.4", margin: 0 }}>{entry.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Panel footer */}
+          {extractDone && extractedEntries.length > 0 && (
+            <div style={{ padding: "1rem 1.5rem", borderTop: "1px solid var(--va-border)", display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+              <button onClick={() => setShowExtractModal(false)}
+                style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>
+                Cancel
+              </button>
+              <button onClick={saveSelectedEntries} disabled={selectedEntries.size === 0}
+                style={{ background: "var(--va-accent)", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem 1.5rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem", opacity: selectedEntries.size === 0 ? 0.4 : 1 }}>
+                Save {selectedEntries.size} Entries to Vault
+              </button>
+            </div>
+          )}
         </div>
       )}
 
