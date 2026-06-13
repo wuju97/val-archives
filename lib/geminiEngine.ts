@@ -41,14 +41,12 @@ export async function geminiCall(
 
   const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
 
-  // Add history if provided
   if (history) {
     for (const msg of history) {
       contents.push({ role: msg.role, parts: [{ text: msg.text }] });
     }
   }
 
-  // Add current prompt
   contents.push({ role: "user", parts: [{ text: prompt }] });
 
   const body: Record<string, unknown> = { contents };
@@ -480,7 +478,6 @@ export async function geminiTargetedDelete(
 }
 
 // ─── FEATURE: Semantic Search (Batch) ────────────────────────────────────────
-// Handles large vaults by processing in batches of 60 entries
 
 export async function geminiSemanticSearch(
   query: string,
@@ -518,7 +515,6 @@ export async function geminiSemanticSearch(
 
   return allResults;
 }
-
 
 // ─── FEATURE: Organize Rule Book ─────────────────────────────────────────────
 
@@ -559,7 +555,6 @@ export async function geminiVerifyCategories(
 ): Promise<Array<{ id: string; text: string; currentCategory: string; suggestedCategory: string; reason: string; changed: boolean }>> {
   if (!hasGeminiKey() || entries.length === 0) return [];
 
-  // Work in batches of 40
   const batch = entries.slice(0, 40);
   const entriesList = batch.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 100)).join("\n");
 
@@ -662,8 +657,6 @@ export async function geminiCheckTimelineSeparation(
 }
 
 // ─── FEATURE: AI-First Batch Classifier ──────────────────────────────────────
-// Replaces keyword scoring entirely. Handles any amount of text accurately.
-// Splits into chunks, processes each, combines results.
 
 export async function geminiClassifyText(
   text: string,
@@ -671,7 +664,6 @@ export async function geminiClassifyText(
 ): Promise<Array<{ text: string; category: string }>> {
   if (!hasGeminiKey()) return [];
 
-  // Split text into sentences/paragraphs for classification
   const chunks = text
     .split(/\n\n+/)
     .flatMap(para => para.split(/(?<=[.!?])\s+/))
@@ -680,7 +672,6 @@ export async function geminiClassifyText(
 
   if (chunks.length === 0) return [];
 
-  // Process in batches of 30 sentences
   const BATCH_SIZE = 30;
   const results: Array<{ text: string; category: string }> = [];
 
@@ -720,10 +711,103 @@ export async function geminiClassifyText(
         });
       }
     } catch {
-      // If AI fails for this batch, add uncategorized
       batch.forEach(text => results.push({ text, category: "meta-information" }));
     }
   }
 
   return results;
+}
+
+// ─── FEATURE: Extract Canon to Vault ─────────────────────────────────────────
+// Reads a canon file and extracts structured story data into vault categories.
+// Processes the file in chunks, collects all extracted entries, returns them
+// for the user to preview and confirm before saving.
+
+export interface ExtractedVaultEntry {
+  text: string;
+  category: string;
+}
+
+export async function geminiExtractCanonToVault(
+  content: string,
+  filename: string,
+  onProgress?: (message: string) => void
+): Promise<ExtractedVaultEntry[]> {
+  if (!hasGeminiKey()) return [];
+
+  // Split content into ~3000 char chunks with some overlap
+  const CHUNK_SIZE = 3000;
+  const OVERLAP = 200;
+  const chunks: string[] = [];
+
+  for (let i = 0; i < content.length; i += CHUNK_SIZE - OVERLAP) {
+    chunks.push(content.slice(i, i + CHUNK_SIZE));
+    if (i + CHUNK_SIZE >= content.length) break;
+  }
+
+  // Cap at 20 chunks (~60,000 chars) to avoid runaway API calls
+  const chunksToProcess = chunks.slice(0, 20);
+  const allEntries: ExtractedVaultEntry[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < chunksToProcess.length; i++) {
+    if (onProgress) {
+      onProgress(`Reading ${filename} — section ${i + 1} of ${chunksToProcess.length}...`);
+    }
+
+    const chunk = chunksToProcess[i];
+
+    const prompt = `You are extracting story/RPG world-building facts from a source file to populate a story archive.
+
+File: ${filename}
+Section ${i + 1} of ${chunksToProcess.length}:
+---
+${chunk}
+---
+
+Extract ONLY concrete, specific facts that are worth storing in a story archive. Focus on:
+- Named characters and their descriptions, roles, traits
+- Specific locations and what they are
+- Relationships between named characters
+- Magic systems, spells, abilities
+- Organizations, factions, groups
+- Key events and timeline moments
+- Rules or laws of the world
+- Items, artifacts, equipment
+- Creatures and wildlife
+- Themes and tone
+
+Rules:
+- Each entry must be a single clear fact or description (1-2 sentences max)
+- Must be specific — no vague statements like "magic exists"
+- Only extract what is actually in this text — do not invent
+- Skip stage directions, formatting, and scene-setting fluff
+- Skip anything already obvious from the title (e.g. "Harry Potter is a wizard")
+
+Categories available:
+characters, relationships, locations, magic-supernatural, organizations, factions, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, themes-tone, writing-style, world-overview, player-character, quests-plotlines, conflict-combat, political-systems, cultures-society
+
+Return ONLY a JSON array (can be empty if nothing useful found):
+[{"text": "fact to store", "category": "category-name"}]`;
+
+    try {
+      const result = await geminiCall(prompt);
+      const clean = result.replace(/```json|```/g, "").trim();
+      const parsed: ExtractedVaultEntry[] = JSON.parse(clean);
+      if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+          // Deduplicate by normalised text
+          const key = entry.text.trim().toLowerCase().slice(0, 80);
+          if (!seen.has(key) && entry.text.trim().length > 10) {
+            seen.add(key);
+            allEntries.push({ text: entry.text.trim(), category: entry.category });
+          }
+        }
+      }
+    } catch {
+      // Skip failed chunk, continue
+    }
+  }
+
+  return allEntries;
 }

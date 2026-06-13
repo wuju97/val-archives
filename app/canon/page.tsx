@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { hasGeminiKey, geminiCanonPlacement } from "../../lib/geminiEngine";
+import { hasGeminiKey, geminiCanonPlacement, geminiExtractCanonToVault, ExtractedVaultEntry } from "../../lib/geminiEngine";
 import {
   loadArchive, saveArchive, ArchiveData,
   addCanonCategory, removeCanonCategory,
   addCanonEntry, removeCanonEntry,
   getPriorityLevel, setPriority,
+  addEntry, CATEGORY_LABELS,
 } from "@/lib/archiveEngine";
 
 // ─── Built-in Canon Categories ────────────────────────────────────────────────
@@ -32,9 +33,17 @@ export default function CanonPage() {
   const [lastAddedContent, setLastAddedContent] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // ── Extract to Vault state ──────────────────────────────────────────────────
+  const [showExtractModal, setShowExtractModal] = useState(false);
+  const [extractSourceId, setExtractSourceId] = useState<string>("");
+  const [extracting, setExtracting] = useState(false);
+  const [extractProgress, setExtractProgress] = useState("");
+  const [extractedEntries, setExtractedEntries] = useState<ExtractedVaultEntry[]>([]);
+  const [selectedEntries, setSelectedEntries] = useState<Set<number>>(new Set());
+  const [extractDone, setExtractDone] = useState(false);
+
   useEffect(() => { setArchive(loadArchive()); }, []);
 
-  // Merge built-in + custom categories
   const customCats = archive.canonCategories ?? [];
   const allCats = [
     ...BUILTIN_CATEGORIES.map(b => ({ ...b, isBuiltin: true })),
@@ -50,9 +59,19 @@ export default function CanonPage() {
     return customCats.find(c => c.id === activeCatId)?.entries ?? [];
   }
 
+  // All entries across all canon categories (for extract picker)
+  function getAllCanonEntries() {
+    return (archive.canonCategories ?? []).flatMap(cat => cat.entries.map(e => ({ ...e, catName: cat.name })));
+  }
+
   function flash(text: string) {
     setMsg(text);
     setTimeout(() => setMsg(""), 6000);
+  }
+
+  function saveWithFallback(data: ArchiveData) {
+    saveArchive(data);
+    setArchive(data);
   }
 
   function ensureBuiltin(id: string, name: string): typeof archive {
@@ -60,10 +79,7 @@ export default function CanonPage() {
     if (!(a.canonCategories ?? []).find(c => c.id === id)) {
       const updated = {
         ...a,
-        canonCategories: [
-          ...(a.canonCategories ?? []),
-          { id, name, entries: [] },
-        ],
+        canonCategories: [...(a.canonCategories ?? []), { id, name, entries: [] }],
       };
       saveArchive(updated);
       setArchive(updated);
@@ -72,18 +88,73 @@ export default function CanonPage() {
     return a;
   }
 
-  // ─── saveWithFallback ──────────────────────────────────────────────────────
-  // Just calls saveArchive — which now handles localStorage-full internally.
-  // DO NOT add a catch here that writes only to IndexedDB — that was the original bug.
-  function saveWithFallback(data: ArchiveData) {
-    saveArchive(data);
-    setArchive(data);
+  // ── Extract to Vault ────────────────────────────────────────────────────────
+
+  function openExtractModal() {
+    const allEntries = getAllCanonEntries();
+    if (allEntries.length === 0) { flash("✗ No canon entries to extract from. Upload some files first."); return; }
+    if (!hasGeminiKey()) { flash("✗ Add your Gemini API key in Settings → AI to use this feature."); return; }
+    // Default to first entry
+    setExtractSourceId(allEntries[0].id);
+    setExtractedEntries([]);
+    setSelectedEntries(new Set());
+    setExtractDone(false);
+    setExtractProgress("");
+    setShowExtractModal(true);
   }
+
+  async function runExtraction() {
+    const allEntries = getAllCanonEntries();
+    const entry = allEntries.find(e => e.id === extractSourceId);
+    if (!entry) return;
+
+    setExtracting(true);
+    setExtractedEntries([]);
+    setExtractDone(false);
+
+    const results = await geminiExtractCanonToVault(
+      entry.content,
+      entry.filename,
+      (msg) => setExtractProgress(msg)
+    );
+
+    setExtractedEntries(results);
+    // Select all by default
+    setSelectedEntries(new Set(results.map((_, i) => i)));
+    setExtracting(false);
+    setExtractDone(true);
+    setExtractProgress("");
+  }
+
+  function toggleEntry(i: number) {
+    setSelectedEntries(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  function saveSelectedEntries() {
+    let a = loadArchive();
+    let count = 0;
+    for (const i of selectedEntries) {
+      const entry = extractedEntries[i];
+      if (!entry) continue;
+      a = addEntry(a, entry.text, entry.category as any);
+      count++;
+    }
+    saveArchive(a);
+    setArchive(a);
+    setShowExtractModal(false);
+    flash(`✓ ${count} entries added to your vault from canon extraction.`);
+  }
+
+  // ── File upload ─────────────────────────────────────────────────────────────
 
   async function handleFileUpload(files: FileList | null) {
     if (!files || !activeCatId) return;
     setImporting(true);
-
     const catName = activeCat.name;
     let a = ensureBuiltin(activeCatId, catName);
 
@@ -222,12 +293,142 @@ export default function CanonPage() {
     return p === "none" ? "var(--va-border)" : priorityColor(id);
   };
   const canonPriority = getPriorityLevel(archive, "canon");
-
   const entries = getEntries();
   const isTimeline = activeCatId === "timeline-events";
+  const allCanonEntries = getAllCanonEntries();
+
+  // Group extracted entries by category for display
+  const groupedExtracted: Record<string, Array<{ entry: ExtractedVaultEntry; index: number }>> = {};
+  extractedEntries.forEach((entry, i) => {
+    if (!groupedExtracted[entry.category]) groupedExtracted[entry.category] = [];
+    groupedExtracted[entry.category].push({ entry, index: i });
+  });
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--va-bg)", color: "var(--va-text)", display: "flex", flexDirection: "column" }}>
+
+      {/* ── Extract to Vault Modal ─────────────────────────────────────────── */}
+      {showExtractModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+          <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "1rem", width: "100%", maxWidth: "700px", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+            {/* Modal header */}
+            <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2 style={{ fontWeight: "bold", fontSize: "1.1rem" }}>✨ Extract Canon to Vault</h2>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginTop: "0.2rem" }}>
+                  Gemini reads a canon file and extracts characters, locations, relationships and more into Story Studio
+                </p>
+              </div>
+              <button onClick={() => setShowExtractModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
+
+              {/* Step 1 — pick file */}
+              {!extractDone && (
+                <div>
+                  <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a file to extract from:</p>
+                  <select
+                    value={extractSourceId}
+                    onChange={e => setExtractSourceId(e.target.value)}
+                    style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "1rem", outline: "none" }}
+                  >
+                    {allCanonEntries.map(e => (
+                      <option key={e.id} value={e.id}>{e.filename} ({e.content.length.toLocaleString()} chars)</option>
+                    ))}
+                  </select>
+
+                  {extracting && (
+                    <div style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.5rem", padding: "1rem", textAlign: "center" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>⏳</div>
+                      <p style={{ color: "#c4b5fd", fontSize: "0.875rem", fontWeight: "600" }}>{extractProgress || "Extracting..."}</p>
+                      <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>This takes 1-2 minutes for large files</p>
+                    </div>
+                  )}
+
+                  {!extracting && (
+                    <button onClick={runExtraction}
+                      style={{ width: "100%", background: "var(--va-accent)", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
+                      ✨ Start Extraction
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Step 2 — preview results */}
+              {extractDone && extractedEntries.length === 0 && (
+                <div style={{ textAlign: "center", padding: "2rem", color: "var(--va-text-muted)" }}>
+                  <p style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🤷</p>
+                  <p>No usable facts found in this file. Try a different one or use Copy & Paste.</p>
+                  <button onClick={() => setExtractDone(false)} style={{ marginTop: "1rem", background: "var(--va-border)", border: "none", borderRadius: "0.375rem", padding: "0.5rem 1rem", cursor: "pointer", color: "var(--va-text)", fontSize: "0.875rem" }}>
+                    Try Another File
+                  </button>
+                </div>
+              )}
+
+              {extractDone && extractedEntries.length > 0 && (
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                    <p style={{ fontWeight: "600", fontSize: "0.875rem" }}>
+                      Found {extractedEntries.length} entries — {selectedEntries.size} selected
+                    </p>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <button onClick={() => setSelectedEntries(new Set(extractedEntries.map((_, i) => i)))}
+                        style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                        Select All
+                      </button>
+                      <button onClick={() => setSelectedEntries(new Set())}
+                        style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                        Deselect All
+                      </button>
+                      <button onClick={() => setExtractDone(false)}
+                        style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                        ← Back
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Entries grouped by category */}
+                  {Object.entries(groupedExtracted).map(([category, items]) => (
+                    <div key={category} style={{ marginBottom: "1rem" }}>
+                      <p style={{ fontSize: "0.7rem", color: "var(--va-accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: "700", marginBottom: "0.4rem" }}>
+                        {(CATEGORY_LABELS as any)[category] ?? category} ({items.length})
+                      </p>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        {items.map(({ entry, index }) => (
+                          <div key={index}
+                            onClick={() => toggleEntry(index)}
+                            style={{ display: "flex", alignItems: "flex-start", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.375rem", border: `1px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "rgba(59,130,246,0.08)" : "var(--va-bg)", cursor: "pointer", transition: "all 0.15s" }}>
+                            <div style={{ width: "16px", height: "16px", borderRadius: "3px", border: `2px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "var(--va-accent)" : "transparent", flexShrink: 0, marginTop: "1px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              {selectedEntries.has(index) && <span style={{ color: "white", fontSize: "10px" }}>✓</span>}
+                            </div>
+                            <p style={{ fontSize: "0.8rem", color: "var(--va-text)", lineHeight: "1.4", margin: 0 }}>{entry.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal footer */}
+            {extractDone && extractedEntries.length > 0 && (
+              <div style={{ padding: "1rem 1.5rem", borderTop: "1px solid var(--va-border)", display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+                <button onClick={() => setShowExtractModal(false)}
+                  style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>
+                  Cancel
+                </button>
+                <button onClick={saveSelectedEntries} disabled={selectedEntries.size === 0}
+                  style={{ background: "var(--va-accent)", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem 1.5rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem", opacity: selectedEntries.size === 0 ? 0.4 : 1 }}>
+                  Save {selectedEntries.size} Entries to Vault
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ padding: "1.25rem 2rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -268,17 +469,23 @@ export default function CanonPage() {
             </p>
           </div>
         </div>
-        <button onClick={handleCanonPriority}
-          style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: `2px solid ${canonPriority !== "none" ? (canonPriority === "red" ? "#ef4444" : "#3b82f6") : "var(--va-border)"}`, background: canonPriority !== "none" ? (canonPriority === "red" ? "#ef4444" : "#3b82f6") : "transparent", color: canonPriority !== "none" ? "white" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
-          {canonPriority === "red" ? "🔴 First Priority" : canonPriority === "blue" ? "🔵 Second Priority" : "Set Priority"}
-        </button>
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+          {/* Extract to Vault button */}
+          <button onClick={openExtractModal}
+            style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid #7c3aed", background: "rgba(124,58,237,0.15)", color: "#c4b5fd", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
+            ✨ Extract to Vault
+          </button>
+          <button onClick={handleCanonPriority}
+            style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: `2px solid ${canonPriority !== "none" ? (canonPriority === "red" ? "#ef4444" : "#3b82f6") : "var(--va-border)"}`, background: canonPriority !== "none" ? (canonPriority === "red" ? "#ef4444" : "#3b82f6") : "transparent", color: canonPriority !== "none" ? "white" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
+            {canonPriority === "red" ? "🔴 First Priority" : canonPriority === "blue" ? "🔵 Second Priority" : "Set Priority"}
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "flex", flex: 1 }}>
 
         {/* LEFT — Category list */}
         <aside style={{ width: "13rem", borderRight: "1px solid var(--va-border)", background: "var(--va-surface)", padding: "0.75rem", flexShrink: 0, display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-
           <p style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.08em", padding: "0.25rem 0.5rem 0.5rem", marginBottom: "0.25rem" }}>File Types</p>
 
           {BUILTIN_CATEGORIES.map(cat => {
@@ -322,7 +529,6 @@ export default function CanonPage() {
             );
           })}
 
-          {/* Add custom category */}
           <div style={{ marginTop: "auto", paddingTop: "0.75rem", borderTop: "1px solid var(--va-border)" }}>
             <input value={customCatName} onChange={(e) => setCustomCatName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddCustomCat()}
               placeholder="Custom category..."
@@ -336,15 +542,12 @@ export default function CanonPage() {
 
         {/* MAIN */}
         <main style={{ flex: 1, padding: "1.5rem 2rem", maxWidth: "900px" }}>
-
           <div style={{ marginBottom: "1.25rem" }}>
             <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>
               {activeCat.icon} {activeCat.name}
             </h2>
             <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem" }}>
-              {isTimeline
-                ? "⚠️ Timeline Events are stored whole and never split. Exact content appears in Master Prompt as-is."
-                : activeCat.desc}
+              {isTimeline ? "⚠️ Timeline Events are stored whole and never split. Exact content appears in Master Prompt as-is." : activeCat.desc}
             </p>
           </div>
 
@@ -356,12 +559,10 @@ export default function CanonPage() {
 
           <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem", marginBottom: "1.5rem" }}>
 
-            {/* PDF Files */}
             {activeCatId === "pdf-files" && (
               <div>
                 <p style={{ fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.75rem" }}>Upload PDF Files</p>
-                <div
-                  onClick={() => fileRef.current?.click()}
+                <div onClick={() => fileRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--va-accent)"; }}
                   onDragLeave={(e) => { e.currentTarget.style.borderColor = "var(--va-border)"; }}
                   onDrop={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--va-border)"; handleFileUpload(e.dataTransfer.files); }}
@@ -377,12 +578,10 @@ export default function CanonPage() {
               </div>
             )}
 
-            {/* Text Files */}
             {activeCatId === "text-files" && (
               <div>
                 <p style={{ fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.75rem" }}>Upload Text or Markdown Files</p>
-                <div
-                  onClick={() => fileRef.current?.click()}
+                <div onClick={() => fileRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--va-accent)"; }}
                   onDragLeave={(e) => { e.currentTarget.style.borderColor = "var(--va-border)"; }}
                   onDrop={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--va-border)"; handleFileUpload(e.dataTransfer.files); }}
@@ -395,12 +594,10 @@ export default function CanonPage() {
               </div>
             )}
 
-            {/* Copy & Paste */}
             {activeCatId === "copy-paste" && (
               <div>
                 <p style={{ fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.75rem" }}>Paste Text Directly</p>
-                <input value={pasteTitle} onChange={(e) => setPasteTitle(e.target.value)}
-                  placeholder="Title (optional)..."
+                <input value={pasteTitle} onChange={(e) => setPasteTitle(e.target.value)} placeholder="Title (optional)..."
                   style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.5rem 0.75rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.5rem", boxSizing: "border-box" }} />
                 <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)}
                   placeholder="Paste any text — lore, story content, world info, character descriptions..."
@@ -412,17 +609,15 @@ export default function CanonPage() {
               </div>
             )}
 
-            {/* Timeline Events */}
             {activeCatId === "timeline-events" && (
               <div>
                 <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: "0.5rem", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.8rem", color: "#93c5fd" }}>
-                  🗓️ <strong>Timeline Events behave differently.</strong> Content is stored exactly as you write it — never split or divided. The complete entry appears in the Master Prompt word-for-word to preserve exact chronological context.
+                  🗓️ <strong>Timeline Events behave differently.</strong> Content is stored exactly as you write it — never split or divided.
                 </div>
-                <input value={pasteTitle} onChange={(e) => setPasteTitle(e.target.value)}
-                  placeholder="e.g. Harry Potter Year 1 — 1991 Events"
+                <input value={pasteTitle} onChange={(e) => setPasteTitle(e.target.value)} placeholder="e.g. Harry Potter Year 1 — 1991 Events"
                   style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.5rem 0.75rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.5rem", boxSizing: "border-box" }} />
                 <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)}
-                  placeholder={`Enter timeline events exactly as you want them remembered:\n\nSeptember 1, 1991 — Harry Potter boards the Hogwarts Express for the first time.\nSeptember 1, 1991 — Harry meets Ron Weasley and Hermione Granger on the train.\nSeptember 1, 1991 — The Sorting Hat places Harry in Gryffindor.\n...`}
+                  placeholder={`September 1, 1991 — Harry Potter boards the Hogwarts Express...\nSeptember 1, 1991 — Harry meets Ron Weasley and Hermione Granger...`}
                   style={{ width: "100%", height: "220px", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.75rem", outline: "none", resize: "vertical", fontSize: "0.875rem", color: "var(--va-text)", marginBottom: "0.5rem", boxSizing: "border-box", fontFamily: "monospace", lineHeight: "1.6" }} />
                 <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
                   <button onClick={handlePaste} disabled={!pasteText.trim()}
@@ -434,7 +629,6 @@ export default function CanonPage() {
               </div>
             )}
 
-            {/* Custom categories */}
             {!BUILTIN_CATEGORIES.find(b => b.id === activeCatId) && (
               <div>
                 <p style={{ fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.75rem" }}>Add to {activeCat.name}</p>
@@ -447,11 +641,9 @@ export default function CanonPage() {
                 </div>
                 <input ref={fileRef} type="file" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple style={{ display: "none" }} onChange={(e) => handleFileUpload(e.target.files)} />
                 <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1rem" }}>
-                  <input value={pasteTitle} onChange={(e) => setPasteTitle(e.target.value)}
-                    placeholder="Title (optional)..."
+                  <input value={pasteTitle} onChange={(e) => setPasteTitle(e.target.value)} placeholder="Title (optional)..."
                     style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.5rem 0.75rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.5rem", boxSizing: "border-box" }} />
-                  <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)}
-                    placeholder="Or paste text directly..."
+                  <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="Or paste text directly..."
                     style={{ width: "100%", height: "120px", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.75rem", outline: "none", resize: "vertical", fontSize: "0.875rem", color: "var(--va-text)", marginBottom: "0.5rem", boxSizing: "border-box" }} />
                   <button onClick={handlePaste} disabled={!pasteText.trim()}
                     style={{ background: "var(--va-accent)", color: "white", padding: "0.5rem 1.25rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: !pasteText.trim() ? 0.3 : 1 }}>
@@ -462,7 +654,6 @@ export default function CanonPage() {
             )}
           </div>
 
-          {/* Entries list */}
           {entries.length > 0 && (
             <div>
               <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em" }}>
