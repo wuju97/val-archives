@@ -89,66 +89,13 @@ export default function CanonPage() {
         const ext = file.name.split(".").pop()?.toLowerCase();
 
         if (ext === "pdf") {
-          content = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-              try {
-                const bytes = new Uint8Array(e.target?.result as ArrayBuffer);
-                const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-
-                // Method 1: Extract BT...ET text blocks (standard PDF text)
-                const btBlocks: string[] = [];
-                const btRegex = /BT([\s\S]*?)ET/g;
-                let btMatch;
-                while ((btMatch = btRegex.exec(text)) !== null) {
-                  const block = btMatch[1];
-                  // Extract strings from Tj, TJ, ' operators
-                  const strRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*(?:Tj|'|")/g;
-                  const arrRegex = /\[((?:[^\[\]]|\[[\s\S]*?\])*)\]\s*TJ/g;
-                  let sm;
-                  while ((sm = strRegex.exec(block)) !== null) {
-                    const decoded = sm[1].replace(/\\(\d{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
-                      .replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t")
-                      .replace(/\\\\/g, "\\").replace(/\\'/g, "'");
-                    if (decoded.trim().length > 0) btBlocks.push(decoded);
-                  }
-                  while ((sm = arrRegex.exec(block)) !== null) {
-                    const arr = sm[1];
-                    const parts: string[] = [];
-                    const pRegex = /\(((?:[^()\\]|\\[\s\S])*)\)/g;
-                    let pm;
-                    while ((pm = pRegex.exec(arr)) !== null) {
-                      parts.push(pm[1].replace(/\\(\d{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8))));
-                    }
-                    if (parts.join("").trim()) btBlocks.push(parts.join(""));
-                  }
-                }
-
-                if (btBlocks.length > 10) {
-                  resolve(btBlocks.join(" ").replace(/\s+/g, " ").trim());
-                  return;
-                }
-
-                // Method 2: Extract readable ASCII strings (fallback)
-                const lines = text
-                  .replace(/[^\x20-\x7E\n\r]/g, " ")
-                  .split(/[\n\r]+/)
-                  .map(l => l.trim())
-                  .filter(l => l.length > 10 && !/^[\d\s\W]+$/.test(l) && /[a-zA-Z]{3,}/.test(l));
-
-                if (lines.length > 5) {
-                  resolve(lines.join("\n"));
-                  return;
-                }
-
-                resolve(`[PDF: ${file.name} — This PDF uses encoded/image-based text that cannot be extracted automatically. Please copy and paste the text content manually using the Copy & Paste tab.]`);
-              } catch {
-                resolve(`[PDF: ${file.name} — Could not read file.]`);
-              }
-            };
-            reader.onerror = () => resolve(`[PDF: ${file.name} — File read error.]`);
-            reader.readAsArrayBuffer(file);
-          });
+          // Store filename as reference — PDF text extraction is unreliable in browser
+          // User can paste the actual content via Copy & Paste tab
+          content = `[PDF File: ${file.name}]\n\nThis PDF has been registered in your Canon Archives. To add the actual text content, open the PDF, select all text (Ctrl+A), copy it, and paste it into the Copy & Paste tab.\n\nFile size: ${(file.size / 1024).toFixed(1)} KB`;
+          const updated = addCanonEntry(a, activeCatId, file.name, content);
+          saveArchive(updated); setArchive(updated); a = updated;
+          flash(`✓ "${file.name}" registered — paste text content via Copy & Paste tab`);
+          continue;
         } else {
           content = await file.text();
         }
