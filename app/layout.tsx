@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "./ThemeProvider";
 import { ExtractionProvider } from "./ExtractionContext";
+import { MusicProvider } from "./MusicPlayer";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -145,7 +146,7 @@ export default function RootLayout({
         />
       </head>
       <body suppressHydrationWarning className="min-h-full flex flex-col">
-        <ThemeProvider><ExtractionProvider>{children}</ExtractionProvider></ThemeProvider>
+        <ThemeProvider><MusicProvider><ExtractionProvider>{children}</ExtractionProvider></MusicProvider></ThemeProvider>
       </body>
     </html>
   );

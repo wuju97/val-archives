@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMusic } from "../MusicPlayer";
 import { useEffect, useState } from "react";
 import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt, saveArchive, pushHistory, undoArchive, redoArchive } from "@/lib/archiveEngine";
 import {
@@ -119,7 +120,8 @@ const INSTRUCTIONS = [
 
 export default function SettingsPage() {
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
-  const [activeSection, setActiveSection] = useState<"display" | "personalisation" | "instructions" | "ai" | "danger">("display");
+  const [activeSection, setActiveSection] = useState<"display" | "personalisation" | "instructions" | "ai" | "danger" | "music">("display");
+  const { songs, currentIndex, isPlaying, volume, loopMode, addSongs, removeSong, playSong, togglePlay, setVolume, setLoopMode, clearAll } = useMusic();
   const [saved, setSaved] = useState(false);
   const [vaultCleared, setVaultCleared] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -185,6 +187,7 @@ export default function SettingsPage() {
     { id: "personalisation", label: "🎨 Personalisation" },
     { id: "instructions",    label: "📖 Instructions" },
     { id: "ai",              label: "✨ AI" },
+    { id: "music",           label: "🎵 Music / BGM" },
     { id: "danger",          label: "🚨 Alert Zone" },
   ] as const;
 
@@ -620,6 +623,86 @@ export default function SettingsPage() {
             </div>
           )}
 
+
+              {/* ── MUSIC / BGM ──────────────────────────────────────────────── */}
+              {activeSection === "music" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                  <div>
+                    <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>🎵 Background Music</h2>
+                    <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Upload songs from your device. They play while you use the site. A mini player appears at the bottom-left of every page.</p>
+                  </div>
+
+                  <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" }}>
+                    <h3 style={{ fontWeight: "bold", marginBottom: "0.75rem" }}>📁 Upload Songs</h3>
+                    <label style={{ display: "block", border: "2px dashed var(--va-border)", borderRadius: "0.5rem", padding: "1.5rem", textAlign: "center", cursor: "pointer" }}
+                      onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--va-accent)")}
+                      onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--va-border)")}>
+                      <p style={{ fontSize: "1.5rem", marginBottom: "0.375rem" }}>🎵</p>
+                      <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem", marginBottom: "0.25rem" }}>Click to upload audio files</p>
+                      <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>MP3, WAV, OGG, FLAC, M4A supported</p>
+                      <input type="file" accept="audio/*" multiple onChange={e => e.target.files && addSongs(e.target.files)} style={{ display: "none" }} />
+                    </label>
+                  </div>
+
+                  <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" }}>
+                    <h3 style={{ fontWeight: "bold", marginBottom: "0.875rem" }}>⚙️ Playback Settings</h3>
+                    <div style={{ marginBottom: "1rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.375rem" }}>
+                        <label style={{ fontSize: "0.875rem", fontWeight: "600" }}>🔈 Volume</label>
+                        <span style={{ fontSize: "0.875rem", color: "var(--va-accent)", fontWeight: "700" }}>{volume}%</span>
+                      </div>
+                      <input type="range" min="0" max="100" value={volume} onChange={e => setVolume(Number(e.target.value))}
+                        style={{ width: "100%", accentColor: "var(--va-accent)", cursor: "pointer" }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "0.875rem", fontWeight: "600", display: "block", marginBottom: "0.5rem" }}>🔁 Loop Mode</label>
+                      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                        {([ ["loop-all", "🔁 Loop All"], ["loop-one", "🔂 Loop One"], ["play-once", "➡️ Play Once"] ] as const).map(([mode, label]) => (
+                          <button key={mode} onClick={() => setLoopMode(mode)}
+                            style={{ padding: "0.5rem 0.875rem", borderRadius: "0.5rem", border: `2px solid ${loopMode === mode ? "var(--va-accent)" : "var(--va-border)"}`, background: loopMode === mode ? "rgba(59,130,246,0.1)" : "transparent", color: loopMode === mode ? "var(--va-accent)" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.8rem", fontWeight: loopMode === mode ? "700" : "400" }}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {songs.length > 0 ? (
+                    <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.875rem" }}>
+                        <h3 style={{ fontWeight: "bold" }}>🎶 Playlist ({songs.length} song{songs.length !== 1 ? "s" : ""})</h3>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                          <button onClick={togglePlay} style={{ background: "var(--va-accent)", color: "white", border: "none", borderRadius: "0.375rem", padding: "0.375rem 0.875rem", cursor: "pointer", fontSize: "0.8rem", fontWeight: "600" }}>
+                            {isPlaying ? "⏸ Pause" : "▶ Play"}
+                          </button>
+                          <button onClick={clearAll} style={{ background: "none", border: "1px solid var(--va-border)", color: "var(--va-text-muted)", borderRadius: "0.375rem", padding: "0.375rem 0.75rem", cursor: "pointer", fontSize: "0.8rem" }}>
+                            Clear All
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", maxHeight: "300px", overflowY: "auto" }}>
+                        {songs.map((song, i) => (
+                          <div key={song.id} onClick={() => playSong(i)}
+                            style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", background: currentIndex === i ? "rgba(59,130,246,0.1)" : "var(--va-bg)", border: `1px solid ${currentIndex === i ? "var(--va-accent)" : "var(--va-border)"}`, cursor: "pointer" }}>
+                            <span style={{ fontSize: "0.85rem", flexShrink: 0 }}>{currentIndex === i && isPlaying ? "🔊" : "🎵"}</span>
+                            <span style={{ flex: 1, fontSize: "0.8rem", color: currentIndex === i ? "var(--va-accent)" : "var(--va-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: currentIndex === i ? "700" : "400" }}>
+                              {i + 1}. {song.name}
+                            </span>
+                            <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", flexShrink: 0 }}>{(song.size / 1024 / 1024).toFixed(1)}MB</span>
+                            <button onClick={e => { e.stopPropagation(); removeSong(song.id); }}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.9rem", flexShrink: 0 }}>×</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: "center", padding: "2rem", color: "var(--va-text-muted)" }}>
+                      <p style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>🎵</p>
+                      <p>No songs yet. Upload some above to start your BGM playlist.</p>
+                    </div>
+                  )}
+                </div>
+              )}
         </main>
       </div>
     </div>
