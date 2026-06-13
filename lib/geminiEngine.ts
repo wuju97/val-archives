@@ -877,7 +877,7 @@ export async function geminiExtractCanonToVault(
 
     if (i < chunks.length - 1) {
       if (onProgress) onProgress("Waiting before next part...");
-      await wait(5000);
+      await wait(13000);
     }
   }
 
