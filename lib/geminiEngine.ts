@@ -719,9 +719,6 @@ export async function geminiClassifyText(
 }
 
 // ─── FEATURE: Extract Canon to Vault ─────────────────────────────────────────
-// Reads a canon file and extracts structured story data into vault categories.
-// Processes the file in chunks, collects all extracted entries, returns them
-// for the user to preview and confirm before saving.
 
 export interface ExtractedVaultEntry {
   text: string;
@@ -735,7 +732,7 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  // Split content into ~3000 char chunks with some overlap
+  // Split into ~3000 char chunks with overlap
   const CHUNK_SIZE = 3000;
   const OVERLAP = 200;
   const chunks: string[] = [];
@@ -745,58 +742,66 @@ export async function geminiExtractCanonToVault(
     if (i + CHUNK_SIZE >= content.length) break;
   }
 
-  // Cap at 20 chunks (~60,000 chars) to avoid runaway API calls
+  // Process first 20 chunks max
   const chunksToProcess = chunks.slice(0, 20);
   const allEntries: ExtractedVaultEntry[] = [];
   const seen = new Set<string>();
+  let successfulChunks = 0;
+  let lastError = "";
 
   for (let i = 0; i < chunksToProcess.length; i++) {
     if (onProgress) {
-      onProgress(`Reading ${filename} — section ${i + 1} of ${chunksToProcess.length}...`);
+      onProgress(`Reading section ${i + 1} of ${chunksToProcess.length}... (${allEntries.length} facts found so far)`);
     }
 
     const chunk = chunksToProcess[i];
 
-    const prompt = `You are extracting story/RPG world-building facts from a source file to populate a story archive.
+    const prompt = `You are extracting facts from a story/book to build a story archive database.
 
-File: ${filename}
-Section ${i + 1} of ${chunksToProcess.length}:
+Source: "${filename}"
+Section ${i + 1}:
 ---
 ${chunk}
 ---
 
-Extract ONLY concrete, specific facts that are worth storing in a story archive. Focus on:
-- Named characters and their descriptions, roles, traits
-- Specific locations and what they are
-- Relationships between named characters
-- Magic systems, spells, abilities
-- Organizations, factions, groups
-- Key events and timeline moments
-- Rules or laws of the world
-- Items, artifacts, equipment
-- Creatures and wildlife
-- Themes and tone
+Extract specific, concrete facts. Include:
+- Named characters and their descriptions or traits
+- Named locations and what they are
+- Relationships between named people
+- Magic, spells, special abilities
+- Organizations or groups
+- Important events
+- World facts and lore
+- Rules of the world
 
-Rules:
-- Each entry must be a single clear fact or description (1-2 sentences max)
-- Must be specific — no vague statements like "magic exists"
-- Only extract what is actually in this text — do not invent
-- Skip stage directions, formatting, and scene-setting fluff
-- Skip anything already obvious from the title (e.g. "Harry Potter is a wizard")
+Each entry = one clear sentence.
 
-Categories available:
-characters, relationships, locations, magic-supernatural, organizations, factions, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, themes-tone, writing-style, world-overview, player-character, quests-plotlines, conflict-combat, political-systems, cultures-society
+Categories to use:
+characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society
 
-Return ONLY a JSON array (can be empty if nothing useful found):
-[{"text": "fact to store", "category": "category-name"}]`;
+Return ONLY valid JSON array, nothing else:
+[{"text": "Harry Potter is a young wizard who survived Voldemort's killing curse as a baby", "category": "characters"}]
+
+If nothing worth extracting in this section, return: []`;
 
     try {
       const result = await geminiCall(prompt);
-      const clean = result.replace(/```json|```/g, "").trim();
-      const parsed: ExtractedVaultEntry[] = JSON.parse(clean);
+      // Strip any markdown fences
+      const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      
+      // Try to find JSON array in the response even if there's extra text
+      const jsonMatch = clean.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        lastError = `Section ${i+1}: No JSON found in response`;
+        continue;
+      }
+      
+      const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
+      successfulChunks++;
+      
       if (Array.isArray(parsed)) {
         for (const entry of parsed) {
-          // Deduplicate by normalised text
+          if (!entry.text || !entry.category) continue;
           const key = entry.text.trim().toLowerCase().slice(0, 80);
           if (!seen.has(key) && entry.text.trim().length > 10) {
             seen.add(key);
@@ -804,9 +809,15 @@ Return ONLY a JSON array (can be empty if nothing useful found):
           }
         }
       }
-    } catch {
-      // Skip failed chunk, continue
+    } catch (e) {
+      lastError = `Section ${i+1}: ${e instanceof Error ? e.message : "parse error"}`;
+      // Continue to next chunk
     }
+  }
+
+  // If we got nothing and had errors, surface the last error
+  if (allEntries.length === 0 && lastError && onProgress) {
+    onProgress(`Done — 0 entries found. Last error: ${lastError}`);
   }
 
   return allEntries;
