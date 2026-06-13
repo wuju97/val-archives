@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const GROQ_KEY_STORAGE = "valArchivesGeminiKey"; // reuse same storage key so existing users don't lose their setup
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODEL = "llama-3.1-8b-instant";
 const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
