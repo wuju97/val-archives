@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const GROQ_KEY_STORAGE = "valArchivesGeminiKey"; // reuse same storage key so existing users don't lose their setup
-const GROQ_MODEL = "llama-3.1-8b-instant";
+const GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
@@ -712,7 +712,7 @@ export async function geminiExtractCanonToVault(
   if (onProgress) onProgress("Preparing extraction...");
 
   // Split into 120k char chunks (fits in Groq 128k context window)
-  const MAX_CHARS = 120000;
+  const MAX_CHARS = 40000;
   const chunks: string[] = [];
   for (let i = 0; i < content.length; i += MAX_CHARS) {
     chunks.push(content.slice(i, i + MAX_CHARS));
