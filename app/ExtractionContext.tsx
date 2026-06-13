@@ -24,6 +24,7 @@ interface ExtractionContextType {
   saveItemResults: (id: string, selectedIndices: Set<number>) => number;
   clearCompleted: () => void;
   isRunning: boolean;
+  retryItem: (id: string) => void;
 }
 
 const ExtractionContext = createContext<ExtractionContextType>({
@@ -33,30 +34,42 @@ const ExtractionContext = createContext<ExtractionContextType>({
   saveItemResults: () => 0,
   clearCompleted: () => {},
   isRunning: false,
+  retryItem: () => {},
 });
 
 export function ExtractionProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<ExtractionQueueItem[]>([]);
   const isProcessing = useRef(false);
+  // Draggable popup position
+  const [popupPos, setPopupPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
 
   function updateItem(id: string, updates: Partial<ExtractionQueueItem>) {
-    setQueue(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+    setQueue(prev => prev.map(item =>
+      item.id === id ? { ...item, ...updates } : item
+    ));
   }
 
   function addToQueue(id: string, content: string, filename: string) {
-    // Don't add duplicates
     setQueue(prev => {
-      if (prev.find(item => item.id === id && item.status !== "done" && item.status !== "error")) return prev;
+      if (prev.find(item => item.id === id && (item.status === "queued" || item.status === "running"))) return prev;
       return [...prev, {
         id, filename, content,
         status: "queued",
         currentPart: 0,
-        totalParts: Math.ceil(content.length / 40000),
+        totalParts: Math.ceil(Math.min(content.length, 800000) / 40000),
         factsFound: 0,
         results: [],
         message: "Queued",
       }];
     });
+  }
+
+  function retryItem(id: string) {
+    setQueue(prev => prev.map(item =>
+      item.id === id ? { ...item, status: "queued", currentPart: 0, factsFound: 0, results: [], message: "Retrying..." } : item
+    ));
   }
 
   function removeFromQueue(id: string) {
@@ -83,11 +96,35 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
     setQueue(prev => prev.filter(item => item.status === "queued" || item.status === "running"));
   }
 
-  // Auto-process queue
+  // Dragging logic
+  function onMouseDown(e: React.MouseEvent) {
+    setDragging(true);
+    dragStart.current = { mx: e.clientX, my: e.clientY, px: popupPos.x, py: popupPos.y };
+  }
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (!dragging) return;
+      setPopupPos({
+        x: dragStart.current.px + (e.clientX - dragStart.current.mx),
+        y: dragStart.current.py + (e.clientY - dragStart.current.my),
+      });
+    }
+    function onMouseUp() { setDragging(false); }
+    if (dragging) {
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    }
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [dragging]);
+
+  // Auto-process queue — one item at a time
   useEffect(() => {
     async function processNext() {
       if (isProcessing.current) return;
-      
       const nextItem = queue.find(item => item.status === "queued");
       if (!nextItem) return;
 
@@ -95,20 +132,31 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
       updateItem(nextItem.id, { status: "running", message: "Starting..." });
 
       try {
+        // Cap content at 800k chars to avoid endless processing
+        const cappedContent = nextItem.content.slice(0, 800000);
+        const totalParts = Math.ceil(cappedContent.length / 40000);
+        updateItem(nextItem.id, { totalParts });
+
         const results = await geminiExtractCanonToVault(
-          nextItem.content,
+          cappedContent,
           nextItem.filename,
           (msg) => {
             const partMatch = msg.match(/part (\d+) of (\d+)/i) || msg.match(/Processing part (\d+) of (\d+)/i);
             const factsMatch = msg.match(/\((\d+) facts/);
             const completeMatch = msg.startsWith("Complete") ? msg.match(/(\d+) facts/) : null;
 
-            updateItem(nextItem.id, {
-              message: msg,
-              currentPart: partMatch ? parseInt(partMatch[1]) : undefined,
-              totalParts: partMatch ? parseInt(partMatch[2]) : undefined,
-              factsFound: completeMatch ? parseInt(completeMatch[1]) : factsMatch ? parseInt(factsMatch[1]) : undefined,
-            } as any);
+            setQueue(prev => prev.map(item => {
+              if (item.id !== nextItem.id) return item;
+              return {
+                ...item,
+                message: msg,
+                currentPart: partMatch ? parseInt(partMatch[1]) : item.currentPart,
+                totalParts: partMatch ? parseInt(partMatch[2]) : item.totalParts,
+                factsFound: completeMatch ? parseInt(completeMatch[1])
+                  : factsMatch ? parseInt(factsMatch[1])
+                  : item.factsFound,
+              };
+            }));
           }
         );
 
@@ -117,13 +165,11 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
           results,
           factsFound: results.length,
           message: `Complete — ${results.length} facts extracted`,
-          currentPart: nextItem.totalParts,
+          currentPart: totalParts,
         });
       } catch (e) {
-        updateItem(nextItem.id, {
-          status: "error",
-          message: e instanceof Error ? e.message : "Extraction failed",
-        });
+        const msg = e instanceof Error ? e.message : "Extraction failed";
+        updateItem(nextItem.id, { status: "error", message: msg });
       }
 
       isProcessing.current = false;
@@ -135,69 +181,100 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
   const currentItem = queue.find(item => item.status === "running");
   const queuedCount = queue.filter(item => item.status === "queued").length;
   const isRunning = !!currentItem;
+  const allDone = queue.length > 0 && queue.every(i => i.status === "done" || i.status === "error") && !isRunning;
+
+  const popupStyle: React.CSSProperties = {
+    position: "fixed",
+    bottom: popupPos.y === 0 ? "1.5rem" : "auto",
+    top: popupPos.y !== 0 ? `calc(100vh - 1.5rem - 120px + ${popupPos.y}px)` : "auto",
+    right: popupPos.x === 0 ? "1.5rem" : "auto",
+    left: popupPos.x !== 0 ? `calc(100vw - 1.5rem - 280px + ${popupPos.x}px)` : "auto",
+    zIndex: 9999,
+    background: "var(--va-surface)",
+    border: `1px solid ${isRunning ? "#7c3aed" : allDone ? "#22c55e" : "var(--va-border)"}`,
+    borderRadius: "0.75rem",
+    padding: "0.875rem 1.125rem",
+    width: "280px",
+    boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+    userSelect: "none",
+  };
 
   return (
-    <ExtractionContext.Provider value={{ queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning }}>
+    <ExtractionContext.Provider value={{ queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, retryItem }}>
       {children}
 
-      {/* ── Global floating extraction indicator ─────────────────────────── */}
-      {(isRunning || queuedCount > 0) && (
-        <div style={{
-          position: "fixed", bottom: "1.5rem", right: "1.5rem", zIndex: 9999,
-          background: "var(--va-surface)", border: "1px solid #7c3aed",
-          borderRadius: "0.75rem", padding: "0.875rem 1.125rem", width: "280px",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.4)"
-        }}>
+      {/* Global floating extraction popup */}
+      {queue.length > 0 && (
+        <div style={popupStyle}>
+          {/* Drag handle */}
+          <div
+            onMouseDown={onMouseDown}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem", cursor: dragging ? "grabbing" : "grab" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span style={{ fontSize: "0.85rem" }}>
+                {isRunning ? "⏳" : allDone ? "✓" : "🕐"}
+              </span>
+              <span style={{ fontWeight: "700", fontSize: "0.78rem", color: isRunning ? "#c4b5fd" : allDone ? "#4ade80" : "var(--va-text)" }}>
+                {isRunning ? "Extracting..." : allDone ? "All done!" : "Queue paused"}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: "0.375rem", alignItems: "center" }}>
+              <span style={{ fontSize: "0.65rem", color: "var(--va-text-muted)" }}>⠿⠿</span>
+              {allDone && (
+                <button onClick={clearCompleted} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.9rem", padding: "0 0.125rem" }}>×</button>
+              )}
+            </div>
+          </div>
+
+          {/* Current running item */}
           {currentItem && (
-            <>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
-                <span style={{ fontSize: "0.85rem" }}>⏳</span>
-                <span style={{ fontWeight: "700", fontSize: "0.78rem", color: "#c4b5fd", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {currentItem.filename.replace(/\.(txt|pdf)$/i, "")}
-                </span>
-              </div>
-              <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", margin: "0 0 0.375rem" }}>
-                Part {currentItem.currentPart} of {currentItem.totalParts} · {currentItem.factsFound} facts
+            <div style={{ marginBottom: "0.375rem" }}>
+              <p style={{ fontSize: "0.72rem", color: "var(--va-text)", marginBottom: "0.25rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {currentItem.filename.replace(/\.(txt|pdf)$/i, "")}
               </p>
-              <div style={{ height: "4px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.375rem" }}>
+              <div style={{ height: "4px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.25rem" }}>
                 <div style={{
                   height: "100%", background: "#7c3aed", borderRadius: "9999px", transition: "width 0.5s",
                   width: currentItem.totalParts > 0 ? `${Math.min(100, (currentItem.currentPart / currentItem.totalParts) * 100)}%` : "5%"
                 }} />
               </div>
-            </>
-          )}
-          {queuedCount > 0 && (
-            <p style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", margin: 0 }}>
-              {queuedCount} more file{queuedCount !== 1 ? "s" : ""} queued
-            </p>
-          )}
-          <a href="/canon" style={{ display: "block", marginTop: "0.5rem", textAlign: "center", fontSize: "0.7rem", color: "var(--va-accent)", textDecoration: "none" }}>
-            Manage queue →
-          </a>
-        </div>
-      )}
-
-      {/* ── Completion notification ───────────────────────────────────────── */}
-      {queue.some(item => item.status === "done" && !item.savedCount) && !isRunning && queuedCount === 0 && (
-        <div style={{
-          position: "fixed", bottom: "1.5rem", right: "1.5rem", zIndex: 9999,
-          background: "var(--va-surface)", border: "1px solid #22c55e",
-          borderRadius: "0.75rem", padding: "0.875rem 1.125rem", width: "280px",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.4)"
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <p style={{ fontWeight: "700", fontSize: "0.8rem", color: "#4ade80", marginBottom: "0.2rem" }}>✓ All extractions complete!</p>
-              <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>
-                {queue.filter(i => i.status === "done").reduce((acc, i) => acc + i.factsFound, 0)} total facts ready to save
+              <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", margin: 0 }}>
+                Part {currentItem.currentPart} of {currentItem.totalParts} · {currentItem.factsFound} facts
               </p>
             </div>
-            <button onClick={clearCompleted} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1rem" }}>×</button>
+          )}
+
+          {/* Queue summary */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem", maxHeight: "100px", overflowY: "auto" }}>
+            {queue.filter(i => i.id !== currentItem?.id).map(item => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "0.375rem", fontSize: "0.68rem" }}>
+                <span>{item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"}</span>
+                <span style={{
+                  flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  color: item.status === "done" ? "#4ade80" : item.status === "error" ? "#f87171" : "var(--va-text-muted)"
+                }}>
+                  {item.filename.replace(/\.(txt|pdf)$/i, "")}
+                </span>
+                {item.status === "done" && <span style={{ color: "#4ade80", flexShrink: 0 }}>{item.factsFound}</span>}
+                {item.status === "error" && (
+                  <button onClick={() => retryItem(item.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#f87171", fontSize: "0.65rem", flexShrink: 0 }}>retry</button>
+                )}
+              </div>
+            ))}
           </div>
-          <a href="/canon" style={{ display: "block", marginTop: "0.5rem", background: "var(--va-accent)", color: "white", padding: "0.4rem 0.75rem", borderRadius: "0.375rem", fontSize: "0.75rem", fontWeight: "600", textAlign: "center", textDecoration: "none" }}>
-            Go to Canon Archives to save →
-          </a>
+
+          {allDone && (
+            <a href="/canon" style={{ display: "block", marginTop: "0.5rem", background: "var(--va-accent)", color: "white", padding: "0.35rem 0.75rem", borderRadius: "0.375rem", fontSize: "0.72rem", fontWeight: "600", textAlign: "center", textDecoration: "none" }}>
+              Save results in Canon Archives →
+            </a>
+          )}
+
+          {queuedCount > 0 && !isRunning && (
+            <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", marginTop: "0.25rem", textAlign: "center" }}>
+              {queuedCount} file{queuedCount !== 1 ? "s" : ""} waiting...
+            </p>
+          )}
         </div>
       )}
     </ExtractionContext.Provider>

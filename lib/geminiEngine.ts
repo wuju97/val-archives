@@ -85,19 +85,32 @@ export async function geminiCall(
 
   messages.push({ role: "user", content: prompt });
 
-  const response = await fetch(CEREBRAS_API_BASE, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${key}`,
-    },
-    body: JSON.stringify({
-      model: CEREBRAS_MODEL,
-      messages,
-      temperature: 0.7,
-      max_tokens: 8192,
-    }),
-  });
+  // Timeout after 45 seconds to prevent stalling
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  
+  let response: Response;
+  try {
+    response = await fetch(CEREBRAS_API_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: CEREBRAS_MODEL,
+        messages,
+        temperature: 0.7,
+        max_tokens: 8192,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(timeout);
+    if (err?.name === "AbortError") throw new Error("RATE_LIMIT"); // treat timeout as rate limit — will retry
+    throw err;
+  }
+  clearTimeout(timeout);
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
@@ -574,38 +587,41 @@ export async function geminiSemanticSearch(
 ): Promise<Array<{ id: string; text: string; category: string; relevance: string }>> {
   if (!hasGeminiKey() || entries.length === 0) return [];
 
-  const BATCH_SIZE = 60;
-  const allResults: Array<{ id: string; text: string; category: string; relevance: string }> = [];
+  // Send all entries to Gemini in one call for intelligent search
+  // Group by category for better context
+  const grouped: Record<string, string[]> = {};
+  entries.forEach((e, i) => {
+    if (!grouped[e.category]) grouped[e.category] = [];
+    grouped[e.category].push(i + ". " + e.text.slice(0, 200));
+  });
 
-  for (let i = 0; i < entries.length; i += BATCH_SIZE) {
-    const batch = entries.slice(i, i + BATCH_SIZE);
-    const entriesList = batch.map((e, idx) => idx + ". [" + e.category + "] " + e.text.slice(0, 150)).join("\n");
+  const vaultSummary = Object.entries(grouped)
+    .map(([cat, items]) => cat.toUpperCase() + ":\n" + items.join("\n"))
+    .join("\n\n");
 
-    const prompt = "Search this story archive for: \"" + query + "\"\n\n"
-      + "Entries:\n" + entriesList + "\n\n"
-      + "Return ONLY relevant entries as JSON:\n"
-      + '[{"index": 0, "relevance": "why relevant"}]\n'
-      + "If nothing relevant, return [].";
+  const prompt = "You are searching a story/RPG vault for: \"" + query + "\"\n\n"
+    + "VAULT CONTENTS:\n" + vaultSummary + "\n\n"
+    + "Find ALL entries relevant to the query. Be thorough — include anything that could help answer it.\n"
+    + "For each relevant entry, explain WHY it answers the query.\n\n"
+    + "Return JSON array of entry indices (0-based from the full list):\n"
+    + '[{"index": 0, "relevance": "explains why this answers the query"}]\n'
+    + "If nothing relevant exists, return [].";
 
-    try {
-      const result = await geminiCall(prompt);
-      const clean = result.replace(/```json|```/g, "").trim();
-      const jsonMatch = clean.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const parsed: Array<{ index: number; relevance: string }> = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed)) {
-          parsed
-            .filter(p => p.index >= 0 && p.index < batch.length)
-            .forEach(p => allResults.push({ ...batch[p.index], relevance: p.relevance }));
-        }
-      }
-    } catch {}
+  try {
+    const result = await geminiQualityCall(prompt);
+    const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
+    const jsonMatch = clean.match(/\[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    const parsed: Array<{ index: number; relevance: string }> = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(p => p.index >= 0 && p.index < entries.length)
+      .map(p => ({ ...entries[p.index], relevance: p.relevance }));
+  } catch {
+    return [];
   }
-
-  return allResults;
 }
 
-// ─── FEATURE: Organize Rule Book ─────────────────────────────────────────────
 
 export async function geminiOrganizeRules(
   rules: string[]
