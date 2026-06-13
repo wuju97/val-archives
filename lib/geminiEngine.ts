@@ -870,7 +870,7 @@ Return ONLY a JSON array, no other text, no markdown fences:
     };
 
     const response = await fetch(
-      `${GEMINI_API_BASE}/gemini-1.5-flash:generateContent?key=${key}`,
+      `${GEMINI_API_BASE}/gemini-1.5-flash-latest:generateContent?key=${key}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
