@@ -736,92 +736,40 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  const totalLen = Math.min(content.length, 75000);
-  const sectionSize = Math.floor(totalLen / 5);
-  const sections: string[] = [];
-  for (let i = 0; i < 5; i++) {
-    const s = content.slice(i * sectionSize, (i + 1) * sectionSize);
-    if (s.trim().length > 100) sections.push(s);
-  }
+  // Just test with the very first 3000 chars — one call, simple prompt
+  const sample = content.slice(0, 3000);
 
-  const allEntries: ExtractedVaultEntry[] = [];
-  const seen = new Set<string>();
+  if (onProgress) onProgress("Testing extraction on first section...");
 
-  for (let i = 0; i < sections.length; i++) {
-    if (onProgress) {
-      onProgress(`Section ${i + 1} of ${sections.length} — ${allEntries.length} facts found so far...`);
-    }
-
-    const prompt = `Read this excerpt from "${filename}" and extract facts for a story wiki/archive.
+  const prompt = `Extract characters and places from this Harry Potter text as JSON.
 
 TEXT:
----
-${sections[i]}
----
+${sample}
 
-You MUST extract facts from this text. This is a Harry Potter novel — it is full of extractable facts.
+Return a JSON array like this:
+[{"text": "Vernon Dursley is Harry Potter's uncle who lives at 4 Privet Drive", "category": "characters"}]
 
-For EVERY named person, place, object, spell, creature, or event you find, create an entry.
+Include every named person and place. Return ONLY the JSON array.`;
 
-Examples of what to extract:
-- "Vernon Dursley is a large beefy man who works as director of Grunnings, a drill company" → characters
-- "Privet Drive, number four, is where the Dursley family lives in Surrey" → locations  
-- "Petunia Dursley is Vernon Dursley's wife and Lily Potter's sister" → relationships
-- "Dudley Dursley is the spoiled young son of Vernon and Petunia Dursley" → characters
-- "Lily Potter is Petunia Dursley's sister and Harry Potter's mother" → relationships
-- "Harry Potter survived Voldemort's killing curse as a baby" → characters
-- "Hogwarts is a school for witchcraft and wizardry" → locations
-- "Owls are used to deliver mail in the wizarding world" → world-overview
-
-Be generous. Extract EVERYTHING named and specific. Aim for at least 10-20 entries per section.
-
-Categories: characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society
-
-Return ONLY a JSON array, nothing else:
-[{"text": "fact here", "category": "category-name"}]`;
-
-    let attempts = 0;
-    let success = false;
-
-    while (attempts < 3 && !success) {
-      try {
-        const result = await geminiCall(prompt);
-        const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        const jsonMatch = clean.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
-          if (Array.isArray(parsed)) {
-            for (const entry of parsed) {
-              if (!entry.text || !entry.category) continue;
-              const k = entry.text.trim().toLowerCase().slice(0, 80);
-              if (!seen.has(k) && entry.text.trim().length > 10) {
-                seen.add(k);
-                allEntries.push({ text: entry.text.trim(), category: entry.category });
-              }
-            }
-          }
-        }
-        success = true;
-      } catch (e) {
-        attempts++;
-        const msg = e instanceof Error ? e.message : "error";
-        if (msg.includes("RATE_LIMIT") || msg.includes("429") || msg.includes("quota")) {
-          const waitSec = attempts * 15;
-          if (onProgress) onProgress(`Rate limit — waiting ${waitSec}s...`);
-          await wait(waitSec * 1000);
-        } else {
-          if (onProgress) onProgress(`Section ${i + 1} error: ${msg}`);
-          break;
-        }
-      }
+  try {
+    const result = await geminiCall(prompt);
+    if (onProgress) onProgress(`Raw response (first 200 chars): ${result.slice(0, 200)}`);
+    
+    const clean = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const jsonMatch = clean.match(/\[[\s\S]*\]/);
+    
+    if (!jsonMatch) {
+      if (onProgress) onProgress(`No JSON found. Full response: ${result.slice(0, 300)}`);
+      return [];
     }
 
-    if (i < sections.length - 1) {
-      if (onProgress) onProgress(`Waiting before next section...`);
-      await wait(8000);
-    }
+    const parsed: ExtractedVaultEntry[] = JSON.parse(jsonMatch[0]);
+    if (onProgress) onProgress(`Found ${parsed.length} entries!`);
+    return Array.isArray(parsed) ? parsed.filter(e => e.text && e.text.length > 10) : [];
+
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "unknown";
+    if (onProgress) onProgress(`Error: ${msg}`);
+    return [];
   }
-
-  if (onProgress) onProgress(`Complete — ${allEntries.length} facts extracted!`);
-  return allEntries;
 }
