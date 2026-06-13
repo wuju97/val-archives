@@ -587,38 +587,50 @@ export async function geminiSemanticSearch(
 ): Promise<Array<{ id: string; text: string; category: string; relevance: string }>> {
   if (!hasGeminiKey() || entries.length === 0) return [];
 
-  // Send all entries to Gemini in one call for intelligent search
-  // Group by category for better context
-  const grouped: Record<string, string[]> = {};
-  entries.forEach((e, i) => {
-    if (!grouped[e.category]) grouped[e.category] = [];
-    grouped[e.category].push(i + ". " + e.text.slice(0, 200));
+  // Step 1: Keyword pre-filter to narrow candidates (no API call)
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const scored = entries.map((e, originalIdx) => {
+    const lower = e.text.toLowerCase();
+    let score = 0;
+    for (const word of queryWords) {
+      if (lower.includes(word)) score++;
+    }
+    return { ...e, originalIdx, score };
   });
 
-  const vaultSummary = Object.entries(grouped)
-    .map(([cat, items]) => cat.toUpperCase() + ":\n" + items.join("\n"))
-    .join("\n\n");
+  // Take top 150 by keyword score, always include top scorers
+  const candidates = scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 150);
 
-  const prompt = "You are searching a story/RPG vault for: \"" + query + "\"\n\n"
-    + "VAULT CONTENTS:\n" + vaultSummary + "\n\n"
-    + "Find ALL entries relevant to the query. Be thorough — include anything that could help answer it.\n"
-    + "For each relevant entry, explain WHY it answers the query.\n\n"
-    + "Return JSON array of entry indices (0-based from the full list):\n"
-    + '[{"index": 0, "relevance": "explains why this answers the query"}]\n'
-    + "If nothing relevant exists, return [].";
+  if (candidates.length === 0) return [];
+
+  // Step 2: Single Gemini call on candidates
+  const entriesList = candidates.map((e, i) => i + ". [" + e.category + "] " + e.text).join("\n");
+
+  const prompt = "You are searching a Harry Potter RPG story archive for: \"" + query + "\"\n\n"
+    + "Find ALL entries relevant to this question. Include entries that directly answer it AND entries that provide useful context.\n\n"
+    + "ENTRIES:\n" + entriesList + "\n\n"
+    + "Return JSON array with entry numbers and why they match:\n"
+    + "[{\"index\": 0, \"relevance\": \"explains why\"}]\n"
+    + "Be generous — include anything useful. Return [] only if truly nothing matches.";
 
   try {
     const result = await geminiQualityCall(prompt);
     const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
-    const jsonMatch = clean.match(/\[\s\S]*\]/);
+    const jsonMatch = clean.match(/\[([\s\S]*)\]/);
     if (!jsonMatch) return [];
-    const parsed: Array<{ index: number; relevance: string }> = JSON.parse(jsonMatch[0]);
+    const parsed: Array<{ index: number; relevance: string }> = JSON.parse("[" + jsonMatch[1] + "]");
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter(p => p.index >= 0 && p.index < entries.length)
-      .map(p => ({ ...entries[p.index], relevance: p.relevance }));
+      .filter(p => p.index >= 0 && p.index < candidates.length)
+      .map(p => ({ ...candidates[p.index], relevance: p.relevance }));
   } catch {
-    return [];
+    // Fallback: return keyword matches directly
+    return candidates
+      .filter(e => e.score > 0)
+      .slice(0, 20)
+      .map(e => ({ ...e, relevance: "Keyword match" }));
   }
 }
 
