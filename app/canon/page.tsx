@@ -93,7 +93,7 @@ export default function CanonPage() {
   function openExtractModal() {
     const allEntries = getAllCanonEntries();
     if (allEntries.length === 0) { flash("✗ No canon entries to extract from. Upload some files first."); return; }
-    if (!hasGeminiKey()) { flash("✗ Add your Gemini API key in Settings → AI to use this feature."); return; }
+    if (!hasGeminiKey()) { flash("✗ Add your Groq API key in Settings → AI to use this feature."); return; }
     // Default to first entry
     setExtractSourceId(allEntries[0].id);
     setExtractedEntries([]);
@@ -317,7 +317,7 @@ export default function CanonPage() {
               <div>
                 <h2 style={{ fontWeight: "bold", fontSize: "1.1rem" }}>✨ Extract Canon to Vault</h2>
                 <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginTop: "0.2rem" }}>
-                  Gemini reads a canon file and extracts characters, locations, relationships and more into Story Studio
+                  AI reads a canon file and extracts characters, locations, relationships and more into Story Studio
                 </p>
               </div>
               <button onClick={() => setShowExtractModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>

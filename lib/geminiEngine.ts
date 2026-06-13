@@ -709,10 +709,11 @@ export async function geminiExtractCanonToVault(
 ): Promise<ExtractedVaultEntry[]> {
   if (!hasGeminiKey()) return [];
 
-  const totalLen = Math.min(content.length, 80000);
-  const sectionSize = Math.floor(totalLen / 5);
+  const totalLen = content.length; // no cap — process full file
+  const sectionSize = Math.floor(totalLen / NUM_SECTIONS);
   const sections: string[] = [];
-  for (let i = 0; i < 5; i++) {
+  const NUM_SECTIONS = Math.max(5, Math.ceil(totalLen / 15000));
+  for (let i = 0; i < NUM_SECTIONS; i++) {
     const s = content.slice(i * sectionSize, (i + 1) * sectionSize);
     if (s.trim().length > 100) sections.push(s);
   }
@@ -791,4 +792,4 @@ Return ONLY a JSON array:
 
   if (onProgress) onProgress(`Complete — ${allEntries.length} facts extracted!`);
   return allEntries;
-} 
+}
