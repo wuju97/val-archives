@@ -634,7 +634,34 @@ export async function loadArchiveAsync(): Promise<ArchiveData> {
 
 export function clearArchive(): void {
   if (typeof window === "undefined") return;
+
+  // Load current archive to PRESERVE canon categories and custom tabs
+  const current = loadArchive();
+
+  // Create empty archive but keep canon files, custom tabs, archive name
+  const cleared = {
+    ...createEmptyArchive(),
+    archiveName: current.archiveName,
+    customTabs: current.customTabs ?? [],
+    canonCategories: current.canonCategories ?? [], // NEVER wipe canon files
+    masterPrompt: "",
+  };
+
+  // Clear localStorage vault data
   localStorage.removeItem(STORAGE_KEY);
+  // Clear dashboard character cards only
+  localStorage.removeItem("valArchivesDashboardCards");
+
+  // Save cleared archive (with canon preserved) to IDB
+  openIDB().then(db => {
+    idbPut(db, STORAGE_KEY, JSON.stringify(cleared));
+    idbPut(db, "valArchivesDashboardCards", JSON.stringify([]));
+  }).catch(() => {});
+
+  // Also save to localStorage for immediate UI update
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cleared));
+  } catch {}
 }
 
 export function addEntry(
