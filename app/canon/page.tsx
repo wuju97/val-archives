@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { hasGeminiKey, hasGeminiQualityKey, geminiCanonPlacement, geminiDistillCanon, geminiRefineDistilledCanon, ExtractedVaultEntry } from "../../lib/geminiEngine";
 import { useExtraction, ExtractionQueueItem } from "../ExtractionContext";
 import {
@@ -97,6 +97,11 @@ export default function CanonPage() {
   const [distilledResult, setDistilledResult] = useState("");
   const [distillTitle, setDistillTitle] = useState("");
   const [refiningDistill, setRefiningDistill] = useState(false);
+  // Distill queue
+  type DistillQueueItem = { id: string; entryId: string; filename: string; status: "queued" | "running" | "done" | "error"; progress: string; result: string; };
+  const [distillQueue, setDistillQueue] = useState<DistillQueueItem[]>([]);
+  const distillProcessing = useRef(false);
+  const [viewingDistillId, setViewingDistillId] = useState<string | null>(null);
   const [extractTotalParts, setExtractTotalParts] = useState(0);
   const [extractCurrentPart, setExtractCurrentPart] = useState(0);
   const [extractFactsFound, setExtractFactsFound] = useState(0);
@@ -208,6 +213,56 @@ export default function CanonPage() {
       }
     }
     setDistilling(false);
+  }
+
+  // ── Distill Queue Processing ──────────────────────────────────────────────
+  useEffect(() => {
+    async function processNextDistill() {
+      if (distillProcessing.current) return;
+      const next = distillQueue.find(i => i.status === "queued");
+      if (!next) return;
+
+      distillProcessing.current = true;
+      setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "running", progress: "Loading file..." } : i));
+
+      try {
+        const allEntries = getAllCanonEntries();
+        const entry = allEntries.find(e => e.id === next.entryId);
+        if (!entry) throw new Error("File not found");
+
+        let fullContent = entry.content;
+        if (entry.content === IDB_PLACEHOLDER) {
+          const idbContent = await loadCanonContentFromIDB(entry.id);
+          if (!idbContent) throw new Error("Could not load file");
+          fullContent = idbContent;
+        }
+
+        const result = await geminiDistillCanon(fullContent, entry.filename, (msg) => {
+          setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, progress: msg } : i));
+        });
+
+        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", result, progress: "Complete!" } : i));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Failed";
+        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "error", progress: "✗ " + msg } : i));
+      }
+
+      distillProcessing.current = false;
+    }
+
+    processNextDistill();
+  }, [distillQueue]);
+
+  function addToDistillQueue(entryId: string, filename: string) {
+    if (distillQueue.find(i => i.entryId === entryId && (i.status === "queued" || i.status === "running"))) return;
+    setDistillQueue(prev => [...prev, {
+      id: crypto.randomUUID(), entryId, filename,
+      status: "queued", progress: "Queued", result: ""
+    }]);
+  }
+
+  function removeFromDistillQueue(id: string) {
+    setDistillQueue(prev => prev.filter(i => i.id !== id));
   }
 
   async function refineDistilledResult() {
@@ -491,40 +546,62 @@ export default function CanonPage() {
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
-            {/* File picker */}
-            {!distilledResult && (
-              <div style={{ marginBottom: "1rem" }}>
-                <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a file to distill:</p>
-                <select value={distillSourceId} onChange={e => setDistillSourceId(e.target.value)} disabled={distilling}
-                  style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.875rem", outline: "none" }}>
+            {/* Queue UI */}
+            <div style={{ marginBottom: "1rem" }}>
+              <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.625rem" }}>Add files to distill queue:</p>
+              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.875rem" }}>
+                <select value={distillSourceId} onChange={e => setDistillSourceId(e.target.value)}
+                  style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.5rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", outline: "none" }}>
                   {getAllCanonEntries().map(e => (
                     <option key={e.id} value={e.id}>{e.filename}</option>
                   ))}
                 </select>
-
-                <div style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.5rem", padding: "0.875rem", marginBottom: "0.875rem", fontSize: "0.8rem", color: "var(--va-text-muted)", lineHeight: "1.6" }}>
-                  <p style={{ color: "#c4b5fd", fontWeight: "700", marginBottom: "0.375rem" }}>How Distill works:</p>
-                  <p>1. Gemini reads the <strong style={{ color: "var(--va-text)" }}>entire file</strong> at once (up to 900k chars)</p>
-                  <p>2. Creates a structured Canon Reference Document with all characters, locations, relationships, events, magic, lore</p>
-                  <p>3. You can <strong style={{ color: "var(--va-text)" }}>✨ Refine</strong> it with AI before saving</p>
-                  <p>4. Save it to Canon Archives, then <strong style={{ color: "var(--va-text)" }}>Extract to Vault</strong> runs on the clean structured doc → much better results</p>
-                </div>
-
-                {distillProgress && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-                    {distilling && <div style={{ width: "12px", height: "12px", borderRadius: "50%", border: "2px solid #7c3aed", borderTopColor: "transparent", animation: "spin 0.8s linear infinite" }} />}
-                    <p style={{ fontSize: "0.8rem", color: distillProgress.startsWith("✗") ? "#f87171" : "#c4b5fd" }}>{distillProgress}</p>
-                  </div>
-                )}
-
-                {!distilling && (
-                  <button onClick={runDistill}
-                    style={{ width: "100%", background: "#7c3aed", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
-                    ✨ Distill with Gemini
-                  </button>
-                )}
+                <button onClick={() => {
+                  const entry = getAllCanonEntries().find(e => e.id === distillSourceId);
+                  if (entry) addToDistillQueue(entry.id, entry.filename);
+                }} style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.5rem 1rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem", whiteSpace: "nowrap" }}>
+                  ✨ Add to Queue
+                </button>
               </div>
-            )}
+
+              <div style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "0.5rem", padding: "0.75rem", marginBottom: "0.875rem", fontSize: "0.75rem", color: "var(--va-text-muted)", lineHeight: "1.6" }}>
+                Gemini reads the <strong style={{ color: "var(--va-text)" }}>entire file at once</strong> → structured canon reference → much better extraction results.
+                Auto-retries indefinitely if Gemini is busy. You can close this panel and use the site while it runs.
+              </div>
+
+              {/* Queue list */}
+              {distillQueue.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                  <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>
+                    Distill Queue ({distillQueue.length})
+                  </p>
+                  {distillQueue.map(item => (
+                    <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+                        <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--va-text)" }}>
+                          {item.status === "running" ? "⏳" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "")}
+                        </span>
+                        <div style={{ display: "flex", gap: "0.375rem" }}>
+                          {item.status === "done" && (
+                            <button onClick={() => { setDistilledResult(item.result); setDistillTitle(item.filename.replace(/\.[^/.]+$/, "") + " — Canon Reference"); setViewingDistillId(item.id); }}
+                              style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600" }}>
+                              View & Save
+                            </button>
+                          )}
+                          {(item.status === "queued" || item.status === "done" || item.status === "error") && (
+                            <button onClick={() => removeFromDistillQueue(item.id)}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem" }}>×</button>
+                          )}
+                        </div>
+                      </div>
+                      <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : "#c4b5fd", margin: 0 }}>
+                        {item.progress}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Result */}
             {distilledResult && (

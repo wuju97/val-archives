@@ -811,13 +811,27 @@ export async function geminiDistillCanon(
     + "Write each entry as a clear factual statement. "
     + "This document will be used as the sole reference for running this story as an RPG.";
 
-  try {
-    const result = await geminiQualityCall(prompt);
-    if (onProgress) onProgress("Distillation complete!");
-    return result;
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    throw new Error(msg);
+  // Auto-retry indefinitely on high demand / rate limit errors
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      if (attempt > 1 && onProgress) onProgress("Attempt " + attempt + " — sending to Gemini...");
+      const result = await geminiQualityCall(prompt);
+      if (onProgress) onProgress("Distillation complete!");
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") || 
+                           msg.includes("429") || msg.includes("503") || msg.includes("overloaded");
+      if (isOverloaded) {
+        const waitSec = Math.min(30 + attempt * 5, 120); // 35s, 40s... up to 120s
+        if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        continue; // retry
+      }
+      throw new Error(msg); // non-retryable error
+    }
   }
 }
 
