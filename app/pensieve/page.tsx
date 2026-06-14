@@ -2,11 +2,41 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { hasGeminiKey, geminiSemanticSearch } from "../../lib/geminiEngine";
+import {
+  hasGeminiKey, hasGeminiQualityKey, hasDeepSeekKey,
+  geminiSemanticSearch, geminiPensieveFinalAnswer,
+} from "../../lib/geminiEngine";
 import {
   loadArchive, loadArchiveAsync, saveArchive, updateEntry, deleteEntry,
   regenerateMasterPrompt, CATEGORY_LABELS, CATEGORY_ICONS, StoryCategory,
 } from "@/lib/archiveEngine";
+
+// ─── Stage 1: Cerebras keyword pre-filter (no API call) ───────────────────────
+function keywordPreFilter(
+  query: string,
+  entries: Array<{ id: string; text: string; category: string }>
+): Array<{ id: string; text: string; category: string }> {
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (queryWords.length === 0) return entries.slice(0, 150);
+
+  const scored = entries.map(e => {
+    const lower = e.text.toLowerCase();
+    let score = 0;
+    for (const word of queryWords) {
+      if (lower.includes(word)) score += 2;
+      // Partial match
+      for (const w of lower.split(/\s+/)) {
+        if (w.startsWith(word.slice(0, 4)) && word.length > 4) score += 1;
+      }
+    }
+    return { ...e, score };
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 150)
+    .filter(e => e.score > 0 || scored.length <= 150);
+}
 
 export default function PensievePage() {
   const [archive, setArchive] = useState(loadArchive());
@@ -15,7 +45,9 @@ export default function PensievePage() {
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [aiQuery, setAiQuery] = useState("");
   const [aiResults, setAiResults] = useState<Array<{ id: string; text: string; category: string; relevance: string }> | null>(null);
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [aiSearching, setAiSearching] = useState(false);
+  const [aiStage, setAiStage] = useState<"idle" | "filtering" | "investigating" | "answering">("idle");
   const [aiMode, setAiMode] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -23,7 +55,7 @@ export default function PensievePage() {
 
   useEffect(() => {
     const sync = loadArchive();
-    if (sync.entries.length > 0 || (sync.canonCategories ?? []).length > 0) {
+    if (sync.entries.length > 0) {
       setArchive(sync);
     } else {
       loadArchiveAsync().then(data => { if (data) setArchive(data); });
@@ -37,7 +69,7 @@ export default function PensievePage() {
   }
 
   const entries = archive.entries
-    .filter((entry) => {
+    .filter(entry => {
       const matchesSearch = search.trim() === "" || entry.text.toLowerCase().includes(search.toLowerCase());
       const matchesCategory = selectedCategory === "all" || entry.category === selectedCategory;
       return matchesSearch && matchesCategory;
@@ -46,6 +78,53 @@ export default function PensievePage() {
       ? new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       : new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()
     );
+
+  // ─── Three-stage Pensieve Pipeline ─────────────────────────────────────────
+  async function runPensieveSearch() {
+    if (!aiQuery.trim()) return;
+    setAiSearching(true);
+    setAiMode(true);
+    setAiResults(null);
+    setAiAnswer(null);
+
+    const allEntries = archive.entries.map(e => ({ id: e.id, text: e.text, category: e.category }));
+
+    // Stage 1 — Cerebras: keyword pre-filter (instant, no API)
+    setAiStage("filtering");
+    const candidates = keywordPreFilter(aiQuery, allEntries);
+
+    if (candidates.length === 0) {
+      setAiResults([]);
+      setAiAnswer("No entries in the vault match your query. Try adding more content via Inbox or Story Studio.");
+      setAiSearching(false);
+      setAiStage("idle");
+      return;
+    }
+
+    // Stage 2 — DeepSeek: Pensieve Investigation
+    setAiStage("investigating");
+    let investigated: Array<{ id: string; text: string; category: string; relevance: string }> = [];
+    if (hasDeepSeekKey() || hasGeminiKey()) {
+      investigated = await geminiSemanticSearch(aiQuery, candidates);
+    } else {
+      // No AI key — use keyword matches directly
+      investigated = candidates.slice(0, 20).map(e => ({ ...e, relevance: "Keyword match" }));
+    }
+
+    setAiResults(investigated);
+
+    // Stage 3 — Gemini: final narrative answer
+    if (investigated.length > 0 && hasGeminiQualityKey()) {
+      setAiStage("answering");
+      const answer = await geminiPensieveFinalAnswer(aiQuery, investigated);
+      setAiAnswer(answer);
+    } else if (investigated.length === 0) {
+      setAiAnswer("The investigation found no relevant entries for this query.");
+    }
+
+    setAiSearching(false);
+    setAiStage("idle");
+  }
 
   function saveEdit(id: string) {
     if (!editingText.trim()) return;
@@ -57,6 +136,13 @@ export default function PensievePage() {
     const updated = regenerateMasterPrompt(deleteEntry(archive, id));
     saveArchive(updated); setArchive(updated); setDeleteConfirmId(null);
   }
+
+  const stageLabel = {
+    idle: "",
+    filtering: "⚡ Stage 1 — Scanning vault...",
+    investigating: "🧠 Stage 2 — Investigating...",
+    answering: "✨ Stage 3 — Composing answer...",
+  }[aiStage];
 
   const S = {
     page: { minHeight: "100vh", background: "var(--va-bg)", color: "var(--va-text)", padding: "2rem" },
@@ -72,81 +158,79 @@ export default function PensievePage() {
       <h1 style={{ fontSize: "3rem", fontWeight: "bold", marginBottom: "0.5rem" }}>🌀 Pensieve</h1>
       <p style={{ ...S.muted, marginBottom: "2rem" }}>{archive.entries.length} {archive.entries.length === 1 ? "memory" : "memories"} in vault</p>
 
-      {/* AI Semantic Search */}
-      {hasGeminiKey() && (
-        <div style={{ marginBottom: "1rem" }}>
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <input value={aiQuery}
-              onChange={e => { setAiQuery(e.target.value); if (!e.target.value.trim()) { setAiResults(null); setAiMode(false); } }}
-              onKeyDown={async e => {
-                if (e.key === "Enter" && aiQuery.trim()) {
-                  setAiSearching(true); setAiMode(true);
-                  // Include canon entries in search
-            const canonEntries = (archive.canonCategories ?? []).flatMap(cat =>
-              cat.entries.map(e => ({ id: e.id, text: e.content, category: "canon-" + cat.name }))
-            );
-            const allEntries = [
-              ...archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })),
-              ...canonEntries,
-            ];
-            const results = await geminiSemanticSearch(aiQuery, allEntries);
-                  setAiResults(results); setAiSearching(false);
-                }
-              }}
-              placeholder="✨ Ask anything — e.g. What do I know about Hermione's relationship with Valefor?"
-              style={{ flex: 1, background: "var(--va-surface)", border: "1px solid #7c3aed", borderRadius: "0.5rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem" }} />
-            <button onClick={async () => {
-              if (!aiQuery.trim()) return;
-              setAiSearching(true); setAiMode(true);
-              // Include canon entries in search
-            const canonEntries = (archive.canonCategories ?? []).flatMap(cat =>
-              cat.entries.map(e => ({ id: e.id, text: e.content, category: "canon-" + cat.name }))
-            );
-            const allEntries = [
-              ...archive.entries.map(en => ({ id: en.id, text: en.text, category: en.category })),
-              ...canonEntries,
-            ];
-            const results = await geminiSemanticSearch(aiQuery, allEntries);
-              setAiResults(results); setAiSearching(false);
-            }} disabled={!aiQuery.trim() || aiSearching}
-              style={{ background: "#7c3aed", color: "white", padding: "0.625rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: (!aiQuery.trim() || aiSearching) ? 0.5 : 1, whiteSpace: "nowrap" }}>
-              {aiSearching ? "✨ Searching..." : "✨ AI Search"}
+      {/* ── Pensieve AI Search ─────────────────────────────────────────────── */}
+      <div style={{ marginBottom: "1.5rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input value={aiQuery}
+            onChange={e => { setAiQuery(e.target.value); if (!e.target.value.trim()) { setAiResults(null); setAiAnswer(null); setAiMode(false); } }}
+            onKeyDown={e => { if (e.key === "Enter") runPensieveSearch(); }}
+            placeholder="✨ Ask anything — e.g. What do I know about Hermione?"
+            style={{ flex: 1, background: "var(--va-surface)", border: "1px solid #7c3aed", borderRadius: "0.5rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem" }} />
+          <button onClick={runPensieveSearch} disabled={!aiQuery.trim() || aiSearching}
+            style={{ background: "#7c3aed", color: "white", padding: "0.625rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: (!aiQuery.trim() || aiSearching) ? 0.5 : 1, whiteSpace: "nowrap" }}>
+            {aiSearching ? "Searching..." : "✨ AI Search"}
+          </button>
+          {aiMode && (
+            <button onClick={() => { setAiMode(false); setAiResults(null); setAiAnswer(null); setAiQuery(""); setAiStage("idle"); }}
+              style={{ background: "var(--va-border)", color: "var(--va-text-muted)", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontSize: "0.8rem" }}>
+              Clear
             </button>
-            {aiMode && (
-              <button onClick={() => { setAiMode(false); setAiResults(null); setAiQuery(""); }}
-                style={{ background: "var(--va-border)", color: "var(--va-text-muted)", padding: "0.625rem 0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontSize: "0.8rem" }}>
-                Clear
-              </button>
-            )}
-          </div>
-          {aiMode && aiResults !== null && (
-            <p style={{ fontSize: "0.75rem", color: "#c4b5fd", marginTop: "0.375rem" }}>
-              {aiResults.length > 0 ? `✨ Found ${aiResults.length} relevant ${aiResults.length === 1 ? "entry" : "entries"}` : "✨ No relevant entries found"}
-            </p>
           )}
-          {aiMode && aiResults !== null && aiResults.length > 0 && (
-            <div style={{ marginTop: "1rem", display: "flex", flexDirection: "column", gap: "0.625rem" }}>
+        </div>
+
+        {/* Stage indicator */}
+        {aiSearching && stageLabel && (
+          <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <div style={{ width: "12px", height: "12px", borderRadius: "50%", border: "2px solid #7c3aed", borderTopColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+            <p style={{ fontSize: "0.78rem", color: "#c4b5fd" }}>{stageLabel}</p>
+          </div>
+        )}
+
+        {/* Gemini narrative answer */}
+        {aiMode && aiAnswer && (
+          <div style={{ marginTop: "1rem", background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.75rem", padding: "1.125rem" }}>
+            <p style={{ fontSize: "0.72rem", color: "#c4b5fd", fontWeight: "700", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>✨ The Archivist</p>
+            <p style={{ fontSize: "0.9rem", color: "var(--va-text)", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>{aiAnswer}</p>
+          </div>
+        )}
+
+        {/* Evidence entries */}
+        {aiMode && aiResults !== null && aiResults.length > 0 && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🧠 Evidence — {aiResults.length} relevant {aiResults.length === 1 ? "entry" : "entries"} found
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               {aiResults.map(result => (
-                <div key={result.id} style={{ background: "var(--va-surface)", border: "1px solid #7c3aed33", borderRadius: "0.75rem", padding: "1rem" }}>
-                  <span style={{ fontSize: "0.7rem", color: "#c4b5fd", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>{result.category}</span>
-                  <p style={{ fontSize: "0.875rem", color: "var(--va-text)", lineHeight: "1.6", margin: "0.375rem 0" }}>{result.text}</p>
-                  <p style={{ fontSize: "0.75rem", color: "#7c3aed", fontStyle: "italic" }}>✨ {result.relevance}</p>
+                <div key={result.id} style={{ background: "var(--va-surface)", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "0.625rem", padding: "0.875rem", borderLeft: "3px solid #7c3aed" }}>
+                  <span style={{ fontSize: "0.68rem", color: "#c4b5fd", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    {CATEGORY_ICONS[result.category as StoryCategory] ?? "📄"} {CATEGORY_LABELS[result.category as StoryCategory] ?? result.category}
+                  </span>
+                  <p style={{ fontSize: "0.875rem", color: "var(--va-text)", lineHeight: "1.6", margin: "0.375rem 0 0.25rem" }}>{result.text}</p>
+                  <p style={{ fontSize: "0.72rem", color: "#7c3aed", fontStyle: "italic" }}>↳ {result.relevance}</p>
                 </div>
               ))}
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
+        {aiMode && aiResults !== null && aiResults.length === 0 && !aiSearching && (
+          <p style={{ fontSize: "0.78rem", color: "var(--va-text-muted)", marginTop: "0.5rem" }}>
+            ✨ No relevant entries found for this query.
+          </p>
+        )}
+      </div>
+
+      {/* ── Regular search + filters ────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "1rem" }}>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search memories..." style={S.input} />
-        <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value as StoryCategory | "all")} style={S.select}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search memories..." style={S.input} />
+        <select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value as StoryCategory | "all")} style={S.select}>
           <option value="all">All Categories ({archive.entries.length})</option>
-          {ALL_CATEGORIES.map((cat) => (
+          {ALL_CATEGORIES.map(cat => (
             <option key={cat} value={cat}>{CATEGORY_ICONS[cat]} {CATEGORY_LABELS[cat]}{(categoryCounts[cat] ?? 0) > 0 ? ` (${categoryCounts[cat]})` : ""}</option>
           ))}
         </select>
-        <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as "newest" | "oldest")} style={S.select}>
+        <select value={sortOrder} onChange={e => setSortOrder(e.target.value as "newest" | "oldest")} style={S.select}>
           <option value="newest">Newest First</option>
           <option value="oldest">Oldest First</option>
         </select>
@@ -163,13 +247,14 @@ export default function PensievePage() {
         </div>
       )}
 
+      {/* ── Entry list ──────────────────────────────────────────────────────── */}
       {entries.length === 0 ? (
         <div style={{ textAlign: "center", paddingTop: "4rem" }}>
           <p style={S.muted}>{archive.entries.length === 0 ? "No memories yet. Add entries via the Inbox." : "No memories match your search."}</p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          {entries.map((entry) => (
+          {entries.map(entry => (
             <div key={entry.id} style={{ ...S.surface, padding: "1rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
                 <span style={{ fontSize: "0.875rem", color: "var(--va-accent)" }}>{CATEGORY_ICONS[entry.category]} {CATEGORY_LABELS[entry.category]}</span>
@@ -185,7 +270,7 @@ export default function PensievePage() {
               </div>
               {editingId === entry.id ? (
                 <div>
-                  <textarea value={editingText} onChange={(e) => setEditingText(e.target.value)} style={{ ...S.input, minHeight: "80px", resize: "vertical" }} autoFocus />
+                  <textarea value={editingText} onChange={e => setEditingText(e.target.value)} style={{ ...S.input, minHeight: "80px", resize: "vertical" }} autoFocus />
                   <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.5rem" }}>
                     <button onClick={() => saveEdit(entry.id)} style={{ background: "#15803d", color: "white", padding: "0.25rem 0.75rem", borderRadius: "0.25rem", border: "none", cursor: "pointer", fontSize: "0.875rem" }}>✓ Save</button>
                     <button onClick={() => { setEditingId(null); setEditingText(""); }} style={{ ...S.muted, background: "none", border: "none", cursor: "pointer", fontSize: "0.875rem" }}>Cancel</button>
@@ -209,6 +294,10 @@ export default function PensievePage() {
           ))}
         </div>
       )}
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }

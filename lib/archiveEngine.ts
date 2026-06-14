@@ -563,85 +563,71 @@ export function regenerateMasterPrompt(archive: ArchiveData): ArchiveData {
   };
 }
 
-// ─── saveArchive (legacy single-vault) ───────────────────────────────────────
-// ALWAYS writes localStorage first. IndexedDB is a backup mirror only.
-// If localStorage is full, strips large canon content and saves stripped
-// version to localStorage so pages never load blank.
+// ─── saveArchive ─────────────────────────────────────────────────────────────
+// IDB IS THE PRIMARY STORE. localStorage is a fast-access cache only.
+// NEVER strips or truncates data. If localStorage is full, skip it silently.
+// Data is ALWAYS saved in full to IndexedDB first — it never gets corrupted.
 export function saveArchive(data: ArchiveData): void {
   if (typeof window === "undefined") return;
   const prepared = regenerateMasterPrompt(data);
   prepared.lastSaved = new Date().toISOString();
   const serialized = JSON.stringify(prepared);
 
-  let savedToLocal = false;
+  // 1. Save full data to IndexedDB FIRST — this is the primary store
+  openIDB().then(db => idbPut(db, STORAGE_KEY, serialized)).catch((err) => {
+    console.error("[ValArchives] IDB save failed:", err);
+  });
 
-  // Attempt 1: save full data
+  // 2. Try to cache in localStorage for fast sync access — never strip, never corrupt
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
-    savedToLocal = true;
   } catch {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.setItem(STORAGE_KEY, serialized);
-      savedToLocal = true;
-    } catch {
-      savedToLocal = false;
-    }
+    // localStorage full — that's fine, IDB has the full data
+    // Remove the key so loadArchive falls through to IDB
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
   }
-
-  // Attempt 2: strip large canon entries and retry
-  if (!savedToLocal) {
-    const stripped: ArchiveData = {
-      ...prepared,
-      canonCategories: (prepared.canonCategories ?? []).map(cat => ({
-        ...cat,
-        entries: cat.entries.map(e => ({
-          ...e,
-          content: e.content.length > 500
-            ? e.content.slice(0, 500) + `\n\n[Full content stored separately — id: ${e.id}]`
-            : e.content,
-        })),
-      })),
-    };
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
-      savedToLocal = true;
-    } catch {
-      console.error("[ValArchives] CRITICAL: Cannot write to localStorage.");
-    }
-  }
-
-  // Always mirror full data to IndexedDB as backup
-  openIDB().then(db => idbPut(db, STORAGE_KEY, serialized)).catch(() => {});
 }
 
 export function loadArchive(): ArchiveData {
   if (typeof window === "undefined") return createEmptyArchive();
+  // Try localStorage cache first (fast)
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
-    try { return JSON.parse(saved) as ArchiveData; } catch {}
+    try {
+      const parsed = JSON.parse(saved) as ArchiveData;
+      // Only use localStorage if it has actual entries — not empty/stripped
+      if (parsed && (parsed.entries?.length > 0 || parsed.masterPrompt)) {
+        return parsed;
+      }
+    } catch {}
   }
+  // localStorage empty/missing/stale — this is normal, return empty and let
+  // loadArchiveAsync handle IDB restore for pages that need it
   return createEmptyArchive();
 }
 
 export async function loadArchiveAsync(): Promise<ArchiveData> {
   if (typeof window === "undefined") return createEmptyArchive();
 
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try { return JSON.parse(saved) as ArchiveData; } catch {}
-  }
-
+  // Always load from IDB first — it has the full, uncorrupted data
   try {
     const db = await openIDB();
     const result = await idbGet(db, STORAGE_KEY);
     if (result) {
       const data = JSON.parse(result) as ArchiveData;
-      try { localStorage.setItem(STORAGE_KEY, result); } catch {}
+      // Update localStorage cache with full data
+      try { localStorage.setItem(STORAGE_KEY, result); } catch {
+        try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      }
       return data;
     }
   } catch {}
+
+  // Fall back to localStorage if IDB fails
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try { return JSON.parse(saved) as ArchiveData; } catch {}
+  }
 
   return createEmptyArchive();
 }
@@ -1054,59 +1040,25 @@ export async function loadVaultByIdAsync(vaultId: string): Promise<ArchiveData> 
 }
 
 // ─── saveVaultById ────────────────────────────────────────────────────────────
-// ALWAYS writes localStorage first — this is the primary store.
-// IndexedDB is a mirror/backup ONLY, never the sole source.
-// If localStorage is full, strips large canon content, saves stripped version
-// to localStorage so pages never load blank, saves full to IDB.
+// IDB IS THE PRIMARY STORE. localStorage is a fast-access cache only.
+// NEVER strips or truncates data under any circumstances.
 export function saveVaultById(vaultId: string, data: ArchiveData): void {
   if (typeof window === "undefined") return;
   const prepared = { ...data, lastSaved: new Date().toISOString() };
   const storageKey = getVaultStorageKey(vaultId);
   const fullSerialized = JSON.stringify(prepared);
 
-  let savedToLocal = false;
+  // 1. Save to IDB first — always, unconditionally, never stripped
+  openIDB().then(db => idbPut(db, storageKey, fullSerialized)).catch((err) => {
+    console.error("[ValArchives] IDB vault save failed:", err);
+  });
 
-  // Attempt 1: save full data
+  // 2. Cache in localStorage — if full, skip silently (IDB has the data)
   try {
     localStorage.setItem(storageKey, fullSerialized);
-    savedToLocal = true;
   } catch {
-    try {
-      localStorage.removeItem(storageKey);
-      localStorage.setItem(storageKey, fullSerialized);
-      savedToLocal = true;
-    } catch {
-      savedToLocal = false;
-    }
+    try { localStorage.removeItem(storageKey); } catch {}
   }
-
-  // Attempt 2: strip large canon content and retry
-  if (!savedToLocal) {
-    const stripped: ArchiveData = {
-      ...prepared,
-      canonCategories: (prepared.canonCategories ?? []).map(cat => ({
-        ...cat,
-        entries: cat.entries.map(e => ({
-          ...e,
-          content: e.content.length > 500
-            ? e.content.slice(0, 500) + `\n\n[Full content stored separately — id: ${e.id}]`
-            : e.content,
-        })),
-      })),
-    };
-    const strippedSerialized = JSON.stringify(stripped);
-    try {
-      localStorage.removeItem(storageKey);
-      localStorage.setItem(storageKey, strippedSerialized);
-      savedToLocal = true;
-      console.warn("[ValArchives] localStorage full — canon content stripped. Full data saved to IndexedDB.");
-    } catch {
-      console.error("[ValArchives] CRITICAL: Cannot write vault to localStorage. Data may be lost on reload.");
-    }
-  }
-
-  // Always mirror full data to IndexedDB as backup
-  openIDB().then(db => idbPut(db, storageKey, fullSerialized)).catch(() => {});
 
   // Update vault index meta
   try {

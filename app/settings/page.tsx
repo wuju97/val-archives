@@ -7,6 +7,7 @@ import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMas
 import {
   getGeminiKey, setGeminiKey, clearGeminiKey, testGeminiConnection, hasGeminiKey,
   getGeminiQualityKey, setGeminiQualityKey, clearGeminiQualityKey, testGeminiQualityConnection, hasGeminiQualityKey,
+  getDeepSeekKey, setDeepSeekKey, clearDeepSeekKey, testDeepSeekConnection, hasDeepSeekKey,
   geminiChat, geminiErrorMessage, geminiTargetedDelete,
 } from "../../lib/geminiEngine";
 
@@ -131,6 +132,10 @@ export default function SettingsPage() {
   const [qualityApiKey, setQualityApiKey] = useState("");
   const [testingQualityApi, setTestingQualityApi] = useState(false);
   const [qualityApiStatus, setQualityApiStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [deepSeekKey, setDeepSeekKeyState] = useState("");
+  const [testingDeepSeek, setTestingDeepSeek] = useState(false);
+  const [deepSeekStatus, setDeepSeekStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [aiMode, setAiMode] = useState<"simple" | "advanced">("simple");
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -149,6 +154,8 @@ export default function SettingsPage() {
     if (savedKey) setApiKey(savedKey);
     const savedQualityKey = getGeminiQualityKey();
     if (savedQualityKey) setQualityApiKey(savedQualityKey);
+    const savedDSKey = getDeepSeekKey();
+    if (savedDSKey) setDeepSeekKeyState(savedDSKey);
   }, []);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
