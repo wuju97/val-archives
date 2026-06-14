@@ -286,7 +286,7 @@ export async function geminiQualityCall(
   if (systemInstruction) {
     body.systemInstruction = { parts: [{ text: systemInstruction }] };
   }
-  body.generationConfig = { temperature: 0.7, maxOutputTokens: 4096 };
+  body.generationConfig = { temperature: 0.7, maxOutputTokens: 65536 };
 
   const response = await fetch(
     `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`,
