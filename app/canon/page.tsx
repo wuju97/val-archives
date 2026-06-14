@@ -74,7 +74,7 @@ export default function CanonPage() {
   const [pasteText, setPasteText] = useState("");
   const [pasteTitle, setPasteTitle] = useState("");
   const [importing, setImporting] = useState(false);
-  const [importingToVault, setImportingToVault] = useState(false);
+  const [importingEntryId, setImportingEntryId] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState("");
   const [importDone, setImportDone] = useState(false);
   const [msg, setMsg] = useState("");
@@ -346,11 +346,11 @@ export default function CanonPage() {
   }
 
   // ── Import Distilled Canon to Vault ──────────────────────────────────────────
-  async function importDistilledToVault(entryContent: string, entryFilename: string) {
+  async function importDistilledToVault(entryId: string, entryContent: string, entryFilename: string) {
     if (!hasGeminiKey()) { flash("✗ Cerebras key required. Add it in Settings → AI."); return; }
-    if (importingToVault) return;
+    if (importingEntryId) return;
 
-    setImportingToVault(true);
+    setImportingEntryId(entryId);
     setImportDone(false);
     setImportProgress("Splitting document into sections...");
 
@@ -408,7 +408,7 @@ export default function CanonPage() {
     const refreshed = regenerateMasterPrompt(currentArchive);
     saveArchive(refreshed);
     setArchive(refreshed);
-    setImportingToVault(false);
+    setImportingEntryId(null);
     setImportDone(true);
     setImportProgress("✓ Complete! " + totalSaved + " entries imported to vault.");
     flash("✓ " + totalSaved + " entries imported from " + entryFilename + " to vault!");
@@ -1151,11 +1151,11 @@ export default function CanonPage() {
                               if (idbContent) fullContent = idbContent;
                               else { flash("✗ Could not load file content"); return; }
                             }
-                            importDistilledToVault(fullContent, entry.filename);
+                            importDistilledToVault(entry.id, fullContent, entry.filename);
                           }}
-                            disabled={importingToVault}
-                            style={{ background: importingToVault ? "var(--va-border)" : "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.625rem", cursor: importingToVault ? "default" : "pointer", fontSize: "0.72rem", fontWeight: "600", whiteSpace: "nowrap", opacity: importingToVault ? 0.5 : 1 }}>
-                            {importingToVault ? "Importing..." : "⚡ Import to Vault"}
+                            disabled={!!importingEntryId}
+                            style={{ background: importingEntryId === entry.id ? "#4ade80" : importingEntryId ? "var(--va-border)" : "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.625rem", cursor: importingEntryId ? "default" : "pointer", fontSize: "0.72rem", fontWeight: "600", whiteSpace: "nowrap", opacity: importingEntryId && importingEntryId !== entry.id ? 0.3 : 1 }}>
+                            {importingEntryId === entry.id ? "⏳ Importing..." : "⚡ Import to Vault"}
                           </button>
                         )}
                         <button onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
