@@ -382,26 +382,59 @@ export default function CanonPage() {
       return "world-overview";
     }
 
-    function parseEntries(sectionText: string): string[] {
+    function parseEntries(sectionText: string, sectionHeader: string): string[] {
       const lines = sectionText.split("\n");
       const results: string[] = [];
-      let current = "";
+      let characterName = "";
 
       for (const line of lines) {
         const t = line.trim();
         if (!t || t.startsWith("## ") || t.startsWith("# ") || t === "---") continue;
-        // Top-level bullet (not indented)
-        const isTopLevel = (t.startsWith("* ") || t.startsWith("- ")) && !line.startsWith("    ");
-        if (isTopLevel) {
-          if (current.length > 30) results.push(current.trim());
-          current = t.replace(/^[*-]\s+/, "");
+
+        // Detect indentation level
+        const indentLevel = line.match(/^(\s*)/)?.[1].length ?? 0;
+        const isBullet = t.startsWith("* ") || t.startsWith("- ") || t.match(/^\d+\.\s/);
+        if (!isBullet) continue;
+
+        const rawText = t.replace(/^[*-]\s+/, "").replace(/^\d+\.\s+/, "").trim();
+        const cleaned = rawText.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").trim();
+
+        if (indentLevel === 0) {
+          // Top-level — could be character name or standalone fact
+          characterName = cleaned.replace(/:$/, "").trim();
+          // Only add as entry if it has content beyond just a name
+          if (cleaned.length > 30 && !cleaned.endsWith(":")) {
+            results.push(cleaned);
+          }
+        } else if (indentLevel <= 4) {
+          // Second level — key property like "Physical Description: ..."
+          const colonIdx = cleaned.indexOf(":");
+          if (colonIdx > 0 && characterName) {
+            const prop = cleaned.slice(0, colonIdx).trim();
+            const val = cleaned.slice(colonIdx + 1).trim();
+            if (val.length > 10) {
+              // Create a proper sentence: "Harry Potter's Physical Description: ..."
+              results.push(characterName + " — " + prop + ": " + val);
+            }
+          } else if (cleaned.length > 20) {
+            if (characterName) {
+              results.push(characterName + ": " + cleaned);
+            } else {
+              results.push(cleaned);
+            }
+          }
         } else {
-          const cleaned = t.replace(/^[*-]\s+/, "");
-          if (cleaned) current += (current ? " | " : "") + cleaned;
+          // Deeper level — sub-property value, combine with parent context
+          if (cleaned.length > 15) {
+            if (characterName) {
+              results.push(characterName + ": " + cleaned);
+            } else {
+              results.push(cleaned);
+            }
+          }
         }
       }
-      if (current.length > 30) results.push(current.trim());
-      return results;
+      return results.filter(r => r.length > 20);
     }
 
     const rawSections = entryContent.split("\n## ");
@@ -420,7 +453,7 @@ export default function CanonPage() {
 
       setImportProgress("(" + i + "/" + total + ") Parsing: " + sectionHeader + "...");
 
-      const entries = parseEntries(raw);
+      const entries = parseEntries(raw, sectionHeader);
       for (const text of entries) {
         const clean = text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").trim();
         if (clean.length < 20) continue;
