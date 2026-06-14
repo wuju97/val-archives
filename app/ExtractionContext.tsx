@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useRef, useState, useEffect, ReactNode } from "react";
 import { geminiExtractCanonToVault, ExtractedVaultEntry } from "../lib/geminiEngine";
-import { loadArchive, saveArchive, addEntry } from "../lib/archiveEngine";
+import { loadArchive, loadArchiveAsync, saveArchive, addEntry } from "../lib/archiveEngine";
 
 export interface ExtractionQueueItem {
   id: string;
@@ -21,7 +21,7 @@ interface ExtractionContextType {
   queue: ExtractionQueueItem[];
   addToQueue: (id: string, content: string, filename: string) => void;
   removeFromQueue: (id: string) => void;
-  saveItemResults: (id: string, selectedIndices: Set<number>) => number;
+  saveItemResults: (id: string, selectedIndices: Set<number>) => Promise<number>;
   clearCompleted: () => void;
   isRunning: boolean;
   retryItem: (id: string) => void;
@@ -31,7 +31,7 @@ const ExtractionContext = createContext<ExtractionContextType>({
   queue: [],
   addToQueue: () => {},
   removeFromQueue: () => {},
-  saveItemResults: () => 0,
+  saveItemResults: async () => 0,
   clearCompleted: () => {},
   isRunning: false,
   retryItem: () => {},
@@ -76,18 +76,20 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
     setQueue(prev => prev.filter(item => item.id !== id));
   }
 
-  function saveItemResults(id: string, selectedIndices: Set<number>): number {
+  async function saveItemResults(id: string, selectedIndices: Set<number>): Promise<number> {
     const item = queue.find(i => i.id === id);
     if (!item || item.results.length === 0) return 0;
-    let archive = loadArchive();
+    // Always load from IDB to get full data
+    const archive = await loadArchiveAsync();
+    let updated = archive;
     let count = 0;
     for (const i of selectedIndices) {
       const entry = item.results[i];
       if (!entry) continue;
-      archive = addEntry(archive, entry.text, entry.category as any);
+      updated = addEntry(updated, entry.text, entry.category as any);
       count++;
     }
-    saveArchive(archive);
+    saveArchive(updated);
     updateItem(id, { savedCount: count });
     return count;
   }

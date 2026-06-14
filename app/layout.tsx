@@ -97,11 +97,26 @@ export default function RootLayout({
               var getReq = store.get(k);
               getReq.onsuccess = function(){
                 if(getReq.result){
-                  try{ localStorage.setItem(k, getReq.result); }
-                  catch(quota){
-                    // localStorage still full — can't restore this key
-                    // Pages using loadVaultByIdAsync() will fall back to IDB directly
-                    console.warn('[ValArchives] Could not restore', k, 'to localStorage — quota exceeded');
+                  // Check if IDB data has more entries than what's in localStorage
+                  // If localStorage has empty/stripped data, always restore from IDB
+                  var idbData = null;
+                  try { idbData = JSON.parse(getReq.result); } catch(e) {}
+                  var localRaw = null;
+                  try { localRaw = localStorage.getItem(k); } catch(e) {}
+                  var localData = null;
+                  try { localData = localRaw ? JSON.parse(localRaw) : null; } catch(e) {}
+                  
+                  var idbEntries = (idbData && idbData.entries) ? idbData.entries.length : 0;
+                  var localEntries = (localData && localData.entries) ? localData.entries.length : 0;
+                  
+                  // Always use IDB if it has more data or localStorage is empty
+                  if(idbEntries >= localEntries) {
+                    try{ localStorage.setItem(k, getReq.result); }
+                    catch(quota){
+                      // localStorage full — remove it so app falls back to IDB
+                      try { localStorage.removeItem(k); } catch(e) {}
+                      console.warn('[ValArchives] localStorage full — app will load from IDB directly');
+                    }
                   }
                 }
               };
