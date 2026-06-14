@@ -1,20 +1,28 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// DUAL AI ENGINE — Val Archives
-// Cerebras: fast tasks (extraction, classification, search)
-// Gemini: quality tasks (refine prompts, enhance, chat)
-// Get Cerebras key at cloud.cerebras.ai (free, 1M tokens/day)
-// Get Gemini key at aistudio.google.com (free, 250 req/day)
+// THE ARCHIVIST ENGINE — Val Archives AI Layer
+// Three specialized models, one unified interface
+//
+// Gemini  → The Librarian  (quality, creativity, chat, refine)
+// DeepSeek → The Analyst   (extraction, verification, reasoning)
+// Cerebras → The Clerk     (speed, inbox, search, fast tasks)
+//
+// User sees: ✨ The Archivist
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── Cerebras (fast) ──────────────────────────────────────────────────────────
-const CEREBRAS_KEY_STORAGE = "valArchivesGeminiKey"; // keep same key name for backwards compat
+// ─── Cerebras (The Clerk — fast tasks) ───────────────────────────────────────
+const CEREBRAS_KEY_STORAGE = "valArchivesGeminiKey";
 const CEREBRAS_MODEL = "gpt-oss-120b";
 const CEREBRAS_API_BASE = "https://api.cerebras.ai/v1/chat/completions";
 
-// ─── Gemini (quality) ─────────────────────────────────────────────────────────
+// ─── Gemini (The Librarian — quality tasks) ───────────────────────────────────
 const GEMINI_KEY_STORAGE = "valArchivesGeminiKeyQuality";
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+// ─── DeepSeek (The Analyst — reasoning & extraction) ─────────────────────────
+const DEEPSEEK_KEY_STORAGE = "valArchivesDeepSeekKey";
+const DEEPSEEK_MODEL = "deepseek-chat"; // DeepSeek-V3
+const DEEPSEEK_API_BASE = "https://api.deepseek.com/v1/chat/completions";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
 
@@ -57,6 +65,24 @@ export function clearGeminiQualityKey(): void {
 export function hasGeminiQualityKey(): boolean {
   return !!getGeminiQualityKey();
 }
+// ─── DeepSeek Key Management ─────────────────────────────────────────────────
+export function getDeepSeekKey(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(DEEPSEEK_KEY_STORAGE) || null;
+}
+export function setDeepSeekKey(key: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(DEEPSEEK_KEY_STORAGE, key.trim());
+}
+export function clearDeepSeekKey(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(DEEPSEEK_KEY_STORAGE);
+}
+export function hasDeepSeekKey(): boolean {
+  return !!getDeepSeekKey();
+}
+
+
 
 // ─── Core API Call ────────────────────────────────────────────────────────────
 
@@ -210,6 +236,62 @@ export async function testGeminiQualityConnection(): Promise<{ ok: boolean; mess
 
 // ─── FEATURE: Refine Inbox Classification ─────────────────────────────────────
 
+// ─── DeepSeek API Call ────────────────────────────────────────────────────────
+async function deepSeekCall(
+  prompt: string,
+  systemInstruction?: string
+): Promise<string> {
+  const key = getDeepSeekKey();
+  if (!key) {
+    return geminiCall(prompt, systemInstruction);
+  }
+
+  const messages: Array<{ role: string; content: string }> = [];
+  if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+  messages.push({ role: "user", content: prompt });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+
+  let response: Response;
+  try {
+    response = await fetch(DEEPSEEK_API_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        messages,
+        temperature: 0.3,
+        max_tokens: 8192,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timeout);
+    if ((err as Error)?.name === "AbortError") throw new Error("RATE_LIMIT");
+    throw err;
+  }
+  clearTimeout(timeout);
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const msg = (err as any)?.error?.message || `HTTP ${response.status}`;
+    if (response.status === 401) throw new Error("INVALID_KEY");
+    if (response.status === 429) throw new Error("RATE_LIMIT");
+    throw new Error(`API_ERROR: ${msg}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("EMPTY_RESPONSE");
+  return text.trim();
+}
+
+
+// [HISTORIAN] DeepSeek handles entry suggestions
 export async function geminiRefineClassification(
   suggestions: Array<{ text: string; category: string }>,
   allCategories: string[]
@@ -229,7 +311,7 @@ Return ONLY a JSON array in this exact format, no other text:
 Keep the same text exactly. Only change categories that are clearly wrong.`;
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await deepSeekCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
     if (Array.isArray(parsed)) return parsed;
@@ -523,6 +605,7 @@ Return ONLY the enhanced instructions, no commentary:`;
 
 // ─── FEATURE: Smart Category Review ──────────────────────────────────────────
 
+// [HISTORIAN] DeepSeek handles smart category review
 export async function geminiSmartCategoryReview(
   suggestions: Array<{ text: string; category: string }>,
   allCategories: string[],
@@ -544,7 +627,7 @@ export async function geminiSmartCategoryReview(
     + '[{"text": "exact entry text", "originalCategory": "current", "suggestedCategory": "better or same", "reason": "brief reason if changed, empty string if same", "changed": true}]';
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await deepSeekCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
     if (Array.isArray(parsed)) return parsed;
@@ -556,6 +639,7 @@ export async function geminiSmartCategoryReview(
 
 // ─── FEATURE: AI Targeted Delete ─────────────────────────────────────────────
 
+// [ANALYST] DeepSeek handles targeted delete
 export async function geminiTargetedDelete(
   query: string,
   entries: Array<{ id: string; text: string; category: string }>
@@ -570,7 +654,7 @@ export async function geminiTargetedDelete(
     + "If nothing matches, return: []";
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await deepSeekCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
@@ -586,60 +670,81 @@ export async function geminiTargetedDelete(
 
 // ─── FEATURE: Semantic Search ─────────────────────────────────────────────────
 
+// [PENSIEVE PIPELINE] Three-stage: Cerebras pre-filter → DeepSeek Investigation → Gemini answer
+// This function handles Stage 2: DeepSeek Investigation
+// Stage 1 (Cerebras keyword pre-filter) happens in the Pensieve page before calling this
+// Stage 3 (Gemini final answer) is a separate call in the Pensieve page
 export async function geminiSemanticSearch(
   query: string,
   entries: Array<{ id: string; text: string; category: string }>
 ): Promise<Array<{ id: string; text: string; category: string; relevance: string }>> {
   if (!hasGeminiKey() || entries.length === 0) return [];
 
-  // Step 1: Keyword pre-filter to narrow candidates (no API call)
-  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  const scored = entries.map((e, originalIdx) => {
-    const lower = e.text.toLowerCase();
-    let score = 0;
-    for (const word of queryWords) {
-      if (lower.includes(word)) score++;
-    }
-    return { ...e, originalIdx, score };
-  });
+  // Stage 2: DeepSeek Investigation
+  // Takes the pre-filtered candidates and determines what's actually relevant
+  const entriesList = entries.map((e, i) => i + ". [" + e.category + "] " + e.text).join("\n");
 
-  // Take top 150 by keyword score, always include top scorers
-  const candidates = scored
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 150);
-
-  if (candidates.length === 0) return [];
-
-  // Step 2: Single Gemini call on candidates
-  const entriesList = candidates.map((e, i) => i + ". [" + e.category + "] " + e.text).join("\n");
-
-  const prompt = "You are searching a Harry Potter RPG story archive for: \"" + query + "\"\n\n"
-    + "Find ALL entries relevant to this question. Include entries that directly answer it AND entries that provide useful context.\n\n"
-    + "ENTRIES:\n" + entriesList + "\n\n"
-    + "Return JSON array with entry numbers and why they match:\n"
-    + "[{\"index\": 0, \"relevance\": \"explains why\"}]\n"
-    + "Be generous — include anything useful. Return [] only if truly nothing matches.";
+  const prompt = "You are investigating a story/RPG archive to answer: \"" + query + "\"\n\n"
+    + "INVESTIGATION TASK:\n"
+    + "- Read all entries carefully\n"
+    + "- Identify entries that are DIRECTLY relevant to the question\n"
+    + "- Include entries that provide important context or background\n"
+    + "- Resolve ambiguity — if two entries seem contradictory, include both\n"
+    + "- Think like a historian: what evidence actually answers this question?\n\n"
+    + "ARCHIVE ENTRIES:\n" + entriesList + "\n\n"
+    + "Return a JSON array of relevant entry indices with why they matter:\n"
+    + "[{\"index\": 0, \"relevance\": \"explains why this entry answers the question\"}]\n"
+    + "Return [] only if truly nothing is relevant.";
 
   try {
-    const result = await geminiQualityCall(prompt);
+    const result = await deepSeekCall(prompt);
     const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
     const jsonMatch = clean.match(/\[([\s\S]*)\]/);
     if (!jsonMatch) return [];
     const parsed: Array<{ index: number; relevance: string }> = JSON.parse("[" + jsonMatch[1] + "]");
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter(p => p.index >= 0 && p.index < candidates.length)
-      .map(p => ({ ...candidates[p.index], relevance: p.relevance }));
+      .filter(p => p.index >= 0 && p.index < entries.length)
+      .map(p => ({ ...entries[p.index], relevance: p.relevance }));
   } catch {
-    // Fallback: return keyword matches directly
-    return candidates
-      .filter(e => e.score > 0)
-      .slice(0, 20)
-      .map(e => ({ ...e, relevance: "Keyword match" }));
+    // Fallback: return all candidates if investigation fails
+    return entries.slice(0, 20).map(e => ({ ...e, relevance: "Keyword match" }));
   }
 }
 
 
+// [ARCHIVIST] Gemini generates the final human-readable Pensieve answer
+export async function geminiPensieveFinalAnswer(
+  query: string,
+  evidence: Array<{ text: string; category: string; relevance: string }>
+): Promise<string> {
+  if (!hasGeminiQualityKey() || evidence.length === 0) {
+    return "I found " + evidence.length + " relevant entries but need a Gemini key to generate a narrative answer. Check Settings → AI.";
+  }
+
+  const evidenceText = evidence.map((e, i) =>
+    (i + 1) + ". [" + e.category + "] " + e.text + "\n   (Why relevant: " + e.relevance + ")"
+  ).join("\n\n");
+
+  const prompt = "You are The Archivist — an intelligent assistant for a story/RPG campaign.\n\n"
+    + "The user asked: \"" + query + "\"\n\n"
+    + "Here is the evidence from the archive:\n\n"
+    + evidenceText + "\n\n"
+    + "Write a clear, intelligent answer to the user's question based on this evidence.\n"
+    + "Be conversational but precise. If the evidence is incomplete, say so.\n"
+    + "Do not just list the evidence — synthesize it into a proper answer.\n"
+    + "If there are contradictions in the evidence, highlight them.";
+
+  try {
+    return await geminiQualityCall(prompt);
+  } catch {
+    // Fallback: format evidence as list
+    return "Based on the archive:\n\n" + evidence.map(e => "• " + e.text).join("\n");
+  }
+}
+
+
+// [ARCHIVIST] Gemini handles rule organization (quick summaries)
 export async function geminiOrganizeRules(
   rules: string[]
 ): Promise<{ organized: string[]; summary: string }> {
@@ -652,7 +757,7 @@ export async function geminiOrganizeRules(
     + '{"organized": ["rule1", "=== GROUP ===", "rule2"], "summary": "what was done"}';
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await geminiQualityCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -667,6 +772,7 @@ export async function geminiOrganizeRules(
 
 // ─── FEATURE: Verify Story Categories ────────────────────────────────────────
 
+// [ANALYST] DeepSeek handles category verification
 export async function geminiVerifyCategories(
   entries: Array<{ id: string; text: string; category: string }>,
   allCategories: string[]
@@ -684,7 +790,7 @@ export async function geminiVerifyCategories(
     + "If all correct, return [].";
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await deepSeekCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
@@ -707,6 +813,7 @@ export async function geminiVerifyCategories(
 
 // ─── FEATURE: Canon Placement ─────────────────────────────────────────────────
 
+// [ANALYST] DeepSeek handles canon placement
 export async function geminiCanonPlacement(
   newContent: string,
   existingCanon: string[],
@@ -722,7 +829,7 @@ export async function geminiCanonPlacement(
     + '{"placement": "where it belongs", "context": "why", "suggestion": "continuity notes"}';
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await deepSeekCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -741,6 +848,7 @@ export async function geminiCanonPlacement(
 
 // ─── FEATURE: Timeline Separation Check ──────────────────────────────────────
 
+// [ANALYST] DeepSeek handles timeline separation
 export async function geminiCheckTimelineSeparation(
   currentTimeline: { name: string; content: string },
   otherTimelines: Array<{ name: string; content: string }>
@@ -755,7 +863,7 @@ export async function geminiCheckTimelineSeparation(
     + '{"hasConflicts": false, "conflicts": [{"timeline": "name", "issue": "description"}]}';
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await deepSeekCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -770,6 +878,7 @@ export async function geminiCheckTimelineSeparation(
 
 // ─── FEATURE: AI-First Batch Classifier ──────────────────────────────────────
 
+// [HISTORIAN] DeepSeek handles inbox sorting
 export async function geminiClassifyText(
   text: string,
   allCategories: string[]
@@ -798,7 +907,7 @@ export async function geminiClassifyText(
       + '[{"index": 0, "category": "category-name"}]';
 
     try {
-      const result = await geminiCall(prompt);
+      const result = await deepSeekCall(prompt);
       const clean = result.replace(/```json|```/g, "").trim();
       const jsonMatch = clean.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
@@ -830,6 +939,21 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+export async function testDeepSeekConnection(): Promise<{ ok: boolean; message: string }> {
+  try {
+    const result = await deepSeekCall("Reply with exactly: CONNECTED");
+    return { ok: true, message: result.includes("CONNECTED") ? "Connected successfully" : "Connected" };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    if (msg === "NO_KEY") return { ok: false, message: "No DeepSeek API key set" };
+    if (msg === "INVALID_KEY") return { ok: false, message: "Invalid DeepSeek API key" };
+    if (msg === "RATE_LIMIT") return { ok: false, message: "Rate limit — try again shortly" };
+    return { ok: false, message: msg };
+  }
+}
+
+
+// [ANALYST] DeepSeek handles extraction
 export async function geminiExtractCanonToVault(
   content: string,
   filename: string,
@@ -876,7 +1000,7 @@ export async function geminiExtractCanonToVault(
 
     while (attempts < 3 && !success) {
       try {
-        const result = await geminiCall(prompt);
+        const result = await deepSeekCall(prompt);
         const fence = String.fromCharCode(96,96,96);
         const clean = result.split(fence + "json").join("").split(fence).join("").trim();
         const jsonMatch = clean.match(/\[[\s\S]*\]/);
