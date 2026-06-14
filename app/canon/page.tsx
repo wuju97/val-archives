@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { hasGeminiKey, hasGeminiQualityKey, geminiCanonPlacement, geminiDistillCanon, geminiRefineDistilledCanon, ExtractedVaultEntry } from "../../lib/geminiEngine";
+import { hasGeminiKey, hasGeminiQualityKey, geminiCanonPlacement, geminiDistillCanon, geminiRefineDistilledCanon, geminiClassifyText, ExtractedVaultEntry } from "../../lib/geminiEngine";
 import { useExtraction, ExtractionQueueItem } from "../ExtractionContext";
 import {
-  loadArchive, saveArchive, ArchiveData,
+  loadArchive, saveArchive, regenerateMasterPrompt, ArchiveData,
   addCanonCategory, removeCanonCategory,
   addCanonEntry, removeCanonEntry,
   getPriorityLevel, setPriority,
@@ -74,6 +74,9 @@ export default function CanonPage() {
   const [pasteText, setPasteText] = useState("");
   const [pasteTitle, setPasteTitle] = useState("");
   const [importing, setImporting] = useState(false);
+  const [importingToVault, setImportingToVault] = useState(false);
+  const [importProgress, setImportProgress] = useState("");
+  const [importDone, setImportDone] = useState(false);
   const [msg, setMsg] = useState("");
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
   const [placementResult, setPlacementResult] = useState<{ placement: string; context: string; suggestion: string } | null>(null);
@@ -340,6 +343,75 @@ export default function CanonPage() {
     setExtractedEntries([]);
     setExtractDone(false);
     flash(`✓ ${count} entries added to your vault.`);
+  }
+
+  // ── Import Distilled Canon to Vault ──────────────────────────────────────────
+  async function importDistilledToVault(entryContent: string, entryFilename: string) {
+    if (!hasGeminiKey()) { flash("✗ Cerebras key required. Add it in Settings → AI."); return; }
+    if (importingToVault) return;
+
+    setImportingToVault(true);
+    setImportDone(false);
+    setImportProgress("Splitting document into sections...");
+
+    // Split by ## headers
+    const rawSecs = entryContent.split("\n## ");
+    const sections: string[] = rawSecs.map((s, i) => (i === 0 ? s : "## " + s).trim()).filter(s => s.length > 50);
+
+    if (sections.length === 0) {
+      // No ## headers — treat whole thing as one section
+      sections.push(entryContent);
+    }
+
+    const ALL_CATEGORIES = [
+      "characters", "relationships", "locations", "magic-supernatural",
+      "organizations", "history", "lore-mythology", "items-equipment",
+      "creatures-wildlife", "rules", "timeline-continuity", "world-overview",
+      "conflict-combat", "cultures-society", "quests-plotlines", "meta-information"
+    ];
+
+    let totalSaved = 0;
+    let currentArchive = loadArchive();
+
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i];
+      const headerMatch = section.match(/^## (.+)/);
+      const sectionName = headerMatch ? headerMatch[1].trim() : "Section " + (i + 1);
+
+      setImportProgress("Section " + (i + 1) + "/" + sections.length + ": " + sectionName + "...");
+
+      try {
+        const classified = await geminiClassifyText(section, ALL_CATEGORIES);
+
+        if (classified.length > 0) {
+          for (const entry of classified) {
+            if (!entry.text || entry.text.length < 10) continue;
+            currentArchive = addEntry(currentArchive, entry.text.trim(), entry.category as any);
+            totalSaved++;
+          }
+          saveArchive(currentArchive);
+          setArchive({ ...currentArchive });
+          setImportProgress("Section " + (i + 1) + "/" + sections.length + " done — " + totalSaved + " entries saved so far...");
+        }
+
+        // Small wait between sections to avoid rate limits
+        if (i < sections.length - 1) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Error";
+        setImportProgress("Section " + (i + 1) + " error: " + msg + " — skipping...");
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    const refreshed = regenerateMasterPrompt(currentArchive);
+    saveArchive(refreshed);
+    setArchive(refreshed);
+    setImportingToVault(false);
+    setImportDone(true);
+    setImportProgress("✓ Complete! " + totalSaved + " entries imported to vault.");
+    flash("✓ " + totalSaved + " entries imported from " + entryFilename + " to vault!");
   }
 
   // ── File upload ─────────────────────────────────────────────────────────────
@@ -1069,7 +1141,23 @@ export default function CanonPage() {
                         <span style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", flexShrink: 0 }}>{entry.content === IDB_PLACEHOLDER ? "Large file (stored)" : entry.content.length.toLocaleString() + " chars"}</span>
                         {isTimeline && <span style={{ background: "rgba(59,130,246,0.2)", color: "#93c5fd", fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "9999px", flexShrink: 0 }}>VERBATIM</span>}
                       </div>
-                      <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
+                      <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0, alignItems: "center" }}>
+                        {/* Import to Vault button — shown on all text entries */}
+                        {!isTimeline && hasGeminiKey() && (
+                          <button onClick={async () => {
+                            let fullContent = entry.content;
+                            if (entry.content === IDB_PLACEHOLDER) {
+                              const idbContent = await loadCanonContentFromIDB(entry.id);
+                              if (idbContent) fullContent = idbContent;
+                              else { flash("✗ Could not load file content"); return; }
+                            }
+                            importDistilledToVault(fullContent, entry.filename);
+                          }}
+                            disabled={importingToVault}
+                            style={{ background: importingToVault ? "var(--va-border)" : "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.625rem", cursor: importingToVault ? "default" : "pointer", fontSize: "0.72rem", fontWeight: "600", whiteSpace: "nowrap", opacity: importingToVault ? 0.5 : 1 }}>
+                            {importingToVault ? "Importing..." : "⚡ Import to Vault"}
+                          </button>
+                        )}
                         <button onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
                           style={{ background: "var(--va-border)", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.5rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
                           {expandedEntry === entry.id ? "▲ Hide" : "▼ View"}
