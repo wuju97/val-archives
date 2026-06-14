@@ -406,8 +406,10 @@ export default function CanonPage() {
 
     const rawSections = entryContent.split("\n## ");
     let totalSaved = 0;
-    let currentArchive = loadArchive();
     const total = rawSections.length - 1;
+
+    // Collect ALL entries first before touching the archive
+    const allToSave: Array<{ text: string; category: string }> = [];
 
     for (let i = 1; i < rawSections.length; i++) {
       const raw = "## " + rawSections[i].trim();
@@ -416,25 +418,31 @@ export default function CanonPage() {
       const sectionHeader = headerMatch[1].trim();
       const category = getCategory(sectionHeader);
 
-      setImportProgress("(" + i + "/" + total + ") " + sectionHeader + " → " + category + "...");
+      setImportProgress("(" + i + "/" + total + ") Parsing: " + sectionHeader + "...");
 
       const entries = parseEntries(raw);
       for (const text of entries) {
         const clean = text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").trim();
         if (clean.length < 20) continue;
-        currentArchive = addEntry(currentArchive, clean, category as any);
-        totalSaved++;
+        allToSave.push({ text: clean, category });
       }
+      await new Promise(r => setTimeout(r, 10));
+    }
 
-      saveArchive(currentArchive);
-      setArchive({ ...currentArchive });
-      setImportProgress("✓ (" + i + "/" + total + ") " + sectionHeader + " → " + entries.length + " entries · " + totalSaved + " total");
-      await new Promise(r => setTimeout(r, 30));
+    // Now do ONE atomic save — load fresh, add all entries, save once
+    setImportProgress("Saving " + allToSave.length + " entries to vault...");
+    await new Promise(r => setTimeout(r, 50));
+
+    // Load the LATEST archive state right before saving
+    let currentArchive = loadArchive();
+    for (const item of allToSave) {
+      currentArchive = addEntry(currentArchive, item.text, item.category as any);
+      totalSaved++;
     }
 
     const refreshed = regenerateMasterPrompt(currentArchive);
     saveArchive(refreshed);
-    setArchive(refreshed);
+    setArchive({ ...refreshed });
     setImportingEntryId(null);
     setImportDone(true);
     setImportProgress("✓ Done! " + totalSaved + " entries imported from " + entryFilename);
