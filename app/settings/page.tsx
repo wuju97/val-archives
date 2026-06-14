@@ -8,6 +8,7 @@ import {
   getGeminiKey, setGeminiKey, clearGeminiKey, testGeminiConnection, hasGeminiKey,
   getGeminiQualityKey, setGeminiQualityKey, clearGeminiQualityKey, testGeminiQualityConnection, hasGeminiQualityKey,
   getDeepSeekKey, setDeepSeekKey, clearDeepSeekKey, testDeepSeekConnection, hasDeepSeekKey,
+  getGroqKey, setGroqKey, clearGroqKey, testGroqConnection, hasGroqKey,
   geminiChat, geminiErrorMessage, geminiTargetedDelete,
 } from "../../lib/geminiEngine";
 
@@ -111,6 +112,9 @@ export default function SettingsPage() {
   const [deepSeekKey, setDeepSeekKeyState] = useState("");
   const [testingDeepSeek, setTestingDeepSeek] = useState(false);
   const [deepSeekStatus, setDeepSeekStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [groqKey, setGroqKeyState] = useState("");
+  const [testingGroq, setTestingGroq] = useState(false);
+  const [groqStatus, setGroqStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [aiViewMode, setAiViewMode] = useState<"simple" | "advanced">("simple");
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
@@ -127,6 +131,7 @@ export default function SettingsPage() {
     const savedKey = getGeminiKey(); if (savedKey) setApiKey(savedKey);
     const savedQualityKey = getGeminiQualityKey(); if (savedQualityKey) setQualityApiKey(savedQualityKey);
     const savedDSKey = getDeepSeekKey(); if (savedDSKey) setDeepSeekKeyState(savedDSKey);
+    const savedGroqKey = getGroqKey(); if (savedGroqKey) setGroqKeyState(savedGroqKey);
   }, []);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
@@ -342,26 +347,27 @@ export default function SettingsPage() {
                     {apiStatus && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: apiStatus.ok ? "#4ade80" : "#f87171" }}>{apiStatus.ok ? "✓" : "✗"} {apiStatus.message}</p>}
                   </div>
 
-                  {/* DeepSeek */}
+                  {/* Groq */}
                   <div style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
                       <div>
-                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>🧠 DeepSeek <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— The Historian</span></p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>platform.deepseek.com · Free tier available</p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>For: Extract to Vault, Inbox sorting, Verify Categories, Targeted Delete, Pensieve Investigation</p>
+                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>🧠 Groq <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— The Deep Historian</span></p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>console.groq.com · Free · No card required</p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>For: Extract to Vault, Timeline Checks, Contradiction Detection, Canon Placement, Verify Categories</p>
+                        <p style={{ fontSize: "0.72rem", color: "#fbbf24" }}>Low-frequency, high-stakes tasks. Falls back to Cerebras if not set.</p>
                       </div>
-                      {hasDeepSeekKey() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
+                      {hasGroqKey() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                      <input type="password" value={deepSeekKey} onChange={e => setDeepSeekKeyState(e.target.value)} placeholder="sk-..."
+                      <input type="password" value={groqKey} onChange={e => setGroqKeyState(e.target.value)} placeholder="gsk_..."
                         style={{ ...S.input, flex: 1 }} />
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem" }}>
-                      <button onClick={() => { if (deepSeekKey.trim()) { setDeepSeekKey(deepSeekKey.trim()); setDeepSeekStatus({ ok: true, message: "Saved" }); setTimeout(() => setDeepSeekStatus(null), 2000); } }} disabled={!deepSeekKey.trim()} style={{ ...S.btn("var(--va-accent)"), opacity: !deepSeekKey.trim() ? 0.4 : 1 }}>Save</button>
-                      <button onClick={async () => { setTestingDeepSeek(true); if (deepSeekKey.trim()) setDeepSeekKey(deepSeekKey.trim()); const r = await testDeepSeekConnection(); setDeepSeekStatus(r); setTestingDeepSeek(false); }} disabled={!deepSeekKey.trim() || testingDeepSeek} style={{ ...S.btn("var(--va-border)", "var(--va-text)"), opacity: (!deepSeekKey.trim() || testingDeepSeek) ? 0.4 : 1 }}>{testingDeepSeek ? "Testing..." : "Test"}</button>
-                      <button onClick={() => { clearDeepSeekKey(); setDeepSeekKeyState(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
+                      <button onClick={() => { if (groqKey.trim()) { setGroqKey(groqKey.trim()); setGroqStatus({ ok: true, message: "Saved" }); setTimeout(() => setGroqStatus(null), 2000); } }} disabled={!groqKey.trim()} style={{ ...S.btn("var(--va-accent)"), opacity: !groqKey.trim() ? 0.4 : 1 }}>Save</button>
+                      <button onClick={async () => { setTestingGroq(true); if (groqKey.trim()) setGroqKey(groqKey.trim()); const r = await testGroqConnection(); setGroqStatus(r); setTestingGroq(false); }} disabled={!groqKey.trim() || testingGroq} style={{ ...S.btn("var(--va-border)", "var(--va-text)"), opacity: (!groqKey.trim() || testingGroq) ? 0.4 : 1 }}>{testingGroq ? "Testing..." : "Test"}</button>
+                      <button onClick={() => { clearGroqKey(); setGroqKeyState(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
                     </div>
-                    {deepSeekStatus && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: deepSeekStatus.ok ? "#4ade80" : "#f87171" }}>{deepSeekStatus.ok ? "✓" : "✗"} {deepSeekStatus.message}</p>}
+                    {groqStatus && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: groqStatus.ok ? "#4ade80" : "#f87171" }}>{groqStatus.ok ? "✓" : "✗"} {groqStatus.message}</p>}
                   </div>
 
                   {/* Gemini */}
@@ -394,7 +400,8 @@ export default function SettingsPage() {
                   <h3 style={{ fontWeight: "bold", marginBottom: "1rem" }}>The Archivist — Internal Architecture</h3>
                   {[
                     { title: "✨ Gemini — The Archivist", color: "#c4b5fd", tasks: ["Master Prompt refine", "Custom Prompt enhance", "Prompt Forge refine", "Rule enhance", "Save Prompt personalize", "Character Panel AI", "Chat", "Pensieve final answer", "Quick Summaries"] },
-                    { title: "🧠 DeepSeek — The Historian", color: "#93c5fd", tasks: ["Extract to Vault", "Inbox Sorting", "Verify Categories", "Canon Placement", "Timeline Checks", "Targeted Delete", "Pensieve Investigation", "Entry Suggestions"] },
+                    { title: "🧠 Groq — The Deep Historian", color: "#93c5fd", tasks: ["Extract to Vault", "Timeline Checks", "Contradiction Detection", "Canon Placement", "Verify Categories"] },
+                    { title: "⚡ Cerebras — The Clerk + Daily Historian", color: "#86efac", tasks: ["Inbox Sorting", "Verify Categories (basic)", "Entry Suggestions", "Targeted Delete (basic)", "Pensieve keyword pre-filter", "Candidate Retrieval", "Relevance Ranking"] },
                     { title: "⚡ Cerebras — The Clerk", color: "#86efac", tasks: ["Pensieve keyword pre-filter", "Candidate Retrieval", "Relevance Ranking"] },
                   ].map(({ title, color, tasks }) => (
                     <div key={title} style={{ padding: "0.875rem", background: "var(--va-bg)", borderRadius: "0.5rem", borderLeft: `3px solid ${color}`, marginBottom: "0.75rem" }}>

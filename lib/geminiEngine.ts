@@ -19,10 +19,15 @@ const GEMINI_KEY_STORAGE = "valArchivesGeminiKeyQuality";
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-// ─── DeepSeek (The Analyst — reasoning & extraction) ─────────────────────────
+// ─── DeepSeek (unused — replaced by Groq) ────────────────────────────────────
 const DEEPSEEK_KEY_STORAGE = "valArchivesDeepSeekKey";
-const DEEPSEEK_MODEL = "deepseek-chat"; // DeepSeek-V3
+const DEEPSEEK_MODEL = "deepseek-chat";
 const DEEPSEEK_API_BASE = "https://api.deepseek.com/v1/chat/completions";
+
+// ─── Groq (The Deep Historian — low-freq, high-stakes) ───────────────────────
+const GROQ_KEY_STORAGE = "valArchivesGroqKey";
+const GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // 500K tokens/day
+const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
 
@@ -81,6 +86,92 @@ export function clearDeepSeekKey(): void {
 export function hasDeepSeekKey(): boolean {
   return !!getDeepSeekKey();
 }
+
+// ─── Groq Key Management (Deep Historian) ────────────────────────────────────
+export function getGroqKey(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(GROQ_KEY_STORAGE) || null;
+}
+export function setGroqKey(key: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GROQ_KEY_STORAGE, key.trim());
+}
+export function clearGroqKey(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(GROQ_KEY_STORAGE);
+}
+export function hasGroqKey(): boolean {
+  return !!getGroqKey();
+}
+
+// ─── Groq API Call ────────────────────────────────────────────────────────────
+async function groqCall(
+  prompt: string,
+  systemInstruction?: string
+): Promise<string> {
+  const key = getGroqKey();
+  if (!key) {
+    // Fall back to Cerebras if no Groq key
+    return geminiCall(prompt, systemInstruction);
+  }
+
+  const messages: Array<{ role: string; content: string }> = [];
+  if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+  messages.push({ role: "user", content: prompt });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+
+  let response: Response;
+  try {
+    response = await fetch(GROQ_API_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages,
+        temperature: 0.3,
+        max_tokens: 8192,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timeout);
+    if ((err as Error)?.name === "AbortError") throw new Error("RATE_LIMIT");
+    throw err;
+  }
+  clearTimeout(timeout);
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const msg = (err as any)?.error?.message || `HTTP ${response.status}`;
+    if (response.status === 401) throw new Error("INVALID_KEY");
+    if (response.status === 429) throw new Error("RATE_LIMIT");
+    throw new Error(`API_ERROR: ${msg}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("EMPTY_RESPONSE");
+  return text.trim();
+}
+
+export async function testGroqConnection(): Promise<{ ok: boolean; message: string }> {
+  try {
+    const result = await groqCall("Reply with exactly: CONNECTED");
+    return { ok: true, message: result.includes("CONNECTED") ? "Connected successfully" : "Connected" };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    if (msg === "NO_KEY") return { ok: false, message: "No Groq API key set" };
+    if (msg === "INVALID_KEY") return { ok: false, message: "Invalid Groq API key" };
+    if (msg === "RATE_LIMIT") return { ok: false, message: "Rate limit — try again shortly" };
+    return { ok: false, message: msg };
+  }
+}
+
 
 
 
@@ -311,7 +402,7 @@ Return ONLY a JSON array in this exact format, no other text:
 Keep the same text exactly. Only change categories that are clearly wrong.`;
 
   try {
-    const result = await deepSeekCall(prompt);
+    const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
     if (Array.isArray(parsed)) return parsed;
@@ -407,7 +498,7 @@ Reply with JSON only:
 {"hasContradiction": true/false, "explanation": "brief explanation or empty string"}`;
 
   try {
-    const result = await geminiCall(prompt);
+    const result = await groqCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     return JSON.parse(clean);
   } catch {
@@ -627,7 +718,7 @@ export async function geminiSmartCategoryReview(
     + '[{"text": "exact entry text", "originalCategory": "current", "suggestedCategory": "better or same", "reason": "brief reason if changed, empty string if same", "changed": true}]';
 
   try {
-    const result = await deepSeekCall(prompt);
+    const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
     if (Array.isArray(parsed)) return parsed;
@@ -654,7 +745,7 @@ export async function geminiTargetedDelete(
     + "If nothing matches, return: []";
 
   try {
-    const result = await deepSeekCall(prompt);
+    const result = await geminiCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
@@ -697,7 +788,7 @@ export async function geminiSemanticSearch(
     + "Return [] only if truly nothing is relevant.";
 
   try {
-    const result = await deepSeekCall(prompt);
+    const result = await geminiCall(prompt);
     const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
     const jsonMatch = clean.match(/\[([\s\S]*)\]/);
     if (!jsonMatch) return [];
@@ -790,7 +881,7 @@ export async function geminiVerifyCategories(
     + "If all correct, return [].";
 
   try {
-    const result = await deepSeekCall(prompt);
+    const result = await groqCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
@@ -829,7 +920,7 @@ export async function geminiCanonPlacement(
     + '{"placement": "where it belongs", "context": "why", "suggestion": "continuity notes"}';
 
   try {
-    const result = await deepSeekCall(prompt);
+    const result = await groqCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -863,7 +954,7 @@ export async function geminiCheckTimelineSeparation(
     + '{"hasConflicts": false, "conflicts": [{"timeline": "name", "issue": "description"}]}';
 
   try {
-    const result = await deepSeekCall(prompt);
+    const result = await groqCall(prompt);
     const clean = result.replace(/```json|```/g, "").trim();
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -907,7 +998,7 @@ export async function geminiClassifyText(
       + '[{"index": 0, "category": "category-name"}]';
 
     try {
-      const result = await deepSeekCall(prompt);
+      const result = await geminiCall(prompt);
       const clean = result.replace(/```json|```/g, "").trim();
       const jsonMatch = clean.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
@@ -1000,7 +1091,7 @@ export async function geminiExtractCanonToVault(
 
     while (attempts < 3 && !success) {
       try {
-        const result = await deepSeekCall(prompt);
+        const result = await groqCall(prompt);
         const fence = String.fromCharCode(96,96,96);
         const clean = result.split(fence + "json").join("").split(fence).join("").trim();
         const jsonMatch = clean.match(/\[[\s\S]*\]/);
