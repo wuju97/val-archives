@@ -146,7 +146,12 @@ export default function SettingsPage() {
   function handleClearVault() {
     if (!confirm("⚠️ Permanently delete your entire vault? This cannot be undone.")) return;
     if (!confirm("Are you absolutely sure? Everything will be deleted.")) return;
-    clearArchive(); setVaultCleared(true);
+    clearArchive();
+    // Also clear dashboard cards from localStorage directly
+    localStorage.removeItem("valArchivesDashboardCards");
+    setVaultCleared(true);
+    // Reload after short delay so IDB clear completes
+    setTimeout(() => window.location.reload(), 500);
   }
 
   const sections = [
