@@ -67,7 +67,7 @@ const BUILTIN_CATEGORIES = [
 ];
 
 export default function CanonPage() {
-  const { queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning } = useExtraction();
+  const { queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, stopExtraction } = useExtraction();
   const [archive, setArchive] = useState(loadArchive());
   const [activeCatId, setActiveCatId] = useState<string>("pdf-files");
   const [customCatName, setCustomCatName] = useState("");
@@ -420,9 +420,17 @@ export default function CanonPage() {
                 {/* Queue status */}
                 {queue.length > 0 && (
                   <div style={{ marginBottom: "0.75rem" }}>
-                    <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", fontWeight: "600", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                      Extraction Queue ({queue.length})
-                    </p>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                      <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Extraction Queue ({queue.length})
+                      </p>
+                      {isRunning && (
+                        <button onClick={stopExtraction}
+                          style={{ fontSize: "0.7rem", color: "#f87171", background: "none", border: "1px solid #f87171", borderRadius: "0.25rem", padding: "0.15rem 0.5rem", cursor: "pointer" }}>
+                          ⏹ Stop
+                        </button>
+                      )}
+                    </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
                       {queue.map(item => (
                         <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
@@ -813,4 +821,4 @@ export default function CanonPage() {
       </div>
     </div>
   );
-} 
+}

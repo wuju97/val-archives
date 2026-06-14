@@ -246,17 +246,22 @@ export async function geminiRefineMasterPrompt(masterPrompt: string): Promise<st
 
   const prompt = `You are an expert at crafting AI system prompts for RPG/story campaigns.
 
-Review and refine this Master Prompt to make it more effective, clearer, and better structured. 
-- Fix any redundancy or contradictions
-- Make instructions more precise and actionable
-- Preserve ALL the factual content — do not remove any lore, rules, or character info
-- Keep the same section structure
-- Make it no longer than the original
+Your job is to REFINE and IMPROVE this Master Prompt — NOT summarize or shorten it.
+
+STRICT RULES:
+- PRESERVE every single fact, rule, character detail, lore entry, and relationship — nothing gets removed
+- PRESERVE all section headers and structure exactly
+- Fix grammar, clarity, and phrasing ONLY
+- Fix contradictions by keeping BOTH pieces of info and noting the contradiction
+- If a section is already clear, leave it completely unchanged
+- The output MUST be at least as long as the input — longer is fine, shorter is NOT acceptable
+- Do NOT add commentary, do NOT summarize, do NOT condense
+- Think of yourself as a careful editor, not a rewriter
 
 Original Master Prompt:
 ${masterPrompt}
 
-Return ONLY the refined prompt, no commentary:`;
+Return ONLY the refined prompt with ALL original content preserved:`;
 
   try {
     return await geminiQualityCall(prompt);
@@ -892,20 +897,24 @@ export async function geminiExtractCanonToVault(
       } catch (e) {
         attempts++;
         const msg = e instanceof Error ? e.message : "error";
-        if (msg.includes("RATE_LIMIT") || msg.includes("429")) {
-          const waitSec = attempts * 20;
+        if (msg.includes("RATE_LIMIT") || msg.includes("429") || msg.includes("Too Many")) {
+          const waitSec = 30 + (attempts * 30);
           if (onProgress) onProgress("Rate limit — waiting " + waitSec + "s before retry...");
           await wait(waitSec * 1000);
+        } else if (msg.includes("TIMEOUT") || msg.includes("AbortError") || msg.includes("abort")) {
+          const waitSec = 20;
+          if (onProgress) onProgress("Timeout — waiting " + waitSec + "s before retry...");
+          await wait(waitSec * 1000);
         } else {
-          if (onProgress) onProgress("Part " + (i + 1) + " error: " + msg);
-          break;
+          if (onProgress) onProgress("Part " + (i + 1) + " error: " + msg + " — retrying...");
+          await wait(15000);
         }
       }
     }
 
     if (i < chunks.length - 1) {
       if (onProgress) onProgress("Waiting before next part...");
-      await wait(13000);
+      await wait(20000); // 20s gap = max 3 requests/min, safely under 5/min limit
     }
   }
 

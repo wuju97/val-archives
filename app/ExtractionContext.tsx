@@ -25,6 +25,7 @@ interface ExtractionContextType {
   clearCompleted: () => void;
   isRunning: boolean;
   retryItem: (id: string) => void;
+  stopExtraction: () => void;
 }
 
 const ExtractionContext = createContext<ExtractionContextType>({
@@ -35,11 +36,14 @@ const ExtractionContext = createContext<ExtractionContextType>({
   clearCompleted: () => {},
   isRunning: false,
   retryItem: () => {},
+  stopExtraction: () => {},
 });
 
 export function ExtractionProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<ExtractionQueueItem[]>([]);
+  // stopExtraction is defined below but referenced in popup via context
   const isProcessing = useRef(false);
+  const abortRef = useRef(false);
   // Draggable popup position
   const [popupPos, setPopupPos] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -64,6 +68,15 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
         message: "Queued",
       }];
     });
+  }
+
+  function stopExtraction() {
+    abortRef.current = true;
+    // Mark running item as error
+    setQueue(prev => prev.map(item =>
+      item.status === "running" ? { ...item, status: "error", message: "Stopped by user" } : item
+    ));
+    setTimeout(() => { isProcessing.current = false; abortRef.current = false; }, 500);
   }
 
   function retryItem(id: string) {
@@ -131,6 +144,7 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
       if (!nextItem) return;
 
       isProcessing.current = true;
+      abortRef.current = false;
       updateItem(nextItem.id, { status: "running", message: "Starting..." });
 
       try {
@@ -143,6 +157,7 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
           cappedContent,
           nextItem.filename,
           (msg) => {
+            if (abortRef.current) return;
             const partMatch = msg.match(/part (\d+) of (\d+)/i) || msg.match(/Processing part (\d+) of (\d+)/i);
             const factsMatch = msg.match(/\((\d+) facts/);
             const completeMatch = msg.startsWith("Complete") ? msg.match(/(\d+) facts/) : null;
@@ -202,7 +217,7 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ExtractionContext.Provider value={{ queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, retryItem }}>
+    <ExtractionContext.Provider value={{ queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, retryItem, stopExtraction }}>
       {children}
 
       {/* Global floating extraction popup */}
@@ -241,9 +256,15 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
                   width: currentItem.totalParts > 0 ? `${Math.min(100, (currentItem.currentPart / currentItem.totalParts) * 100)}%` : "5%"
                 }} />
               </div>
-              <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", margin: 0 }}>
-                Part {currentItem.currentPart} of {currentItem.totalParts} · {currentItem.factsFound} facts
-              </p>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", margin: 0 }}>
+                  Part {currentItem.currentPart} of {currentItem.totalParts} · {currentItem.factsFound} facts
+                </p>
+                <button onClick={stopExtraction}
+                  style={{ fontSize: "0.65rem", color: "#f87171", background: "none", border: "1px solid #f87171", borderRadius: "0.25rem", padding: "0.1rem 0.4rem", cursor: "pointer" }}>
+                  Stop
+                </button>
+              </div>
             </div>
           )}
 
