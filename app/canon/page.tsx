@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { hasGeminiKey, geminiCanonPlacement, ExtractedVaultEntry } from "../../lib/geminiEngine";
+import { hasGeminiKey, hasGeminiQualityKey, geminiCanonPlacement, geminiDistillCanon, geminiRefineDistilledCanon, ExtractedVaultEntry } from "../../lib/geminiEngine";
 import { useExtraction, ExtractionQueueItem } from "../ExtractionContext";
 import {
   loadArchive, saveArchive, ArchiveData,
@@ -89,6 +89,14 @@ export default function CanonPage() {
   const [extractedEntries, setExtractedEntries] = useState<ExtractedVaultEntry[]>([]);
   const [selectedEntries, setSelectedEntries] = useState<Set<number>>(new Set());
   const [extractDone, setExtractDone] = useState(false);
+  // Distill state
+  const [showDistillPanel, setShowDistillPanel] = useState(false);
+  const [distillSourceId, setDistillSourceId] = useState("");
+  const [distillProgress, setDistillProgress] = useState("");
+  const [distilling, setDistilling] = useState(false);
+  const [distilledResult, setDistilledResult] = useState("");
+  const [distillTitle, setDistillTitle] = useState("");
+  const [refiningDistill, setRefiningDistill] = useState(false);
   const [extractTotalParts, setExtractTotalParts] = useState(0);
   const [extractCurrentPart, setExtractCurrentPart] = useState(0);
   const [extractFactsFound, setExtractFactsFound] = useState(0);
@@ -152,6 +160,89 @@ export default function CanonPage() {
     setExtractProgress("");
     setViewingQueueItem(null);
     setShowExtractModal(true);
+  }
+
+  async function openDistillPanel() {
+    const allEntries = getAllCanonEntries();
+    if (allEntries.length === 0) { flash("✗ No canon files to distill. Upload files first."); return; }
+    if (!hasGeminiQualityKey()) { flash("✗ Distill requires your Gemini API key. Add it in Settings → AI."); return; }
+    setDistillSourceId(allEntries[0].id);
+    setDistilledResult("");
+    setDistillProgress("");
+    setDistillTitle("");
+    setShowDistillPanel(true);
+  }
+
+  async function runDistill() {
+    const allEntries = getAllCanonEntries();
+    const entry = allEntries.find(e => e.id === distillSourceId);
+    if (!entry) return;
+
+    setDistilling(true);
+    setDistilledResult("");
+
+    let fullContent = entry.content;
+    if (entry.content === IDB_PLACEHOLDER) {
+      setDistillProgress("Loading file from storage...");
+      const idbContent = await loadCanonContentFromIDB(entry.id);
+      if (idbContent) {
+        fullContent = idbContent;
+      } else {
+        setDistillProgress("Error: Could not load file content.");
+        setDistilling(false);
+        return;
+      }
+    }
+
+    setDistillTitle(entry.filename.replace(/\.[^/.]+$/, "") + " — Canon Reference");
+
+    try {
+      const result = await geminiDistillCanon(fullContent, entry.filename, setDistillProgress);
+      setDistilledResult(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Distillation failed";
+      if (msg === "NO_GEMINI_KEY") {
+        setDistillProgress("✗ Gemini API key required. Add it in Settings → AI.");
+      } else {
+        setDistillProgress("✗ Error: " + msg);
+      }
+    }
+    setDistilling(false);
+  }
+
+  async function refineDistilledResult() {
+    if (!distilledResult) return;
+    setRefiningDistill(true);
+    try {
+      const entry = getAllCanonEntries().find(e => e.id === distillSourceId);
+      const refined = await geminiRefineDistilledCanon(distilledResult, entry?.filename ?? "");
+      setDistilledResult(refined);
+    } catch {}
+    setRefiningDistill(false);
+  }
+
+  async function saveDistilledAsCanon() {
+    if (!distilledResult) return;
+    const title = distillTitle || "Distilled Canon";
+    // Save to canon archives as a new entry
+    const a = loadArchive();
+    let storedContent = distilledResult;
+    const entryId = crypto.randomUUID();
+    if (distilledResult.length > LARGE_CONTENT_THRESHOLD) {
+      await saveCanonContentToIDB(entryId, distilledResult);
+      storedContent = IDB_PLACEHOLDER;
+    }
+    const updated = addCanonEntry(a, activeCatId, title, storedContent);
+    const lastIdx = updated.canonCategories.findIndex(c => c.id === activeCatId);
+    if (lastIdx !== -1) {
+      const entries = updated.canonCategories[lastIdx].entries;
+      entries[entries.length - 1] = { ...entries[entries.length - 1], id: entryId };
+    }
+    saveArchive(updated);
+    setArchive(updated);
+    setShowDistillPanel(false);
+    setDistilledResult("");
+    flash("✓ Distilled canon saved to Canon Archives — ready to Extract to Vault!");
   }
 
   async function addFileToQueue() {
@@ -382,6 +473,104 @@ export default function CanonPage() {
           <div style={{ marginTop: "0.5rem", height: "3px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden" }}>
             <div style={{ height: "100%", background: "#7c3aed", borderRadius: "9999px", width: extractTotalParts > 0 ? `${Math.min(100, (extractCurrentPart / extractTotalParts) * 100)}%` : "10%", transition: "width 0.5s" }} />
           </div>
+        </div>
+      )}
+
+
+      {/* ── Distill Canon Side Panel ─────────────────────────────────────────── */}
+      {showDistillPanel && (
+        <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1001, width: "min(600px, 95vw)", background: "var(--va-surface)", borderLeft: "1px solid var(--va-border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.3)" }}>
+          <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>✨ Distill Canon</h2>
+              <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                Gemini reads the entire file at once and creates a structured canon reference document
+              </p>
+            </div>
+            <button onClick={() => setShowDistillPanel(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
+            {/* File picker */}
+            {!distilledResult && (
+              <div style={{ marginBottom: "1rem" }}>
+                <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a file to distill:</p>
+                <select value={distillSourceId} onChange={e => setDistillSourceId(e.target.value)} disabled={distilling}
+                  style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.875rem", outline: "none" }}>
+                  {getAllCanonEntries().map(e => (
+                    <option key={e.id} value={e.id}>{e.filename}</option>
+                  ))}
+                </select>
+
+                <div style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.5rem", padding: "0.875rem", marginBottom: "0.875rem", fontSize: "0.8rem", color: "var(--va-text-muted)", lineHeight: "1.6" }}>
+                  <p style={{ color: "#c4b5fd", fontWeight: "700", marginBottom: "0.375rem" }}>How Distill works:</p>
+                  <p>1. Gemini reads the <strong style={{ color: "var(--va-text)" }}>entire file</strong> at once (up to 900k chars)</p>
+                  <p>2. Creates a structured Canon Reference Document with all characters, locations, relationships, events, magic, lore</p>
+                  <p>3. You can <strong style={{ color: "var(--va-text)" }}>✨ Refine</strong> it with AI before saving</p>
+                  <p>4. Save it to Canon Archives, then <strong style={{ color: "var(--va-text)" }}>Extract to Vault</strong> runs on the clean structured doc → much better results</p>
+                </div>
+
+                {distillProgress && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                    {distilling && <div style={{ width: "12px", height: "12px", borderRadius: "50%", border: "2px solid #7c3aed", borderTopColor: "transparent", animation: "spin 0.8s linear infinite" }} />}
+                    <p style={{ fontSize: "0.8rem", color: distillProgress.startsWith("✗") ? "#f87171" : "#c4b5fd" }}>{distillProgress}</p>
+                  </div>
+                )}
+
+                {!distilling && (
+                  <button onClick={runDistill}
+                    style={{ width: "100%", background: "#7c3aed", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
+                    ✨ Distill with Gemini
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Result */}
+            {distilledResult && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <p style={{ fontWeight: "700", fontSize: "0.875rem", color: "#4ade80" }}>✓ Distillation complete!</p>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button onClick={refineDistilledResult} disabled={refiningDistill}
+                      style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.375rem", padding: "0.375rem 0.75rem", cursor: "pointer", fontSize: "0.75rem", fontWeight: "600", opacity: refiningDistill ? 0.6 : 1 }}>
+                      {refiningDistill ? "✨ Refining..." : "✨ AI Refine"}
+                    </button>
+                    <button onClick={() => { setDistilledResult(""); setDistillProgress(""); }}
+                      style={{ background: "var(--va-border)", color: "var(--va-text-muted)", border: "none", borderRadius: "0.375rem", padding: "0.375rem 0.625rem", cursor: "pointer", fontSize: "0.75rem" }}>
+                      ← Redo
+                    </button>
+                  </div>
+                </div>
+
+                <input value={distillTitle} onChange={e => setDistillTitle(e.target.value)}
+                  placeholder="Title for this distilled document..."
+                  style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.5rem 0.75rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.75rem", boxSizing: "border-box" as const }} />
+
+                <textarea value={distilledResult} onChange={e => setDistilledResult(e.target.value)}
+                  style={{ width: "100%", height: "400px", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.8rem", lineHeight: "1.7", resize: "vertical", fontFamily: "monospace", boxSizing: "border-box" as const }} />
+
+                <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.375rem", marginBottom: "0.75rem" }}>
+                  {distilledResult.length.toLocaleString()} chars · Edit above if needed, then save
+                </p>
+              </div>
+            )}
+          </div>
+
+          {distilledResult && (
+            <div style={{ padding: "1rem 1.5rem", borderTop: "1px solid var(--va-border)", display: "flex", gap: "0.75rem" }}>
+              <button onClick={() => setShowDistillPanel(false)}
+                style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>
+                Cancel
+              </button>
+              <button onClick={saveDistilledAsCanon}
+                style={{ flex: 1, background: "#7c3aed", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem" }}>
+                ✓ Save to Canon Archives
+              </button>
+            </div>
+          )}
+
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
 

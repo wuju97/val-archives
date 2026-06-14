@@ -26,7 +26,8 @@ const DEEPSEEK_API_BASE = "https://api.deepseek.com/v1/chat/completions";
 
 // ─── Groq (The Deep Historian — low-freq, high-stakes) ───────────────────────
 const GROQ_KEY_STORAGE = "valArchivesGroqKey";
-const GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // 500K tokens/day
+const GROQ_MODEL = "llama-3.3-70b-versatile"; // Deep reasoning tasks
+const GROQ_EXTRACT_MODEL = "llama-3.1-8b-instant"; // High-volume extraction (14.4K req/day)
 const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
 
 // ─── Key Management ───────────────────────────────────────────────────────────
@@ -107,7 +108,8 @@ export function hasGroqKey(): boolean {
 // ─── Groq API Call ────────────────────────────────────────────────────────────
 async function groqCall(
   prompt: string,
-  systemInstruction?: string
+  systemInstruction?: string,
+  modelOverride?: string
 ): Promise<string> {
   const key = getGroqKey();
   if (!key) {
@@ -131,7 +133,7 @@ async function groqCall(
         "Authorization": `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: GROQ_MODEL,
+        model: modelOverride || GROQ_MODEL,
         messages,
         temperature: 0.3,
         max_tokens: 8192,
@@ -761,6 +763,87 @@ export async function geminiTargetedDelete(
 
 // ─── FEATURE: Semantic Search ─────────────────────────────────────────────────
 
+// ─── Canon Distill ────────────────────────────────────────────────────────────
+// Uses Gemini to read an entire source file and produce a structured canon
+// reference document. Much better than direct extraction because Gemini reads
+// the full text at once with complete context.
+export async function geminiDistillCanon(
+  sourceText: string,
+  filename: string,
+  onProgress?: (msg: string) => void
+): Promise<string> {
+  if (!hasGeminiQualityKey()) {
+    throw new Error("NO_GEMINI_KEY");
+  }
+
+  if (onProgress) onProgress("Sending to Gemini for distillation...");
+
+  // Gemini 2.5 Flash supports 1M token context — HP1 is ~110k tokens, fits easily
+  // Cap at 900k chars just to be safe
+  const cappedText = sourceText.slice(0, 900000);
+
+  const prompt = "You are a Canon Archivist for a tabletop RPG campaign. "
+    + "Your job is to read this source material and produce a structured CANON REFERENCE DOCUMENT "
+    + "that a Game Master can use as a definitive reference during play.\n\n"
+    + "SOURCE: " + filename + "\n\n"
+    + "---\n" + cappedText + "\n---\n\n"
+    + "Create a comprehensive Canon Reference Document with these sections:\n\n"
+    + "## CHARACTERS\n"
+    + "For every named character: full name, physical description, personality, key traits, "
+    + "abilities/powers, role in the story, key relationships, important history, secrets.\n\n"
+    + "## LOCATIONS\n"
+    + "Every named place: description, significance, who lives/works there, what happens there.\n\n"
+    + "## RELATIONSHIPS\n"
+    + "All meaningful relationships between characters: nature of relationship, history, tensions, dynamics.\n\n"
+    + "## MAGIC & SUPERNATURAL\n"
+    + "Every spell, magical ability, magical object, supernatural rule, and how magic works.\n\n"
+    + "## ORGANIZATIONS & FACTIONS\n"
+    + "Every group, institution, faction: purpose, members, hierarchy, goals.\n\n"
+    + "## KEY EVENTS (Chronological)\n"
+    + "Every significant event in story order: what happened, who was involved, consequences.\n\n"
+    + "## WORLD RULES & LORE\n"
+    + "How this world works: laws, customs, social structures, history, mythology, anything that defines the setting.\n\n"
+    + "## ITEMS & ARTIFACTS\n"
+    + "Every named object, weapon, tool, or artifact of significance.\n\n"
+    + "## CANON FACTS (Important Details)\n"
+    + "Any other facts that are canonically important — things a GM must never get wrong.\n\n"
+    + "Be thorough and specific. Include minor characters and details. "
+    + "Write each entry as a clear factual statement. "
+    + "This document will be used as the sole reference for running this story as an RPG.";
+
+  try {
+    const result = await geminiQualityCall(prompt);
+    if (onProgress) onProgress("Distillation complete!");
+    return result;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    throw new Error(msg);
+  }
+}
+
+// Refine the distilled document with AI
+export async function geminiRefineDistilledCanon(
+  distilledText: string,
+  filename: string
+): Promise<string> {
+  if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
+
+  const prompt = "You are reviewing a Canon Reference Document for a tabletop RPG campaign.\n\n"
+    + "Source: " + filename + "\n\n"
+    + "CURRENT DOCUMENT:\n" + distilledText + "\n\n"
+    + "Improve this document by:\n"
+    + "- Adding any missing sections or entries\n"
+    + "- Making entries more specific and useful for a GM\n"
+    + "- Ensuring all character relationships are clearly documented\n"
+    + "- Adding context for why each fact matters canonically\n"
+    + "- Fixing any inaccuracies or vague statements\n"
+    + "- Preserving ALL existing content — only add and improve, never remove\n\n"
+    + "Return the complete improved document:";
+
+  return geminiQualityCall(prompt);
+}
+
+
 // [PENSIEVE PIPELINE] Three-stage: Cerebras pre-filter → DeepSeek Investigation → Gemini answer
 // This function handles Stage 2: DeepSeek Investigation
 // Stage 1 (Cerebras keyword pre-filter) happens in the Pensieve page before calling this
@@ -1091,7 +1174,7 @@ export async function geminiExtractCanonToVault(
 
     while (attempts < 3 && !success) {
       try {
-        const result = await groqCall(prompt);
+        const result = await groqCall(prompt, undefined, GROQ_EXTRACT_MODEL);
         const fence = String.fromCharCode(96,96,96);
         const clean = result.split(fence + "json").join("").split(fence).join("").trim();
         const jsonMatch = clean.match(/\[[\s\S]*\]/);
