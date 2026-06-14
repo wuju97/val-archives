@@ -1069,22 +1069,22 @@ export async function geminiExtractCanonToVault(
       onProgress("Processing part " + (i + 1) + " of " + chunks.length + "... (" + allEntries.length + " facts found)");
     }
 
-    const prompt = "Extract story facts from this text for a world-building archive database.\n\n"
+    const prompt = "You are an expert story archivist. Extract EVERY SINGLE fact from this text.\n\n"
       + "Source: \"" + filename + "\", part " + (i + 1) + " of " + chunks.length + "\n"
       + "---\n"
       + chunks[i]
       + "\n---\n\n"
-      + "Extract EVERY named character, location, relationship, magical ability, organization, creature, item, and world fact.\n"
-      + "Be very thorough — extract as many facts as possible.\n"
-      + "Each entry = one clear self-contained sentence.\n\n"
-      + "Examples:\n"
-      + "- \"Harry Potter is a young boy who lives with his aunt and uncle at 4 Privet Drive\" category: characters\n"
-      + "- \"Hogwarts is a school for witchcraft and wizardry\" category: locations\n"
-      + "- \"Hermione Granger is a highly intelligent witch and one of Harry Potter best friends\" category: characters\n"
-      + "- \"Owls are used to deliver mail in the wizarding world\" category: world-overview\n\n"
-      + "Categories: characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society\n\n"
-      + "Return ONLY a JSON array, nothing else:\n"
-      + '[{"text": "fact here", "category": "category-name"}]';
+      + "RULES:\n"
+      + "- Extract EVERY named character, place, relationship, item, spell, creature, organization, event, rule, and world detail\n"
+      + "- Include physical descriptions, personality traits, abilities, backstory details\n"
+      + "- Include dialogue-revealed facts (e.g. if a character says something that reveals a fact)\n"
+      + "- Include minor characters, background locations, passing mentions\n"
+      + "- Each fact = one clear self-contained sentence with the subject named explicitly\n"
+      + "- Aim for 100-200 facts per section — more is always better\n"
+      + "- Do NOT summarize — extract individual atomic facts\n\n"
+      + "CATEGORIES: characters, relationships, locations, magic-supernatural, organizations, history, lore-mythology, items-equipment, creatures-wildlife, rules, timeline-continuity, world-overview, conflict-combat, cultures-society\n\n"
+      + "Return ONLY a JSON array:\n"
+      + "[{\"text\": \"Harry Potter has a lightning-bolt shaped scar on his forehead.\", \"category\": \"characters\"},{\"text\": \"Hogwarts is a school of witchcraft and wizardry.\", \"category\": \"locations\"}]";
 
     let attempts = 0;
     let success = false;
