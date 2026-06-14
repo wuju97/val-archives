@@ -1176,6 +1176,15 @@ export default function CanonPage() {
                   </div>
                 ))}
               </div>
+
+              {/* Import to Vault progress */}
+              {(importingEntryId || importDone) && importProgress && (
+                <div style={{ marginTop: "0.875rem", background: importDone ? "rgba(34,197,94,0.08)" : "rgba(124,58,237,0.08)", border: "1px solid " + (importDone ? "#22c55e" : "#7c3aed"), borderRadius: "0.5rem", padding: "0.75rem 1rem", display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                  {importingEntryId && !importDone && <div style={{ width: "12px", height: "12px", borderRadius: "50%", border: "2px solid #7c3aed", borderTopColor: "transparent", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />}
+                  <p style={{ fontSize: "0.8rem", color: importDone ? "#4ade80" : "#c4b5fd", margin: 0, flex: 1 }}>{importProgress}</p>
+                  {importDone && <button onClick={() => { setImportDone(false); setImportProgress(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1rem", flexShrink: 0 }}>✕</button>}
+                </div>
+              )}
             </div>
           )}
         </main>
