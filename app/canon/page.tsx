@@ -785,6 +785,13 @@ export default function CanonPage() {
           </div>
         </div>
         <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+          {/* Distill Canon button */}
+          {hasGeminiQualityKey() && (
+            <button onClick={openDistillPanel}
+              style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid #7c3aed", background: "#7c3aed", color: "white", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
+              ✨ Distill Canon
+            </button>
+          )}
           {/* Extract to Vault button */}
           <button onClick={openExtractModal}
             style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid #7c3aed", background: "rgba(124,58,237,0.15)", color: "#c4b5fd", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
