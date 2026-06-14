@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { hasGeminiKey, hasGeminiQualityKey, geminiCanonPlacement, geminiDistillCanon, geminiRefineDistilledCanon, geminiClassifyText, ExtractedVaultEntry } from "../../lib/geminiEngine";
+import { hasGeminiKey, hasGeminiQualityKey, geminiCanonPlacement, geminiDistillCanon, geminiRefineDistilledCanon, geminiImportCanonToVault, ExtractedVaultEntry } from "../../lib/geminiEngine";
 import { useExtraction, ExtractionQueueItem } from "../ExtractionContext";
 import {
   loadArchive, saveArchive, regenerateMasterPrompt, ArchiveData,
@@ -345,141 +345,69 @@ export default function CanonPage() {
     flash(`✓ ${count} entries added to your vault.`);
   }
 
-  // ── Import Distilled Canon to Vault (Direct Section Mapping) ────────────────
+  // ── Import Canon Reference to Vault (Gemini-powered) ────────────────────────
+  // Gemini reads the Canon Reference and outputs flat JSON entries.
+  // Atomic save — nothing touches the vault until ALL entries are ready.
   async function importDistilledToVault(entryId: string, entryContent: string, entryFilename: string) {
     if (importingEntryId) return;
+    if (!hasGeminiQualityKey()) { flash("✗ Gemini key required for Import to Vault. Add it in Settings → AI."); return; }
+
     setImportingEntryId(entryId);
     setImportDone(false);
-    setImportProgress("Parsing canon reference document...");
+    setImportProgress("Loading file content...");
 
-    const SECTION_MAP: Record<string, string> = {
-      "CHARACTERS": "characters", "CHARACTER": "characters",
-      "LOCATIONS": "locations", "LOCATION": "locations",
-      "RELATIONSHIPS": "relationships", "RELATIONSHIP": "relationships",
-      "MAGIC & SUPERNATURAL": "magic-supernatural", "MAGIC AND SUPERNATURAL": "magic-supernatural",
-      "MAGIC": "magic-supernatural", "SPELLS": "magic-supernatural",
-      "ORGANIZATIONS & FACTIONS": "organizations", "ORGANIZATIONS": "organizations", "FACTIONS": "organizations",
-      "KEY EVENTS": "timeline-continuity", "EVENTS": "timeline-continuity", "TIMELINE": "timeline-continuity",
-      "CHRONOLOGICAL EVENTS": "timeline-continuity",
-      "WORLD RULES & LORE": "lore-mythology", "WORLD RULES AND LORE": "lore-mythology",
-      "WORLD RULES": "lore-mythology", "LORE": "lore-mythology",
-      "RULES": "rules",
-      "ITEMS & ARTIFACTS": "items-equipment", "ITEMS AND ARTIFACTS": "items-equipment",
-      "ITEMS": "items-equipment", "ARTIFACTS": "items-equipment",
-      "CANON FACTS": "world-overview", "IMPORTANT DETAILS": "world-overview",
-      "CREATURES": "creatures-wildlife", "CREATURES & BEASTS": "creatures-wildlife",
-      "HISTORY": "history",
-      "CULTURES": "cultures-society", "CULTURE": "cultures-society",
-      "CONFLICT": "conflict-combat", "COMBAT": "conflict-combat",
-    };
-
-    function getCategory(header: string): string {
-      const upper = header.toUpperCase().trim();
-      if (SECTION_MAP[upper]) return SECTION_MAP[upper];
-      for (const key of Object.keys(SECTION_MAP)) {
-        if (upper.includes(key)) return SECTION_MAP[key];
+    try {
+      // Get the full content
+      let fullContent = entryContent;
+      if (entryContent === IDB_PLACEHOLDER) {
+        const idbContent = await loadCanonContentFromIDB(entryId);
+        if (!idbContent) { flash("✗ Could not load file from storage"); setImportingEntryId(null); return; }
+        fullContent = idbContent;
       }
-      return "world-overview";
-    }
 
-    function parseEntries(sectionText: string, sectionHeader: string): string[] {
-      const lines = sectionText.split("\n");
-      const results: string[] = [];
-      let characterName = "";
+      setImportProgress("Sending to Gemini — this takes 30-60 seconds...");
 
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t || t.startsWith("## ") || t.startsWith("# ") || t === "---") continue;
+      // Get all entries from Gemini
+      const entries = await geminiImportCanonToVault(
+        fullContent,
+        entryFilename,
+        (msg) => setImportProgress(msg)
+      );
 
-        // Detect indentation level
-        const indentLevel = line.match(/^(\s*)/)?.[1].length ?? 0;
-        const isBullet = t.startsWith("* ") || t.startsWith("- ") || t.match(/^\d+\.\s/);
-        if (!isBullet) continue;
-
-        const rawText = t.replace(/^[*-]\s+/, "").replace(/^\d+\.\s+/, "").trim();
-        const cleaned = rawText.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").trim();
-
-        if (indentLevel === 0) {
-          // Top-level — could be character name or standalone fact
-          characterName = cleaned.replace(/:$/, "").trim();
-          // Only add as entry if it has content beyond just a name
-          if (cleaned.length > 30 && !cleaned.endsWith(":")) {
-            results.push(cleaned);
-          }
-        } else if (indentLevel <= 4) {
-          // Second level — key property like "Physical Description: ..."
-          const colonIdx = cleaned.indexOf(":");
-          if (colonIdx > 0 && characterName) {
-            const prop = cleaned.slice(0, colonIdx).trim();
-            const val = cleaned.slice(colonIdx + 1).trim();
-            if (val.length > 10) {
-              // Create a proper sentence: "Harry Potter's Physical Description: ..."
-              results.push(characterName + " — " + prop + ": " + val);
-            }
-          } else if (cleaned.length > 20) {
-            if (characterName) {
-              results.push(characterName + ": " + cleaned);
-            } else {
-              results.push(cleaned);
-            }
-          }
-        } else {
-          // Deeper level — sub-property value, combine with parent context
-          if (cleaned.length > 15) {
-            if (characterName) {
-              results.push(characterName + ": " + cleaned);
-            } else {
-              results.push(cleaned);
-            }
-          }
-        }
+      if (entries.length === 0) {
+        setImportProgress("✗ Gemini returned no entries. Try again.");
+        setImportingEntryId(null);
+        return;
       }
-      return results.filter(r => r.length > 20);
-    }
 
-    const rawSections = entryContent.split("\n## ");
-    let totalSaved = 0;
-    const total = rawSections.length - 1;
+      // ATOMIC SAVE — load fresh archive, add all entries, save ONCE
+      setImportProgress("Saving " + entries.length + " entries to vault...");
+      await new Promise(r => setTimeout(r, 50));
 
-    // Collect ALL entries first before touching the archive
-    const allToSave: Array<{ text: string; category: string }> = [];
+      let currentArchive = loadArchive();
+      const seen = new Set<string>();
 
-    for (let i = 1; i < rawSections.length; i++) {
-      const raw = "## " + rawSections[i].trim();
-      const headerMatch = raw.match(/^##\s+(.+)/);
-      if (!headerMatch) continue;
-      const sectionHeader = headerMatch[1].trim();
-      const category = getCategory(sectionHeader);
-
-      setImportProgress("(" + i + "/" + total + ") Parsing: " + sectionHeader + "...");
-
-      const entries = parseEntries(raw, sectionHeader);
-      for (const text of entries) {
-        const clean = text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").trim();
-        if (clean.length < 20) continue;
-        allToSave.push({ text: clean, category });
+      for (const entry of entries) {
+        const key = entry.text.trim().toLowerCase().slice(0, 60);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        currentArchive = addEntry(currentArchive, entry.text.trim(), entry.category as any);
       }
-      await new Promise(r => setTimeout(r, 10));
+
+      const refreshed = regenerateMasterPrompt(currentArchive);
+      saveArchive(refreshed);
+      setArchive({ ...refreshed });
+
+      setImportingEntryId(null);
+      setImportDone(true);
+      setImportProgress("✓ Done! " + entries.length + " entries imported from " + entryFilename);
+      flash("✓ " + entries.length + " entries imported to vault!");
+
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed";
+      setImportProgress("✗ Error: " + msg);
+      setImportingEntryId(null);
     }
-
-    // Now do ONE atomic save — load fresh, add all entries, save once
-    setImportProgress("Saving " + allToSave.length + " entries to vault...");
-    await new Promise(r => setTimeout(r, 50));
-
-    // Load the LATEST archive state right before saving
-    let currentArchive = loadArchive();
-    for (const item of allToSave) {
-      currentArchive = addEntry(currentArchive, item.text, item.category as any);
-      totalSaved++;
-    }
-
-    const refreshed = regenerateMasterPrompt(currentArchive);
-    saveArchive(refreshed);
-    setArchive({ ...refreshed });
-    setImportingEntryId(null);
-    setImportDone(true);
-    setImportProgress("✓ Done! " + totalSaved + " entries imported from " + entryFilename);
-    flash("✓ " + totalSaved + " entries imported to vault!");
   }
 
 

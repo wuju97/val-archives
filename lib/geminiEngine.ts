@@ -860,6 +860,86 @@ export async function geminiRefineDistilledCanon(
 }
 
 
+
+// ─── Import Canon Reference to Vault ─────────────────────────────────────────
+// Gemini reads the already-distilled Canon Reference and outputs a flat JSON
+// array of {text, category} entries. One fact per entry, right category.
+// Much simpler than extraction — Gemini just needs to sort, not think.
+export async function geminiImportCanonToVault(
+  canonReference: string,
+  filename: string,
+  onProgress?: (msg: string) => void
+): Promise<Array<{ text: string; category: string }>> {
+  if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
+
+  const CATEGORIES = [
+    "characters", "relationships", "locations", "magic-supernatural",
+    "organizations", "history", "lore-mythology", "items-equipment",
+    "creatures-wildlife", "rules", "timeline-continuity", "world-overview",
+    "conflict-combat", "cultures-society", "quests-plotlines"
+  ];
+
+  if (onProgress) onProgress("Sending Canon Reference to Gemini...");
+
+  const prompt = "You are converting a Canon Reference Document into individual vault entries for a story/RPG archive.\n\n"
+    + "SOURCE: " + filename + "\n\n"
+    + "CANON REFERENCE:\n" + canonReference + "\n\n"
+    + "TASK:\n"
+    + "Convert every piece of information in this document into individual atomic fact entries.\n"
+    + "Rules:\n"
+    + "- Each entry = one clear, self-contained factual sentence\n"
+    + "- Include EVERY character detail, location, spell, relationship, event, rule, item\n"
+    + "- Do NOT skip anything — every bullet point and sub-bullet becomes at least one entry\n"
+    + "- For characters: create separate entries for physical description, personality, abilities, relationships, history\n"
+    + "- Keep original wording as much as possible — do not summarize or combine facts\n"
+    + "- Assign the most specific matching category from the list below\n\n"
+    + "CATEGORIES: " + CATEGORIES.join(", ") + "\n\n"
+    + "Return ONLY a JSON array, no other text:\n"
+    + '[{"text": "Harry Potter has bright green eyes and a lightning bolt scar on his forehead.", "category": "characters"}]';
+
+  // Auto-retry indefinitely on any error
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      if (attempt > 1 && onProgress) onProgress("Attempt " + attempt + " — sending to Gemini...");
+      const result = await geminiQualityCall(prompt);
+      if (onProgress) onProgress("Parsing Gemini response...");
+
+      // Parse JSON
+      const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
+      const jsonMatch = clean.match(/\[([\s\S]*)\]/);
+      if (!jsonMatch) throw new Error("No JSON array in response");
+
+      const parsed: Array<{ text: string; category: string }> = JSON.parse("[" + jsonMatch[1] + "]");
+      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty or invalid JSON array");
+
+      // Validate entries
+      const valid = parsed.filter(e =>
+        e.text && typeof e.text === "string" && e.text.trim().length > 15 &&
+        e.category && CATEGORIES.includes(e.category)
+      );
+
+      if (onProgress) onProgress("✓ Got " + valid.length + " entries from Gemini");
+      return valid;
+
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
+                          msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                          msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                          msg.includes("timeout") || msg.includes("TIMEOUT") || msg.includes("AbortError");
+      if (isRetryable) {
+        const waitSec = Math.min(30 + attempt * 10, 120);
+        if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        continue;
+      }
+      throw new Error(msg);
+    }
+  }
+}
+
 // [PENSIEVE PIPELINE] Three-stage: Cerebras pre-filter → DeepSeek Investigation → Gemini answer
 // This function handles Stage 2: DeepSeek Investigation
 // Stage 1 (Cerebras keyword pre-filter) happens in the Pensieve page before calling this
