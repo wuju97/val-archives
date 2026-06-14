@@ -823,7 +823,9 @@ export async function geminiDistillCanon(
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") || 
-                           msg.includes("429") || msg.includes("503") || msg.includes("overloaded");
+                           msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                           msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                           msg.includes("timeout") || msg.includes("TIMEOUT") || msg.includes("AbortError");
       if (isOverloaded) {
         const waitSec = Math.min(30 + attempt * 5, 120); // 35s, 40s... up to 120s
         if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
