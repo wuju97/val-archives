@@ -345,64 +345,91 @@ export default function CanonPage() {
     flash(`✓ ${count} entries added to your vault.`);
   }
 
-  // ── Import Distilled Canon to Vault ──────────────────────────────────────────
+  // ── Import Distilled Canon to Vault (Direct Section Mapping) ────────────────
   async function importDistilledToVault(entryId: string, entryContent: string, entryFilename: string) {
-    if (!hasGeminiKey()) { flash("✗ Cerebras key required. Add it in Settings → AI."); return; }
     if (importingEntryId) return;
-
     setImportingEntryId(entryId);
     setImportDone(false);
-    setImportProgress("Splitting document into sections...");
+    setImportProgress("Parsing canon reference document...");
 
-    // Split by ## headers
-    const rawSecs = entryContent.split("\n## ");
-    const sections: string[] = rawSecs.map((s, i) => (i === 0 ? s : "## " + s).trim()).filter(s => s.length > 50);
+    const SECTION_MAP: Record<string, string> = {
+      "CHARACTERS": "characters", "CHARACTER": "characters",
+      "LOCATIONS": "locations", "LOCATION": "locations",
+      "RELATIONSHIPS": "relationships", "RELATIONSHIP": "relationships",
+      "MAGIC & SUPERNATURAL": "magic-supernatural", "MAGIC AND SUPERNATURAL": "magic-supernatural",
+      "MAGIC": "magic-supernatural", "SPELLS": "magic-supernatural",
+      "ORGANIZATIONS & FACTIONS": "organizations", "ORGANIZATIONS": "organizations", "FACTIONS": "organizations",
+      "KEY EVENTS": "timeline-continuity", "EVENTS": "timeline-continuity", "TIMELINE": "timeline-continuity",
+      "CHRONOLOGICAL EVENTS": "timeline-continuity",
+      "WORLD RULES & LORE": "lore-mythology", "WORLD RULES AND LORE": "lore-mythology",
+      "WORLD RULES": "lore-mythology", "LORE": "lore-mythology",
+      "RULES": "rules",
+      "ITEMS & ARTIFACTS": "items-equipment", "ITEMS AND ARTIFACTS": "items-equipment",
+      "ITEMS": "items-equipment", "ARTIFACTS": "items-equipment",
+      "CANON FACTS": "world-overview", "IMPORTANT DETAILS": "world-overview",
+      "CREATURES": "creatures-wildlife", "CREATURES & BEASTS": "creatures-wildlife",
+      "HISTORY": "history",
+      "CULTURES": "cultures-society", "CULTURE": "cultures-society",
+      "CONFLICT": "conflict-combat", "COMBAT": "conflict-combat",
+    };
 
-    if (sections.length === 0) {
-      // No ## headers — treat whole thing as one section
-      sections.push(entryContent);
+    function getCategory(header: string): string {
+      const upper = header.toUpperCase().trim();
+      if (SECTION_MAP[upper]) return SECTION_MAP[upper];
+      for (const key of Object.keys(SECTION_MAP)) {
+        if (upper.includes(key)) return SECTION_MAP[key];
+      }
+      return "world-overview";
     }
 
-    const ALL_CATEGORIES = [
-      "characters", "relationships", "locations", "magic-supernatural",
-      "organizations", "history", "lore-mythology", "items-equipment",
-      "creatures-wildlife", "rules", "timeline-continuity", "world-overview",
-      "conflict-combat", "cultures-society", "quests-plotlines", "meta-information"
-    ];
+    function parseEntries(sectionText: string): string[] {
+      const lines = sectionText.split("\n");
+      const results: string[] = [];
+      let current = "";
 
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || t.startsWith("## ") || t.startsWith("# ") || t === "---") continue;
+        // Top-level bullet (not indented)
+        const isTopLevel = (t.startsWith("* ") || t.startsWith("- ")) && !line.startsWith("    ");
+        if (isTopLevel) {
+          if (current.length > 30) results.push(current.trim());
+          current = t.replace(/^[*-]\s+/, "");
+        } else {
+          const cleaned = t.replace(/^[*-]\s+/, "");
+          if (cleaned) current += (current ? " | " : "") + cleaned;
+        }
+      }
+      if (current.length > 30) results.push(current.trim());
+      return results;
+    }
+
+    const rawSections = entryContent.split("\n## ");
     let totalSaved = 0;
     let currentArchive = loadArchive();
+    const total = rawSections.length - 1;
 
-    for (let i = 0; i < sections.length; i++) {
-      const section = sections[i];
-      const headerMatch = section.match(/^## (.+)/);
-      const sectionName = headerMatch ? headerMatch[1].trim() : "Section " + (i + 1);
+    for (let i = 1; i < rawSections.length; i++) {
+      const raw = "## " + rawSections[i].trim();
+      const headerMatch = raw.match(/^##\s+(.+)/);
+      if (!headerMatch) continue;
+      const sectionHeader = headerMatch[1].trim();
+      const category = getCategory(sectionHeader);
 
-      setImportProgress("Section " + (i + 1) + "/" + sections.length + ": " + sectionName + "...");
+      setImportProgress("(" + i + "/" + total + ") " + sectionHeader + " → " + category + "...");
 
-      try {
-        const classified = await geminiClassifyText(section, ALL_CATEGORIES);
-
-        if (classified.length > 0) {
-          for (const entry of classified) {
-            if (!entry.text || entry.text.length < 10) continue;
-            currentArchive = addEntry(currentArchive, entry.text.trim(), entry.category as any);
-            totalSaved++;
-          }
-          saveArchive(currentArchive);
-          setArchive({ ...currentArchive });
-          setImportProgress("Section " + (i + 1) + "/" + sections.length + " done — " + totalSaved + " entries saved so far...");
-        }
-
-        // Small wait between sections to avoid rate limits
-        if (i < sections.length - 1) {
-          await new Promise(r => setTimeout(r, 2000));
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Error";
-        setImportProgress("Section " + (i + 1) + " error: " + msg + " — skipping...");
-        await new Promise(r => setTimeout(r, 3000));
+      const entries = parseEntries(raw);
+      for (const text of entries) {
+        const clean = text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").trim();
+        if (clean.length < 20) continue;
+        currentArchive = addEntry(currentArchive, clean, category as any);
+        totalSaved++;
       }
+
+      saveArchive(currentArchive);
+      setArchive({ ...currentArchive });
+      setImportProgress("✓ (" + i + "/" + total + ") " + sectionHeader + " → " + entries.length + " entries · " + totalSaved + " total");
+      await new Promise(r => setTimeout(r, 30));
     }
 
     const refreshed = regenerateMasterPrompt(currentArchive);
@@ -410,9 +437,10 @@ export default function CanonPage() {
     setArchive(refreshed);
     setImportingEntryId(null);
     setImportDone(true);
-    setImportProgress("✓ Complete! " + totalSaved + " entries imported to vault.");
-    flash("✓ " + totalSaved + " entries imported from " + entryFilename + " to vault!");
+    setImportProgress("✓ Done! " + totalSaved + " entries imported from " + entryFilename);
+    flash("✓ " + totalSaved + " entries imported to vault!");
   }
+
 
   // ── File upload ─────────────────────────────────────────────────────────────
 
