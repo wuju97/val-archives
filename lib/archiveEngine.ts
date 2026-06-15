@@ -112,6 +112,7 @@ export const MASTER_PROMPT_ORDER: StoryCategory[] = [
   "timeline-continuity",
   "characters",
   "relationships",
+  "romance",
   "locations",
   "geography",
   "history",
