@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
   hasGeminiKey, hasGeminiQualityKey,
-  geminiSmartCategoryReview, geminiGenerateSavePrompt, geminiErrorMessage,
-  geminiClassifyText, geminiDistillStory, geminiImportStoryToVault
+  geminiSmartCategoryReview, geminiGenerateSavePrompt,
+  geminiClassifyText
 } from "../../lib/geminiEngine";
+import { useDistill } from "../ExtractionContext";
 import {
   addEntry, addPlayerEntry, replaceEntry, loadArchive, saveArchive,
   detectContradiction, regenerateMasterPrompt,
   CATEGORY_LABELS, CATEGORY_ICONS, StoryCategory, VaultEntry, ArchiveData,
+  saveInboxFileToIDB, loadInboxFileFromIDB, deleteInboxFileFromIDB, listInboxFilesFromIDB,
 } from "@/lib/archiveEngine";
 
 type Suggestion = { text: string; category: StoryCategory };
@@ -106,127 +108,79 @@ export default function InboxPage() {
   const [dynamicSavePrompt, setDynamicSavePrompt] = useState("");
   const [generatingSavePrompt, setGeneratingSavePrompt] = useState(false);
 
-  // Distill Story state
+  // Distill Story state — queue managed by ExtractionContext
+  const { addToDistillQueue, distillQueue, removeFromDistillQueue } = useDistill();
   const [activeTab, setActiveTab] = useState<"paste" | "files">("paste");
-  const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; name: string; content: string }>>([]);
-  const [showDistillPanel, setShowDistillPanel] = useState(false);
-  const [distillSourceId, setDistillSourceId] = useState<"paste" | string>("paste");
-  const [distillProgress, setDistillProgress] = useState("");
-  const [distilling, setDistilling] = useState(false);
-  const [distilledResult, setDistilledResult] = useState("");
-  const [distillTitle, setDistillTitle] = useState("");
-  const [importingToVault, setImportingToVault] = useState(false);
-  const [importProgress, setImportProgress] = useState("");
-  const [importDone, setImportDone] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; name: string; size: number }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── File upload ────────────────────────────────────────────────────────────
+  // Load inbox file metadata from IDB on mount
+  useEffect(() => {
+    const stored = localStorage.getItem("valArchivesInboxFileMeta");
+    if (stored) {
+      try { setUploadedFiles(JSON.parse(stored)); } catch {}
+    }
+  }, []);
+
+  function saveFileMeta(files: Array<{ id: string; name: string; size: number }>) {
+    setUploadedFiles(files);
+    localStorage.setItem("valArchivesInboxFileMeta", JSON.stringify(files));
+  }
+
+  // ── File upload — saves content to IDB, metadata to localStorage ──────────
   async function handleFileUpload(files: FileList) {
+    const newMeta: Array<{ id: string; name: string; size: number }> = [];
     for (const file of Array.from(files)) {
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      if (ext === 'txt' || ext === 'md') {
-        const text = await file.text();
-        setUploadedFiles(prev => [...prev, { id: crypto.randomUUID(), name: file.name, content: text }]);
-      } else if (ext === 'pdf') {
-        // PDF text extraction
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      let text = "";
+      if (ext === "txt" || ext === "md") {
+        text = await file.text();
+      } else if (ext === "pdf") {
         const arrayBuffer = await file.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
-        let text = '';
         try {
-          const decoder = new TextDecoder('utf-8', { fatal: false });
+          const decoder = new TextDecoder("utf-8", { fatal: false });
           const raw = decoder.decode(bytes);
           const matches = raw.matchAll(/BT\s*([\s\S]*?)ET/g);
           for (const match of matches) {
             const block = match[1];
             const strings = block.matchAll(/\(([^)]*)\)\s*T[jJ]/g);
             for (const s of strings) {
-              text += s[1].replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, ' ') + ' ';
+              text += s[1].replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\t/g, " ") + " ";
             }
           }
         } catch {}
-        if (text.trim().length < 100) {
-          text = `[PDF: ${file.name} — Could not extract text. Use Copy & Paste tab instead.]`;
-        }
-        setUploadedFiles(prev => [...prev, { id: crypto.randomUUID(), name: file.name, content: text }]);
+        if (text.trim().length < 100) text = `[PDF: ${file.name} — Could not extract text. Use Copy & Paste tab instead.]`;
       }
+      if (text) {
+        const id = crypto.randomUUID();
+        await saveInboxFileToIDB(id, text);
+        newMeta.push({ id, name: file.name, size: text.length });
+      }
+    }
+    if (newMeta.length > 0) {
+      saveFileMeta([...uploadedFiles, ...newMeta]);
     }
   }
 
-  // ── Distill Story ──────────────────────────────────────────────────────────
-  async function runDistillStory() {
-    if (!hasGeminiQualityKey()) { setDistillProgress("✗ Gemini key required. Add it in Settings → AI."); return; }
-    setDistilling(true);
-    setDistilledResult("");
-    setDistillProgress("Loading content...");
-
-    let content = "";
-    let filename = "Pasted Content";
-
-    if (distillSourceId === "paste") {
-      content = input;
-      filename = "Session Notes";
+  // ── Distill Story — loads from IDB then adds to queue ────────────────────────
+  async function handleDistillStory(sourceId: "paste" | string) {
+    if (!hasGeminiQualityKey()) { alert("Gemini key required. Add it in Settings → AI."); return; }
+    let sourceContent = "";
+    let sourceName = "Session Notes";
+    if (sourceId === "paste") {
+      if (!input.trim()) { alert("Nothing to distill. Paste some content first."); return; }
+      sourceContent = input;
+      sourceName = "Session Notes";
     } else {
-      const file = uploadedFiles.find(f => f.id === distillSourceId);
-      if (!file) { setDistillProgress("✗ File not found"); setDistilling(false); return; }
-      content = file.content;
-      filename = file.name;
+      const meta = uploadedFiles.find(f => f.id === sourceId);
+      if (!meta) { alert("File not found."); return; }
+      const loaded = await loadInboxFileFromIDB(meta.id);
+      if (!loaded) { alert("Could not load file from storage."); return; }
+      sourceContent = loaded;
+      sourceName = meta.name;
     }
-
-    if (!content.trim()) { setDistillProgress("✗ No content to distill"); setDistilling(false); return; }
-
-    setDistillTitle(filename.replace(/\.[^/.]+$/, "") + " — Story Reference");
-    try {
-      const result = await geminiDistillStory(content, filename, setDistillProgress);
-      setDistilledResult(result);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Distillation failed";
-      setDistillProgress("✗ Error: " + msg);
-    }
-    setDistilling(false);
-  }
-
-  // ── Import Story Reference → Player Story subtab ──────────────────────────
-  async function importStoryToVault() {
-    if (!distilledResult) return;
-    if (importingToVault) return;
-
-    setImportingToVault(true);
-    setImportDone(false);
-    setImportProgress("Sending to Gemini for section-by-section import...");
-
-    try {
-      const entries = await geminiImportStoryToVault(distilledResult, distillTitle, setImportProgress);
-      if (entries.length === 0) {
-        setImportProgress("✗ No entries returned. Try again.");
-        setImportingToVault(false);
-        return;
-      }
-
-      // ATOMIC SAVE to Player Story subtab
-      setImportProgress("Saving " + entries.length + " entries to 🎮 Player Story subtab...");
-      await new Promise(r => setTimeout(r, 50));
-
-      let currentArchive = loadArchive();
-      const seen = new Set<string>();
-
-      for (const entry of entries) {
-        const key = entry.text.trim().toLowerCase().slice(0, 60);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        currentArchive = addPlayerEntry(currentArchive, entry.text.trim(), entry.category as StoryCategory);
-      }
-
-      const refreshed = regenerateMasterPrompt(currentArchive);
-      saveArchive(refreshed);
-
-      setImportingToVault(false);
-      setImportDone(true);
-      setImportProgress("✓ Done! " + entries.length + " entries saved to 🎮 Player Story subtab.");
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed";
-      setImportProgress("✗ Error: " + msg);
-      setImportingToVault(false);
-    }
+    addToDistillQueue(crypto.randomUUID(), sourceContent, sourceName);
   }
 
   // ── Existing inbox functions ───────────────────────────────────────────────
@@ -346,98 +300,55 @@ export default function InboxPage() {
         </div>
       )}
 
-      {/* Distill Story Side Panel */}
-      {showDistillPanel && (
-        <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1001, width: "min(600px, 95vw)", background: "var(--va-surface)", borderLeft: "1px solid var(--va-border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.3)" }}>
-          <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>✨ Distill Story</h2>
-              <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                Gemini reads your content and creates a structured Story Reference → imports to 🎮 Player Story subtab
-              </p>
-            </div>
-            <button onClick={() => { setShowDistillPanel(false); setDistilledResult(""); setDistillProgress(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
-          </div>
 
-          <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
-            {!distilledResult ? (
+      {/* Save Prompt Modal */}
+      {showSavePrompt && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "1rem" }}>
+          <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-accent)", borderRadius: "0.75rem", padding: "2rem", maxWidth: "56rem", width: "100%", display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
               <div>
-                <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.625rem" }}>Pick source to distill:</p>
-                <select value={distillSourceId} onChange={e => setDistillSourceId(e.target.value)} disabled={distilling}
-                  style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.5rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.875rem", outline: "none" }}>
-                  <option value="paste">📝 Pasted text in Inbox</option>
-                  {uploadedFiles.map(f => <option key={f.id} value={f.id}>📄 {f.name}</option>)}
-                </select>
-
-                <div style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "0.5rem", padding: "0.75rem", marginBottom: "0.875rem", fontSize: "0.75rem", color: "var(--va-text-muted)", lineHeight: "1.6" }}>
-                  <p style={{ color: "#c4b5fd", fontWeight: "700", marginBottom: "0.3rem" }}>How it works:</p>
-                  <p>1. Gemini reads your entire content at once</p>
-                  <p>2. Creates a structured Story Reference (characters, events, quests, relationships, romance, etc.)</p>
-                  <p>3. You can review and edit before saving</p>
-                  <p>4. Import sends everything to <strong style={{ color: "var(--va-text)" }}>🎮 Player Story subtab only</strong></p>
-                </div>
-
-                {distillProgress && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-                    {distilling && <div style={{ width: "12px", height: "12px", borderRadius: "50%", border: "2px solid #7c3aed", borderTopColor: "transparent", animation: "spin 0.8s linear infinite" }} />}
-                    <p style={{ fontSize: "0.8rem", color: distillProgress.startsWith("✗") ? "#f87171" : "#c4b5fd" }}>{distillProgress}</p>
-                  </div>
-                )}
-
-                {!distilling && (
-                  <button onClick={runDistillStory}
-                    style={{ width: "100%", background: "#7c3aed", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
-                    ✨ Distill with Gemini
+                <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", color: "var(--va-accent)" }}>💾 Session Save Prompt</h2>
+                <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", marginTop: "0.25rem" }}>Send this to your AI to extract everything from your session.</p>
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                {hasGeminiKey() && (
+                  <button onClick={async () => {
+                    setGeneratingSavePrompt(true);
+                    const archive = loadArchive();
+                    const withPrompt = regenerateMasterPrompt(archive);
+                    const dynamic = await geminiGenerateSavePrompt(withPrompt.masterPrompt);
+                    if (dynamic) setDynamicSavePrompt(dynamic);
+                    setGeneratingSavePrompt(false);
+                  }} disabled={generatingSavePrompt}
+                    style={{ background: "#7c3aed", color: "white", padding: "0.375rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: generatingSavePrompt ? 0.6 : 1 }}>
+                    {generatingSavePrompt ? "✨ Generating..." : "✨ AI Personalize"}
                   </button>
                 )}
-              </div>
-            ) : (
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                  <p style={{ fontWeight: "700", fontSize: "0.875rem", color: "#4ade80" }}>✓ Distillation complete!</p>
-                  <button onClick={() => { setDistilledResult(""); setDistillProgress(""); }}
-                    style={{ background: "var(--va-border)", color: "var(--va-text-muted)", border: "none", borderRadius: "0.375rem", padding: "0.25rem 0.625rem", cursor: "pointer", fontSize: "0.75rem" }}>
-                    ← Redo
+                {dynamicSavePrompt && (
+                  <button onClick={() => setDynamicSavePrompt("")}
+                    style={{ background: "var(--va-border)", color: "var(--va-text-muted)", padding: "0.375rem 0.75rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontSize: "0.75rem" }}>
+                    Use Default
                   </button>
-                </div>
-
-                <input value={distillTitle} onChange={e => setDistillTitle(e.target.value)}
-                  placeholder="Title for this Story Reference..."
-                  style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.5rem 0.75rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "0.75rem", boxSizing: "border-box" as const }} />
-
-                <textarea value={distilledResult} onChange={e => setDistilledResult(e.target.value)}
-                  style={{ width: "100%", height: "350px", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.8rem", lineHeight: "1.7", resize: "vertical", fontFamily: "monospace", boxSizing: "border-box" as const }} />
-
-                <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.375rem", marginBottom: "0.75rem" }}>
-                  {distilledResult.length.toLocaleString()} chars · Edit above if needed
-                </p>
-
-                {(importingToVault || importDone) && importProgress && (
-                  <div style={{ background: importDone ? "rgba(34,197,94,0.08)" : "rgba(124,58,237,0.08)", border: `1px solid ${importDone ? "#22c55e" : "#7c3aed"}`, borderRadius: "0.5rem", padding: "0.75rem", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    {importingToVault && <div style={{ width: "12px", height: "12px", borderRadius: "50%", border: "2px solid #7c3aed", borderTopColor: "transparent", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />}
-                    <p style={{ fontSize: "0.8rem", color: importDone ? "#4ade80" : "#c4b5fd", margin: 0 }}>{importProgress}</p>
-                  </div>
                 )}
+                <button onClick={() => { navigator.clipboard.writeText(dynamicSavePrompt || DEFAULT_SAVE_PROMPT); setCopiedSave(true); setTimeout(() => setCopiedSave(false), 2000); }}
+                  style={{ background: "var(--va-accent)", color: "white", padding: "0.375rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
+                  {copiedSave ? "✓ Copied!" : "📋 Copy"}
+                </button>
+                <button onClick={() => { const blob = new Blob([dynamicSavePrompt || DEFAULT_SAVE_PROMPT], { type: "text/plain" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "session_save_prompt.txt"; a.click(); URL.revokeObjectURL(url); }}
+                  style={{ background: "var(--va-border)", color: "var(--va-text)", padding: "0.375rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontSize: "0.875rem" }}>
+                  📄 Export TXT
+                </button>
+                <button onClick={() => { setShowSavePrompt(false); setDynamicSavePrompt(""); }}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem", padding: "0.375rem 0.75rem" }}>Close</button>
               </div>
-            )}
-          </div>
-
-          {distilledResult && (
-            <div style={{ padding: "1rem 1.5rem", borderTop: "1px solid var(--va-border)", display: "flex", gap: "0.75rem" }}>
-              <button onClick={() => setShowDistillPanel(false)}
-                style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>
-                Close
-              </button>
-              <button onClick={importStoryToVault} disabled={importingToVault || importDone}
-                style={{ flex: 1, background: importDone ? "#15803d" : "#7c3aed", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem", cursor: importDone ? "default" : "pointer", fontWeight: "700", fontSize: "0.875rem", opacity: importingToVault ? 0.7 : 1 }}>
-                {importDone ? "✓ Imported to Player Story" : importingToVault ? "Importing..." : "⚡ Import to 🎮 Player Story"}
-              </button>
             </div>
-          )}
-
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            {dynamicSavePrompt && <p style={{ fontSize: "0.75rem", color: "#c4b5fd", marginBottom: "0.5rem" }}>✨ AI-personalized for your archive</p>}
+            <textarea value={dynamicSavePrompt || DEFAULT_SAVE_PROMPT} onChange={e => dynamicSavePrompt ? setDynamicSavePrompt(e.target.value) : null} readOnly={!dynamicSavePrompt}
+              style={{ flex: 1, minHeight: "400px", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "1rem", outline: "none", resize: "none", fontSize: "0.8rem", fontFamily: "monospace", color: "var(--va-text)", lineHeight: "1.6" }} />
+          </div>
         </div>
       )}
+
 
       <Link href="/dashboard" style={{ color: "var(--va-text-muted)", fontSize: "0.875rem", display: "block", marginBottom: "1.5rem" }}>← Home</Link>
 
@@ -448,7 +359,7 @@ export default function InboxPage() {
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
           {hasGeminiQualityKey() && (
-            <button onClick={() => setShowDistillPanel(true)}
+            <button onClick={() => handleDistillStory("paste")}
               style={{ background: "#7c3aed", color: "white", padding: "0.625rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
               ✨ Distill Story
             </button>
@@ -535,16 +446,16 @@ export default function InboxPage() {
                 <div key={file.id} style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.75rem 1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
                     <p style={{ fontWeight: "600", fontSize: "0.875rem" }}>📄 {file.name}</p>
-                    <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>{file.content.length.toLocaleString()} chars</p>
+                    <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>{file.size.toLocaleString()} chars</p>
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     {hasGeminiQualityKey() && (
-                      <button onClick={() => { setDistillSourceId(file.id); setShowDistillPanel(true); }}
+                      <button onClick={() => handleDistillStory(file.id)}
                         style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.375rem", padding: "0.25rem 0.625rem", cursor: "pointer", fontSize: "0.75rem", fontWeight: "600" }}>
                         ✨ Distill
                       </button>
                     )}
-                    <button onClick={() => setUploadedFiles(prev => prev.filter(f => f.id !== file.id))}
+                    <button onClick={async () => { await deleteInboxFileFromIDB(file.id); saveFileMeta(uploadedFiles.filter(f => f.id !== file.id)); }}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1rem" }}>🗑️</button>
                   </div>
                 </div>
