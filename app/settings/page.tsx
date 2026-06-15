@@ -390,9 +390,9 @@ export default function SettingsPage() {
                   <div style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
                       <div>
-                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— The Archivist</span></p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>aistudio.google.com · Free · No card required</p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>For: Master Prompt refine, Prompt Forge, Chat, Pensieve answers, all ✨ quality buttons</p>
+                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 1 — Canon <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Dedicated to Canon distill + import</span></p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>Canon Distill → Key 1 → Key 3 fallback</p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>aistudio.google.com · Free · No card required</p>
                       </div>
                       {hasGeminiQualityKey() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
                     </div>

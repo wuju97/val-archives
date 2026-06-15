@@ -864,7 +864,7 @@ export async function geminiChat(
   masterPrompt: string,
   history: Array<{ role: "user" | "model"; text: string }>
 ): Promise<string> {
-  if (!hasGeminiKey() && !hasOpenRouterKey()) throw new Error("NO_KEY");
+  if (!hasGeminiKey() && !hasGeminiQualityKey() && !hasGeminiQualityKey2() && !hasGeminiQualityKey3()) throw new Error("NO_KEY");
 
   const systemInstruction = `You are The Archivist — an intelligent AI assistant for a story/RPG campaign.\nYou have complete knowledge of this archive including both Canon Story facts and the Player's current journey.\nBe helpful, specific, and always stay consistent with established facts.\nYou can help with: storytelling, character analysis, world-building, quest planning, theories, and anything related to this campaign.\n\nARCHIVE CONTEXT:\n${masterPrompt.slice(0, 8000)}`;
 
