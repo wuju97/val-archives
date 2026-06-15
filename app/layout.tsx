@@ -1,11 +1,9 @@
-"use client";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "./ThemeProvider";
-import { ExtractionProvider, useDistill, DistillQueueItem } from "./ExtractionContext";
+import { ExtractionProvider } from "./ExtractionContext";
 import { MusicProvider } from "./MusicPlayer";
-import { useState } from "react";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,65 +20,6 @@ export const metadata: Metadata = {
   description: "A Prompt Operating System for stories, RPGs, and worldbuilding.",
 };
 
-
-// ─── Floating Distill Queue Popup ────────────────────────────────────────────
-function DistillFloatingPopup() {
-  const { distillQueue, removeFromDistillQueue, isDistillRunning } = useDistill();
-  const [pos, setPos] = useState({ x: 20, y: 120 });
-  const [dragging, setDragging] = useState(false);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [visible, setVisible] = useState(true);
-
-  if (distillQueue.length === 0) return null;
-
-  const running = distillQueue.find((i: DistillQueueItem) => i.status === "distilling" || i.status === "importing");
-  const done = distillQueue.filter((i: DistillQueueItem) => i.status === "done");
-  const errors = distillQueue.filter((i: DistillQueueItem) => i.status === "error");
-  const queued = distillQueue.filter((i: DistillQueueItem) => i.status === "queued");
-
-  if (!visible) {
-    return (
-      <button onClick={() => setVisible(true)}
-        style={{ position: "fixed", bottom: "5rem", right: "1.25rem", zIndex: 999, background: "#7c3aed", color: "white", border: "none", borderRadius: "9999px", padding: "0.5rem 0.875rem", cursor: "pointer", fontSize: "0.75rem", fontWeight: "700", boxShadow: "0 4px 12px rgba(124,58,237,0.4)" }}>
-        ✨ Distill Queue ({distillQueue.length})
-      </button>
-    );
-  }
-
-  return (
-    <div
-      onMouseDown={e => { setDragging(true); setOffset({ x: e.clientX - pos.x, y: e.clientY - pos.y }); }}
-      onMouseMove={e => { if (dragging) setPos({ x: e.clientX - offset.x, y: e.clientY - offset.y }); }}
-      onMouseUp={() => setDragging(false)}
-      style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 1000, width: "320px", background: "var(--va-surface)", border: "1px solid #7c3aed", borderRadius: "0.75rem", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", cursor: dragging ? "grabbing" : "grab", userSelect: "none" }}>
-      <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          {isDistillRunning && <div style={{ width: "10px", height: "10px", borderRadius: "50%", border: "2px solid #7c3aed", borderTopColor: "transparent", animation: "spin 0.8s linear infinite" }} />}
-          <p style={{ fontWeight: "700", fontSize: "0.8rem", color: "#c4b5fd" }}>
-            ✨ Distilling... {running?.filename.replace(/\.[^/.]+$/, "")}
-          </p>
-        </div>
-        <button onClick={() => setVisible(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem", padding: "0 0.25rem" }}>−</button>
-      </div>
-      <div style={{ padding: "0.75rem 1rem", maxHeight: "200px", overflowY: "auto" }}>
-        {distillQueue.map((item: DistillQueueItem) => (
-          <div key={item.id} style={{ marginBottom: "0.5rem", padding: "0.5rem 0.625rem", background: "var(--va-bg)", borderRadius: "0.375rem", border: `1px solid ${item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : item.status === "distilling" || item.status === "importing" ? "#7c3aed" : "var(--va-border)"}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.2rem" }}>
-              <span style={{ fontSize: "0.75rem", fontWeight: "600", color: "var(--va-text)" }}>
-                {item.status === "done" ? "✓" : item.status === "error" ? "✗" : item.status === "queued" ? "🕐" : "⏳"} {item.filename.replace(/\.[^/.]+$/, "").slice(0, 25)}
-              </span>
-              {(item.status === "done" || item.status === "error") && (
-                <button onClick={() => removeFromDistillQueue(item.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>×</button>
-              )}
-            </div>
-            <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : "#c4b5fd", margin: 0 }}>{item.progress}</p>
-          </div>
-        ))}
-      </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-}
 
 export default function RootLayout({
   children,
