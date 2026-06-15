@@ -258,7 +258,24 @@ export interface ContradictionResult {
   reason?: string;
 }
 
-const STORAGE_KEY = "valArchivesData_v2";
+const STORAGE_KEY_DEFAULT = "valArchivesData_v2";
+
+function getStorageKey(): string {
+  if (typeof window === "undefined") return STORAGE_KEY_DEFAULT;
+  const activeId = localStorage.getItem("valArchivesActiveVault");
+  if (activeId) return `valArchivesData_${activeId}`;
+  try {
+    const index = localStorage.getItem("valArchivesVaultIndex");
+    if (index) {
+      const vaults = JSON.parse(index);
+      if (vaults.length > 0) {
+        localStorage.setItem("valArchivesActiveVault", vaults[0].id);
+        return `valArchivesData_${vaults[0].id}`;
+      }
+    }
+  } catch {}
+  return STORAGE_KEY_DEFAULT;
+}
 
 // ─── IndexedDB helpers ────────────────────────────────────────────────────────
 
@@ -332,7 +349,6 @@ export function detectContradiction(
 // ─── Master Prompt Compiler ───────────────────────────────────────────────────
 
 export function compileMasterPrompt(archive: ArchiveData): string {
-  // Dedupe canon entries
   const seenCanon = new Set<string>();
   const deduped = archive.entries.filter((e) => {
     const key = `${e.category}::${e.text.trim()}`;
@@ -341,7 +357,6 @@ export function compileMasterPrompt(archive: ArchiveData): string {
     return true;
   });
 
-  // Dedupe player entries
   const seenPlayer = new Set<string>();
   const dedupedPlayer = (archive.playerEntries ?? []).filter((e) => {
     const key = `${e.category}::${e.text.trim()}`;
@@ -542,8 +557,8 @@ export function createEmptyArchive(): ArchiveData {
   return {
     archiveName: "Untitled Archive",
     lastSaved: "",
-    entries: [],          // Canon Story subtab
-    playerEntries: [],    // Player Story subtab
+    entries: [],
+    playerEntries: [],
     masterPrompt: "",
     savePrompt: "",
     customPrompt: "",
@@ -594,69 +609,62 @@ export function regenerateMasterPrompt(archive: ArchiveData): ArchiveData {
   };
 }
 
-// ─── saveArchive ─────────────────────────────────────────────────────────────
+// ─── saveArchive ──────────────────────────────────────────────────────────────
 // IDB IS THE PRIMARY STORE. localStorage is a fast-access cache only.
 // NEVER strips or truncates data. If localStorage is full, skip it silently.
-// Data is ALWAYS saved in full to IndexedDB first — it never gets corrupted.
 export function saveArchive(data: ArchiveData): void {
   if (typeof window === "undefined") return;
+  const STORAGE_KEY = getStorageKey(); // FIX: was bare STORAGE_KEY
   const prepared = regenerateMasterPrompt(data);
   prepared.lastSaved = new Date().toISOString();
   const serialized = JSON.stringify(prepared);
 
-  // 1. Save full data to IndexedDB FIRST — this is the primary store
   openIDB().then(db => idbPut(db, STORAGE_KEY, serialized)).catch((err) => {
     console.error("[ValArchives] IDB save failed:", err);
   });
 
-  // 2. Try to cache in localStorage for fast sync access — never strip, never corrupt
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
   } catch {
-    // localStorage full — that's fine, IDB has the full data
-    // Remove the key so loadArchive falls through to IDB
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
   }
 }
 
 export function loadArchive(): ArchiveData {
   if (typeof window === "undefined") return createEmptyArchive();
-  // Try localStorage cache first (fast)
+  const STORAGE_KEY = getStorageKey(); // FIX: was bare STORAGE_KEY
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
       const parsed = JSON.parse(saved) as ArchiveData;
       if (!parsed.playerEntries) parsed.playerEntries = [];
       if (!parsed.inboxDistillCategories) parsed.inboxDistillCategories = [];
-      // Only use localStorage if it has actual entries — not empty/stripped
       if (parsed && (parsed.entries?.length > 0 || parsed.masterPrompt)) {
         return parsed;
       }
     } catch {}
   }
-  // localStorage empty/missing/stale — this is normal, return empty and let
-  // loadArchiveAsync handle IDB restore for pages that need it
   return createEmptyArchive();
 }
 
 export async function loadArchiveAsync(): Promise<ArchiveData> {
   if (typeof window === "undefined") return createEmptyArchive();
+  const STORAGE_KEY = getStorageKey();
 
-  // Always load from IDB first — it has the full, uncorrupted data
   try {
     const db = await openIDB();
     const result = await idbGet(db, STORAGE_KEY);
     if (result) {
       const data = JSON.parse(result) as ArchiveData;
-      // Update localStorage cache with full data
       try { localStorage.setItem(STORAGE_KEY, result); } catch {
         try { localStorage.removeItem(STORAGE_KEY); } catch {}
       }
+      if (!data.playerEntries) data.playerEntries = [];
+      if (!data.inboxDistillCategories) data.inboxDistillCategories = [];
       return data;
     }
   } catch {}
 
-  // Fall back to localStorage if IDB fails
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try { return JSON.parse(saved) as ArchiveData; } catch {}
@@ -664,7 +672,6 @@ export async function loadArchiveAsync(): Promise<ArchiveData> {
 
   return createEmptyArchive();
 }
-
 
 // ─── Inbox File IDB Storage ───────────────────────────────────────────────────
 const INBOX_IDB_NAME = "valArchivesInboxDB";
@@ -730,38 +737,32 @@ export async function listInboxFilesFromIDB(): Promise<Array<{ key: string; valu
 
 export function clearArchive(): void {
   if (typeof window === "undefined") return;
+  const STORAGE_KEY = getStorageKey();
 
-  // Load current archive to PRESERVE canon categories and custom tabs
   const current = loadArchive();
 
-  // Create empty archive but keep canon files, custom tabs, archive name
   const cleared = {
     ...createEmptyArchive(),
     archiveName: current.archiveName,
     customTabs: current.customTabs ?? [],
-    canonCategories: current.canonCategories ?? [],       // NEVER wipe canon files
-    inboxDistillCategories: current.inboxDistillCategories ?? [], // NEVER wipe inbox distill files
+    canonCategories: current.canonCategories ?? [],
+    inboxDistillCategories: current.inboxDistillCategories ?? [],
     masterPrompt: "",
   };
 
-  // Clear localStorage vault data
   localStorage.removeItem(STORAGE_KEY);
-  // Clear dashboard character cards only
   localStorage.removeItem("valArchivesDashboardCards");
 
-  // Save cleared archive (with canon preserved) to IDB
   openIDB().then(db => {
     idbPut(db, STORAGE_KEY, JSON.stringify(cleared));
     idbPut(db, "valArchivesDashboardCards", JSON.stringify([]));
   }).catch(() => {});
 
-  // Also save to localStorage for immediate UI update
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cleared));
   } catch {}
 }
 
-// Add entry to Player Story subtab
 export function addPlayerEntry(
   archive: ArchiveData,
   text: string,
@@ -1161,18 +1162,15 @@ export function loadVaultById(vaultId: string): ArchiveData {
 export async function loadVaultByIdAsync(vaultId: string): Promise<ArchiveData> {
   if (typeof window === "undefined") return createEmptyArchive();
 
-  // Try localStorage first
   try {
     const raw = localStorage.getItem(getVaultStorageKey(vaultId));
     if (raw) return { ...createEmptyArchive(), ...JSON.parse(raw) };
   } catch {}
 
-  // Fall back to IndexedDB
   try {
     const db = await openIDB();
     const result = await idbGet(db, getVaultStorageKey(vaultId));
     if (result) {
-      // Restore to localStorage for future fast access
       try { localStorage.setItem(getVaultStorageKey(vaultId), result); } catch {}
       return { ...createEmptyArchive(), ...JSON.parse(result) };
     }
@@ -1181,28 +1179,22 @@ export async function loadVaultByIdAsync(vaultId: string): Promise<ArchiveData> 
   return createEmptyArchive();
 }
 
-// ─── saveVaultById ────────────────────────────────────────────────────────────
-// IDB IS THE PRIMARY STORE. localStorage is a fast-access cache only.
-// NEVER strips or truncates data under any circumstances.
 export function saveVaultById(vaultId: string, data: ArchiveData): void {
   if (typeof window === "undefined") return;
   const prepared = { ...data, lastSaved: new Date().toISOString() };
   const storageKey = getVaultStorageKey(vaultId);
   const fullSerialized = JSON.stringify(prepared);
 
-  // 1. Save to IDB first — always, unconditionally, never stripped
   openIDB().then(db => idbPut(db, storageKey, fullSerialized)).catch((err) => {
     console.error("[ValArchives] IDB vault save failed:", err);
   });
 
-  // 2. Cache in localStorage — if full, skip silently (IDB has the data)
   try {
     localStorage.setItem(storageKey, fullSerialized);
   } catch {
     try { localStorage.removeItem(storageKey); } catch {}
   }
 
-  // Update vault index meta
   try {
     const index = getVaultIndex().map(v =>
       v.id === vaultId
@@ -1333,6 +1325,7 @@ export function pushHistory(state: ArchiveData): void {
 
 export function undoArchive(): ArchiveData | null {
   if (typeof window === "undefined") return null;
+  const STORAGE_KEY = getStorageKey(); // FIX: was bare STORAGE_KEY
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     const history: ArchiveData[] = raw ? JSON.parse(raw) : [];
@@ -1352,6 +1345,7 @@ export function undoArchive(): ArchiveData | null {
 
 export function redoArchive(): ArchiveData | null {
   if (typeof window === "undefined") return null;
+  const STORAGE_KEY = getStorageKey(); // FIX: was bare STORAGE_KEY
   try {
     const futureRaw = localStorage.getItem(FUTURE_KEY);
     const future: ArchiveData[] = futureRaw ? JSON.parse(futureRaw) : [];
