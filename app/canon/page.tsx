@@ -1159,6 +1159,20 @@ export default function CanonPage() {
                           style={{ background: "var(--va-border)", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.5rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
                           {expandedEntry === entry.id ? "▲ Hide" : "▼ View"}
                         </button>
+                        <button onClick={async () => {
+                          let dl = entry.content;
+                          if (entry.content === IDB_PLACEHOLDER) {
+                            const idb = await loadCanonContentFromIDB(entry.id);
+                            if (idb) dl = idb; else { flash("✗ Could not load file"); return; }
+                          }
+                          const blob = new Blob([dl], { type: "text/markdown" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = entry.filename.replace(/\.[^/.]+$/, "") + ".md";
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }} title="Download">⬇️</button>
                         <button onClick={() => handleRemoveEntry(entry.id)}
                           style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>🗑️</button>
                       </div>

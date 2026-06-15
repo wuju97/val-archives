@@ -453,13 +453,29 @@ export default function InboxPage() {
                   <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>
                     Distill Queue ({distillQueue.length})
                   </p>
-                  {distillQueue.map(item => (
+                  {distillQueue.map(item => {
+                    // Parse chunk progress for progress bar: "(2/4) Distilling..."
+                    const chunkMatch = item.progress?.match(/\((\d+)\/(\d+)\)/);
+                    const currentChunk = chunkMatch ? parseInt(chunkMatch[1]) : 0;
+                    const totalChunks = chunkMatch ? parseInt(chunkMatch[2]) : 4;
+                    const pct = item.status === "done" ? 100 : item.status === "running" ? Math.round((currentChunk / totalChunks) * 100) : 0;
+                    // Time estimate: ~4 min per chunk
+                    const chunksLeft = totalChunks - currentChunk;
+                    const minsLeft = chunksLeft * 4;
+                    const timeEstimate = item.status === "running" && currentChunk > 0
+                      ? `~${minsLeft} min remaining`
+                      : item.status === "running" && currentChunk === 0
+                      ? "~16 min total"
+                      : "";
+
+                    return (
                     <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.375rem" }}>
                         <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--va-text)" }}>
-                          {item.status === "running" ? "⏳" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "")}
+                          {item.status === "running" ? "⏳" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "").slice(0, 30)}
                         </span>
-                        <div style={{ display: "flex", gap: "0.375rem" }}>
+                        <div style={{ display: "flex", gap: "0.375rem", alignItems: "center" }}>
+                          {timeEstimate && <span style={{ fontSize: "0.65rem", color: "var(--va-text-muted)" }}>{timeEstimate}</span>}
                           {item.status === "done" && item.importedCount === 0 && (
                             <button onClick={() => importToPlayerStory(item)} disabled={importingId === item.id}
                               style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600", opacity: importingId === item.id ? 0.6 : 1 }}>
@@ -475,11 +491,18 @@ export default function InboxPage() {
                           )}
                         </div>
                       </div>
+                      {/* Progress bar */}
+                      {(item.status === "running" || item.status === "done") && (
+                        <div style={{ height: "4px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.3rem" }}>
+                          <div style={{ height: "100%", background: item.status === "done" ? "#22c55e" : "#7c3aed", borderRadius: "9999px", transition: "width 0.5s", width: pct + "%" }} />
+                        </div>
+                      )}
                       <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : "#c4b5fd", margin: 0 }}>
                         {item.progress}
                       </p>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -593,6 +616,15 @@ export default function InboxPage() {
                         ✨ Distill
                       </button>
                     )}
+                    <button onClick={async () => {
+                      const dl = await loadInboxFileFromIDB(file.id);
+                      if (!dl) return;
+                      const blob = new Blob([dl], { type: "text/plain" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url; a.download = file.name; a.click();
+                      URL.revokeObjectURL(url);
+                    }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }} title="Download">⬇️</button>
                     <button onClick={async () => { await deleteInboxFileFromIDB(file.id); saveFileMeta(uploadedFiles.filter(f => f.id !== file.id)); }}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1rem" }}>🗑️</button>
                   </div>
