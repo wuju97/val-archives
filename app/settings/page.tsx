@@ -413,8 +413,8 @@ export default function SettingsPage() {
                   <div style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
                       <div>
-                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 2 <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Backup (auto-rotates when Key 1 hits rate limit)</span></p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>aistudio.google.com · Free · Different Google account</p>
+                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 2 — Inbox <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Dedicated to Inbox distill + import</span></p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>Inbox Distill → Key 2 → Key 3 fallback</p>
                       </div>
                       {hasGeminiQualityKey2() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
                     </div>
@@ -435,8 +435,8 @@ export default function SettingsPage() {
                   <div style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
                       <div>
-                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 3 <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Optional 3rd backup</span></p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>aistudio.google.com · Free · 3rd Google account</p>
+                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 3 — General <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Pensieve, Chat, Refine + fallback for Keys 1 & 2</span></p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>General tasks: Key 3 first. Canon fallback: Key 3. Inbox fallback: Key 3.</p>
                         <p style={{ fontSize: "0.72rem", color: "#fbbf24" }}>If all 3 keys hit rate limit, process pauses and auto-resumes when a key resets.</p>
                       </div>
                       {hasGeminiQualityKey3() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
@@ -461,7 +461,7 @@ export default function SettingsPage() {
                 <div style={S.card}>
                   <h3 style={{ fontWeight: "bold", marginBottom: "1rem" }}>The Archivist — Internal Architecture</h3>
                   {[
-                    { title: "✨ Gemini — The Archivist", color: "#c4b5fd", tasks: ["Master Prompt refine", "Custom Prompt enhance", "Prompt Forge refine", "Rule enhance", "Save Prompt personalize", "Character Panel AI", "Chat", "Pensieve final answer", "Quick Summaries"] },
+                    { title: "✨ Gemini Key 1 — Canon", color: "#c4b5fd", tasks: ["Master Prompt refine", "Custom Prompt enhance", "Prompt Forge refine", "Rule enhance", "Save Prompt personalize", "Character Panel AI", "Chat", "Pensieve final answer", "Quick Summaries"] },
                     { title: "🧠 Groq — The Deep Historian", color: "#93c5fd", tasks: ["Extract to Vault", "Timeline Checks", "Contradiction Detection", "Canon Placement", "Verify Categories"] },
                     { title: "⚡ Cerebras — The Clerk + Daily Historian", color: "#86efac", tasks: ["Inbox Sorting", "Verify Categories (basic)", "Entry Suggestions", "Targeted Delete (basic)", "Pensieve keyword pre-filter", "Candidate Retrieval", "Relevance Ranking"] },
                     { title: "⚡ Cerebras — The Clerk", color: "#86efac", tasks: ["Pensieve keyword pre-filter", "Candidate Retrieval", "Relevance Ranking"] },

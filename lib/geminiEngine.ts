@@ -18,6 +18,7 @@ const CEREBRAS_API_BASE = "https://api.cerebras.ai/v1/chat/completions";
 const GEMINI_KEY_STORAGE = "valArchivesGeminiKeyQuality";
 const GEMINI_KEY_STORAGE_2 = "valArchivesGeminiKeyQuality2";
 const GEMINI_KEY_STORAGE_3 = "valArchivesGeminiKeyQuality3";
+// Key routing: Key1=Canon, Key2=Inbox, Key3=Everything else
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -121,6 +122,51 @@ export function getGeminiQualityKeys(): string[] {
 
 // Track which key is currently active and rate-limited
 const _keyRateLimitedUntil: Record<number, number> = {}; // key index → timestamp when limit resets
+
+
+// ─── Dedicated key routing ────────────────────────────────────────────────────
+// Canon tasks:      Key1 → Key3 → pause
+// Inbox tasks:      Key2 → Key3 → pause
+// Everything else:  Key3 → Key1 → Key2 → pause
+
+type KeyPurpose = "canon" | "inbox" | "general";
+
+function getKeysForPurpose(purpose: KeyPurpose): string[] {
+  const k1 = getGeminiQualityKey();
+  const k2 = getGeminiQualityKey2();
+  const k3 = getGeminiQualityKey3();
+
+  if (purpose === "canon") {
+    return [k1, k3, k2].filter(Boolean) as string[];
+  } else if (purpose === "inbox") {
+    return [k2, k3, k1].filter(Boolean) as string[];
+  } else {
+    return [k3, k1, k2].filter(Boolean) as string[];
+  }
+}
+
+// Per-key rate limit tracking (shared across all purposes)
+const _keyRateLimitMap: Record<string, number> = {}; // key value → reset timestamp
+
+function getAvailableKeyForPurpose(purpose: KeyPurpose): string | null {
+  const keys = getKeysForPurpose(purpose);
+  const now = Date.now();
+  for (const key of keys) {
+    const limitedUntil = _keyRateLimitMap[key] ?? 0;
+    if (now >= limitedUntil) return key;
+  }
+  return null;
+}
+
+function markKeyRateLimitedByValue(key: string, waitMs: number): void {
+  _keyRateLimitMap[key] = Date.now() + waitMs;
+}
+
+function getEarliestResetForPurpose(purpose: KeyPurpose): number {
+  const keys = getKeysForPurpose(purpose);
+  const times = keys.map(k => _keyRateLimitMap[k] ?? 0).filter(t => t > Date.now());
+  return times.length > 0 ? Math.min(...times) : 0;
+}
 
 function getAvailableGeminiKey(): { key: string; index: number } | null {
   if (typeof window === "undefined") return null;
@@ -530,43 +576,8 @@ export async function geminiQualityCall(
   systemInstruction?: string,
   history?: Array<{ role: "user" | "model"; text: string }>
 ): Promise<string> {
-  const keys = getGeminiQualityKeys();
-  if (keys.length === 0) {
-    // No Gemini key — fall back to Cerebras
-    return geminiCall(prompt, systemInstruction, history);
-  }
-
-  let attempt = 0;
-  while (true) {
-    attempt++;
-    const available = getAvailableGeminiKey();
-
-    if (!available) {
-      // All keys rate limited — wait for earliest reset
-      const resetAt = getEarliestKeyReset();
-      const waitMs = Math.max(resetAt - Date.now(), 5000);
-      const waitSec = Math.ceil(waitMs / 1000);
-      // Throw a pauseable error — callers that support pausing will catch this
-      throw new Error(`ALL_KEYS_LIMITED:${waitSec}`);
-    }
-
-    try {
-      return await geminiQualityCallWithKey(available.key, prompt, systemInstruction, history);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "error";
-      if (msg === "RATE_LIMIT" || msg.includes("429")) {
-        // Mark this key as rate limited for 60 seconds, try next key
-        markKeyRateLimited(available.index, 60000);
-        continue;
-      }
-      if (msg === "INVALID_KEY") {
-        // Mark as permanently limited for this session
-        markKeyRateLimited(available.index, 24 * 60 * 60 * 1000);
-        continue;
-      }
-      throw e; // non-rate-limit error — propagate
-    }
-  }
+  // General tasks use Key3 → Key1 → Key2 routing
+  return geminiQualityCallFor("general", prompt, systemInstruction, history);
 }
 
 // Test Gemini quality connection
@@ -1016,6 +1027,45 @@ export async function geminiTargetedDelete(
 // ─── FEATURE: Semantic Search ─────────────────────────────────────────────────
 
 
+
+// ─── Purpose-aware Gemini Quality Call ───────────────────────────────────────
+export async function geminiQualityCallFor(
+  purpose: KeyPurpose,
+  prompt: string,
+  systemInstruction?: string,
+  history?: Array<{ role: "user" | "model"; text: string }>
+): Promise<string> {
+  const keys = getKeysForPurpose(purpose);
+  if (keys.length === 0) {
+    return geminiCall(prompt, systemInstruction, history);
+  }
+
+  while (true) {
+    const key = getAvailableKeyForPurpose(purpose);
+
+    if (!key) {
+      const resetAt = getEarliestResetForPurpose(purpose);
+      const waitSec = Math.max(Math.ceil((resetAt - Date.now()) / 1000), 5);
+      throw new Error(`ALL_KEYS_LIMITED:${waitSec}`);
+    }
+
+    try {
+      return await geminiQualityCallWithKey(key, prompt, systemInstruction, history);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "error";
+      if (msg === "RATE_LIMIT" || msg.includes("429")) {
+        markKeyRateLimitedByValue(key, 60000);
+        continue;
+      }
+      if (msg === "INVALID_KEY") {
+        markKeyRateLimitedByValue(key, 24 * 60 * 60 * 1000);
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 // ─── Pause helper for ALL_KEYS_LIMITED ───────────────────────────────────────
 async function waitForKeyReset(
   msg: string,
@@ -1084,7 +1134,7 @@ export async function geminiDistillCanon(
     attempt++;
     try {
       if (attempt > 1 && onProgress) onProgress("Attempt " + attempt + " — sending to Gemini...");
-      const result = await geminiQualityCall(prompt);
+      const result = await geminiQualityCallFor("canon", prompt);
       if (onProgress) onProgress("Distillation complete!");
       return result;
     } catch (e) {
@@ -1209,7 +1259,7 @@ export async function geminiImportCanonToVault(
       attempt++;
       try {
         if (attempt > 1 && onProgress) onProgress("Retry " + attempt + " for section " + (i+1) + "...");
-        const result = await geminiQualityCall(prompt);
+        const result = await geminiQualityCallFor("canon", prompt);
         const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
         const jsonMatch = clean.match(/\[([\s\S]*)\]/);
         if (!jsonMatch) { if (attempt < 5) { await new Promise(r => setTimeout(r, 10000)); continue; } break; }
@@ -1259,68 +1309,106 @@ export async function geminiDistillStory(
   onProgress?: (msg: string) => void
 ): Promise<string> {
   if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
-  if (onProgress) onProgress("Sending to Gemini for distillation...");
 
   const cappedText = sourceText.slice(0, 900000);
+  const SOURCE_HEADER = "SOURCE: " + filename + "\n\n---\n" + cappedText + "\n---\n\n";
 
-  const prompt = "You are a Story Archivist for a tabletop RPG campaign. "
-    + "Your job is to read this player content and produce a structured STORY REFERENCE DOCUMENT "
-    + "that captures everything relevant to the player\'s current campaign state.\n\n"
-    + "SOURCE: " + filename + "\n\n"
-    + "---\n" + cappedText + "\n---\n\n"
-    + "Create a comprehensive Story Reference Document with these sections:\n\n"
-    + "## PLAYER CHARACTER\n"
-    + "Everything about the player character: name, appearance, personality, abilities, backstory, current status, inventory.\n\n"
-    + "## CHARACTERS MET\n"
-    + "Every NPC and character encountered: name, description, role, relationship to player, what they revealed.\n\n"
-    + "## LOCATIONS VISITED\n"
-    + "Every place visited or mentioned: description, significance, what happened there.\n\n"
-    + "## RELATIONSHIPS\n"
-    + "All relationships between player character and others: nature, history, current status, tensions.\n\n"
-    + "## ROMANCE & BONDS\n"
-    + "Any romantic interests, deep bonds, or emotional connections: who, what happened, current status.\n\n"
-    + "## EVENTS & SESSIONS\n"
-    + "Everything that happened in chronological order: what occurred, decisions made, consequences.\n\n"
-    + "## ACTIVE QUESTS\n"
-    + "All ongoing quests and objectives: goal, progress, obstacles, who gave it.\n\n"
-    + "## DISCOVERIES & LORE\n"
-    + "New information learned: world facts, secrets revealed, mysteries uncovered.\n\n"
-    + "## ITEMS & INVENTORY\n"
-    + "All items, weapons, artifacts, and equipment the player has or has encountered.\n\n"
-    + "## PLAYER DECISIONS\n"
-    + "Major choices made, paths taken, consequences, moral decisions.\n\n"
-    + "## CURRENT STATUS\n"
-    + "Where things stand right now: location, active threats, immediate situation, what happens next.\n\n"
-    + "Be thorough. Include everything that affects the ongoing campaign. "
-    + "This document will be used as the definitive reference for the player\'s story.";
+  // Chunked distillation — 4 focused calls instead of 1 giant call
+  // Each call focuses on fewer sections = more detail per section = 4x total output
+  const CHUNKS = [
+    {
+      label: "Characters & Relationships",
+      prompt: SOURCE_HEADER
+        + "Extract ONLY these sections from the above content. Be exhaustive — include every detail.\n\n"
+        + "## PLAYER CHARACTER\n"
+        + "Full name, titles, physical appearance, personality, abilities/powers, backstory, current condition, equipment worn, inventory.\n\n"
+        + "## CHARACTERS MET\n"
+        + "Every NPC encountered: name, description, role, personality, what they said/revealed, secrets they carry.\n\n"
+        + "## RELATIONSHIPS\n"
+        + "Every relationship: nature (friend/enemy/ally/neutral), history, current dynamic, trust level, recent changes.\n\n"
+        + "## ROMANCE & BONDS\n"
+        + "Any romantic interest, deep emotional bonds, love interests: who, what happened, current status, feelings involved.",
+    },
+    {
+      label: "Events & Quests",
+      prompt: SOURCE_HEADER
+        + "Extract ONLY these sections from the above content. Be exhaustive — include every detail.\n\n"
+        + "## EVENTS & SESSIONS\n"
+        + "Everything that happened in strict chronological order: scene by scene, what occurred, who was involved, what was said, consequences.\n\n"
+        + "## ACTIVE QUESTS\n"
+        + "Every active quest/mission: name, goal, who gave it, why, current progress, obstacles, complications, deadline.\n\n"
+        + "## PLAYER DECISIONS\n"
+        + "Every major choice made: what options existed, what was chosen, immediate consequences, potential future impact.\n\n"
+        + "## CURRENT STATUS\n"
+        + "Exact current situation: location, time, who is present, active threats, immediate next steps, what happens when we resume.",
+    },
+    {
+      label: "World & Lore",
+      prompt: SOURCE_HEADER
+        + "Extract ONLY these sections from the above content. Be exhaustive — include every detail.\n\n"
+        + "## LOCATIONS VISITED\n"
+        + "Every place visited or mentioned: name, full description, atmosphere, significance, what happened there, who lives/works there.\n\n"
+        + "## DISCOVERIES & LORE\n"
+        + "All new information learned: world history, secrets revealed, mysteries uncovered, rules of the world clarified, factions explained.\n\n"
+        + "## MAGIC & ABILITIES\n"
+        + "Every spell, ability, power used or mentioned: how it works, who has it, limitations, costs, what it revealed.",
+    },
+    {
+      label: "Items & Mysteries",
+      prompt: SOURCE_HEADER
+        + "Extract ONLY these sections from the above content. Be exhaustive — include every detail.\n\n"
+        + "## ITEMS & INVENTORY\n"
+        + "Every item, weapon, artifact, tool mentioned: name, description, properties, who has it, how it was obtained, significance.\n\n"
+        + "## UNRESOLVED MYSTERIES\n"
+        + "Every open question, unexplained event, unresolved thread, planted hook, ominous hint, unanswered question.\n\n"
+        + "## SESSION NOTES\n"
+        + "Any important meta-information: tone shifts, significant NPC reactions, world-changing events, things to remember for next session.",
+    },
+  ];
 
-  let attempt = 0;
-  while (true) {
-    attempt++;
-    try {
-      if (attempt > 1 && onProgress) onProgress("Attempt " + attempt + " — sending to Gemini...");
-      const result = await geminiQualityCall(prompt);
-      if (onProgress) onProgress("Distillation complete!");
-      return result;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      if (msg.startsWith("ALL_KEYS_LIMITED")) {
-        await waitForKeyReset(msg, onProgress);
-        continue;
+  const results: string[] = [];
+
+  for (let i = 0; i < CHUNKS.length; i++) {
+    const chunk = CHUNKS[i];
+    if (onProgress) onProgress("(" + (i+1) + "/" + CHUNKS.length + ") Distilling: " + chunk.label + "...");
+
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        if (attempt > 1 && onProgress) onProgress("Retry " + attempt + " for " + chunk.label + "...");
+        const result = await geminiQualityCallFor("inbox", chunk.prompt);
+        results.push(result);
+        if (onProgress) onProgress("✓ (" + (i+1) + "/" + CHUNKS.length + ") " + chunk.label + " done · " + result.length.toLocaleString() + " chars");
+        break;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        if (msg.startsWith("ALL_KEYS_LIMITED")) {
+          await waitForKeyReset(msg, onProgress);
+          continue;
+        }
+        const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
+                            msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                            msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                            msg.includes("timeout") || msg.includes("AbortError");
+        if (isRetryable) {
+          const waitSec = Math.min(30 + attempt * 5, 120);
+          if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s...");
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+          continue;
+        }
+        // Non-retryable — skip this chunk
+        if (onProgress) onProgress("⚠ " + chunk.label + " failed: " + msg + " — skipping");
+        break;
       }
-      const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
-                          msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
-                          msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
-                          msg.includes("timeout") || msg.includes("AbortError");
-      if (isRetryable) {
-        const waitSec = Math.min(30 + attempt * 5, 120);
-        if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
-        await new Promise(r => setTimeout(r, waitSec * 1000));
-        continue;
-      }
-      throw new Error(msg);
     }
+
+    if (i < CHUNKS.length - 1) await new Promise(r => setTimeout(r, 1500));
   }
+
+  const combined = results.join("\n\n");
+  if (onProgress) onProgress("✓ Distillation complete! " + combined.length.toLocaleString() + " chars across " + results.length + " sections");
+  return combined;
 }
 
 // ─── Import Story Reference to Vault (Player Story subtab) ───────────────────
@@ -1408,7 +1496,7 @@ export async function geminiImportStoryToVault(
       attempt++;
       try {
         if (attempt > 1 && onProgress) onProgress("Retry " + attempt + " for section " + (i+1) + "...");
-        const result = await geminiQualityCall(prompt);
+        const result = await geminiQualityCallFor("inbox", prompt);
         const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
         const jsonMatch = clean.match(/\[([\s\S]*)\]/);
         if (!jsonMatch) { if (attempt < 5) { await new Promise(r => setTimeout(r, 10000)); continue; } break; }
