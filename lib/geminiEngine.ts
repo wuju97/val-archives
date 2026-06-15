@@ -30,6 +30,13 @@ const GROQ_MODEL = "llama-3.3-70b-versatile"; // Deep reasoning tasks
 const GROQ_EXTRACT_MODEL = "llama-3.1-8b-instant"; // High-volume extraction (14.4K req/day)
 const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
 
+// ─── OpenRouter (Gemma 4 + Nemotron 3 Ultra) ─────────────────────────────────
+const OPENROUTER_KEY_STORAGE = "valArchivesOpenRouterKey";
+const OWL_ALPHA_MODEL = "google/gemma-4-26b-a4b-it:free"; // Gemma 4 26B - free, strong story/chat
+const NEMOTRON_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free";
+const OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions";
+
+
 // ─── Key Management ───────────────────────────────────────────────────────────
 
 // Cerebras key (primary — used for most features)
@@ -326,11 +333,6 @@ export async function testGroqConnection(): Promise<{ ok: boolean; message: stri
 
 
 
-// ─── OpenRouter (Owl Alpha + Nemotron 3 Ultra) ────────────────────────────────
-const OPENROUTER_KEY_STORAGE = "valArchivesOpenRouterKey";
-const OWL_ALPHA_MODEL = "google/gemma-4-26b-a4b-it:free"; // Gemma 4 26B - free, strong story/chat
-const NEMOTRON_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free";
-const OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions";
 
 // ─── Core API Call ────────────────────────────────────────────────────────────
 
