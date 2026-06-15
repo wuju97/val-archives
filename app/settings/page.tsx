@@ -109,6 +109,7 @@ export default function SettingsPage() {
   const [testingApi, setTestingApi] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [qualityApiKey, setQualityApiKey] = useState("");
+  const [qualityApiKeyVisible, setQualityApiKeyVisible] = useState(false);
   const [testingQualityApi, setTestingQualityApi] = useState(false);
   const [qualityApiStatus, setQualityApiStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [deepSeekKey, setDeepSeekKeyState] = useState("");
@@ -118,8 +119,10 @@ export default function SettingsPage() {
   const [testingGroq, setTestingGroq] = useState(false);
   const [groqStatus, setGroqStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [qualityApiKey2, setQualityApiKey2] = useState("");
+  const [qualityApiKey2Visible, setQualityApiKey2Visible] = useState(false);
   const [qualityApiStatus2, setQualityApiStatus2] = useState<{ ok: boolean; message: string } | null>(null);
   const [qualityApiKey3, setQualityApiKey3] = useState("");
+  const [qualityApiKey3Visible, setQualityApiKey3Visible] = useState(false);
   const [qualityApiStatus3, setQualityApiStatus3] = useState<{ ok: boolean; message: string } | null>(null);
   const [aiViewMode, setAiViewMode] = useState<"simple" | "advanced">("simple");
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
@@ -394,8 +397,9 @@ export default function SettingsPage() {
                       {hasGeminiQualityKey() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                      <input type="password" value={qualityApiKey} onChange={e => setQualityApiKey(e.target.value)} placeholder="AIzaSy..."
+                      <input type={qualityApiKeyVisible ? "text" : "password"} value={qualityApiKey} onChange={e => setQualityApiKey(e.target.value)} placeholder="AIzaSy..."
                         style={{ ...S.input, flex: 1 }} />
+                      <button onClick={() => setQualityApiKeyVisible(!qualityApiKeyVisible)} style={{ ...S.btn("var(--va-border)", "var(--va-text-muted)"), padding: "0.5rem 0.75rem" }}>{qualityApiKeyVisible ? "Hide" : "Show"}</button>
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem" }}>
                       <button onClick={() => { if (qualityApiKey.trim()) { setGeminiQualityKey(qualityApiKey.trim()); setQualityApiStatus({ ok: true, message: "Saved" }); setTimeout(() => setQualityApiStatus(null), 2000); } }} disabled={!qualityApiKey.trim()} style={{ ...S.btn("#7c3aed"), opacity: !qualityApiKey.trim() ? 0.4 : 1 }}>Save</button>
@@ -415,11 +419,13 @@ export default function SettingsPage() {
                       {hasGeminiQualityKey2() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                      <input type="password" value={qualityApiKey2} onChange={e => setQualityApiKey2(e.target.value)} placeholder="AIzaSy..."
+                      <input type={qualityApiKey2Visible ? "text" : "password"} value={qualityApiKey2} onChange={e => setQualityApiKey2(e.target.value)} placeholder="AIzaSy..."
                         style={{ ...S.input, flex: 1 }} />
+                      <button onClick={() => setQualityApiKey2Visible(!qualityApiKey2Visible)} style={{ ...S.btn("var(--va-border)", "var(--va-text-muted)"), padding: "0.5rem 0.75rem" }}>{qualityApiKey2Visible ? "Hide" : "Show"}</button>
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem" }}>
                       <button onClick={() => { if (qualityApiKey2.trim()) { setGeminiQualityKey2(qualityApiKey2.trim()); setQualityApiStatus2({ ok: true, message: "Saved" }); setTimeout(() => setQualityApiStatus2(null), 2000); } }} disabled={!qualityApiKey2.trim()} style={{ ...S.btn("#7c3aed"), opacity: !qualityApiKey2.trim() ? 0.4 : 1 }}>Save</button>
+                      <button onClick={async () => { if (qualityApiKey2.trim()) setGeminiQualityKey2(qualityApiKey2.trim()); const r = await testGeminiQualityConnection(); setQualityApiStatus2(r); }} disabled={!qualityApiKey2.trim()} style={{ ...S.btn("var(--va-border)", "var(--va-text)"), opacity: !qualityApiKey2.trim() ? 0.4 : 1 }}>Test</button>
                       <button onClick={() => { clearGeminiQualityKey2(); setQualityApiKey2(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
                     </div>
                     {qualityApiStatus2 && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: qualityApiStatus2.ok ? "#4ade80" : "#f87171" }}>{qualityApiStatus2.ok ? "✓" : "✗"} {qualityApiStatus2.message}</p>}
@@ -436,11 +442,13 @@ export default function SettingsPage() {
                       {hasGeminiQualityKey3() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                      <input type="password" value={qualityApiKey3} onChange={e => setQualityApiKey3(e.target.value)} placeholder="AIzaSy..."
+                      <input type={qualityApiKey3Visible ? "text" : "password"} value={qualityApiKey3} onChange={e => setQualityApiKey3(e.target.value)} placeholder="AIzaSy..."
                         style={{ ...S.input, flex: 1 }} />
+                      <button onClick={() => setQualityApiKey3Visible(!qualityApiKey3Visible)} style={{ ...S.btn("var(--va-border)", "var(--va-text-muted)"), padding: "0.5rem 0.75rem" }}>{qualityApiKey3Visible ? "Hide" : "Show"}</button>
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem" }}>
                       <button onClick={() => { if (qualityApiKey3.trim()) { setGeminiQualityKey3(qualityApiKey3.trim()); setQualityApiStatus3({ ok: true, message: "Saved" }); setTimeout(() => setQualityApiStatus3(null), 2000); } }} disabled={!qualityApiKey3.trim()} style={{ ...S.btn("#7c3aed"), opacity: !qualityApiKey3.trim() ? 0.4 : 1 }}>Save</button>
+                      <button onClick={async () => { if (qualityApiKey3.trim()) setGeminiQualityKey3(qualityApiKey3.trim()); const r = await testGeminiQualityConnection(); setQualityApiStatus3(r); }} disabled={!qualityApiKey3.trim()} style={{ ...S.btn("var(--va-border)", "var(--va-text)"), opacity: !qualityApiKey3.trim() ? 0.4 : 1 }}>Test</button>
                       <button onClick={() => { clearGeminiQualityKey3(); setQualityApiKey3(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
                     </div>
                     {qualityApiStatus3 && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: qualityApiStatus3.ok ? "#4ade80" : "#f87171" }}>{qualityApiStatus3.ok ? "✓" : "✗"} {qualityApiStatus3.message}</p>}
