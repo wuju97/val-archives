@@ -1,8 +1,8 @@
 "use client";
 
 import { createContext, useContext, useRef, useState, useEffect, ReactNode } from "react";
-import { geminiExtractCanonToVault, ExtractedVaultEntry } from "../lib/geminiEngine";
-import { loadArchive, loadArchiveAsync, saveArchive, addEntry } from "../lib/archiveEngine";
+import { geminiExtractCanonToVault, geminiDistillStory, geminiImportStoryToVault, ExtractedVaultEntry } from "../lib/geminiEngine";
+import { loadArchive, loadArchiveAsync, saveArchive, addEntry, addPlayerEntry, StoryCategory } from "../lib/archiveEngine";
 
 export interface ExtractionQueueItem {
   id: string;
@@ -17,6 +17,16 @@ export interface ExtractionQueueItem {
   savedCount?: number;
 }
 
+export interface DistillQueueItem {
+  id: string;
+  filename: string;
+  content: string;
+  status: "queued" | "distilling" | "importing" | "done" | "error";
+  progress: string;
+  result: string; // distilled Story Reference
+  importedCount: number;
+}
+
 interface ExtractionContextType {
   queue: ExtractionQueueItem[];
   addToQueue: (id: string, content: string, filename: string) => void;
@@ -26,6 +36,11 @@ interface ExtractionContextType {
   isRunning: boolean;
   retryItem: (id: string) => void;
   stopExtraction: () => void;
+  // Inbox distill queue
+  distillQueue: DistillQueueItem[];
+  addToDistillQueue: (id: string, content: string, filename: string) => void;
+  removeFromDistillQueue: (id: string) => void;
+  isDistillRunning: boolean;
 }
 
 const ExtractionContext = createContext<ExtractionContextType>({
@@ -37,6 +52,10 @@ const ExtractionContext = createContext<ExtractionContextType>({
   isRunning: false,
   retryItem: () => {},
   stopExtraction: () => {},
+  distillQueue: [],
+  addToDistillQueue: () => {},
+  removeFromDistillQueue: () => {},
+  isDistillRunning: false,
 });
 
 export function ExtractionProvider({ children }: { children: ReactNode }) {
@@ -44,6 +63,8 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
   // stopExtraction is defined below but referenced in popup via context
   const isProcessing = useRef(false);
   const abortRef = useRef(false);
+  const [distillQueue, setDistillQueue] = useState<DistillQueueItem[]>([]);
+  const isDistillProcessing = useRef(false);
   // Draggable popup position
   const [popupPos, setPopupPos] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -136,6 +157,72 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
     };
   }, [dragging]);
 
+  // ── Distill Queue Processing (Inbox → Player Story) ─────────────────────────
+  useEffect(() => {
+    async function processNextDistill() {
+      if (isDistillProcessing.current) return;
+      const next = distillQueue.find(i => i.status === "queued");
+      if (!next) return;
+
+      isDistillProcessing.current = true;
+
+      // Stage 1: Distill
+      setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "distilling", progress: "Sending to Gemini..." } : i));
+
+      try {
+        const result = await geminiDistillStory(next.content, next.filename, (msg) => {
+          setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, progress: msg } : i));
+        });
+
+        // Stage 2: Import
+        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "importing", result, progress: "Importing to Player Story..." } : i));
+
+        const entries = await geminiImportStoryToVault(result, next.filename, (msg) => {
+          setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, progress: msg } : i));
+        });
+
+        // Atomic save to Player Story subtab
+        let archive = loadArchive();
+        const seen = new Set<string>();
+        for (const entry of entries) {
+          const key = entry.text.trim().toLowerCase().slice(0, 60);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          archive = addPlayerEntry(archive, entry.text.trim(), entry.category as StoryCategory);
+        }
+        saveArchive(archive);
+
+        setDistillQueue(prev => prev.map(i => i.id === next.id ? {
+          ...i, status: "done", importedCount: entries.length,
+          progress: "✓ " + entries.length + " entries imported to Player Story"
+        } : i));
+
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Failed";
+        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "error", progress: "✗ " + msg } : i));
+      }
+
+      isDistillProcessing.current = false;
+    }
+
+    processNextDistill();
+  }, [distillQueue]);
+
+  function addToDistillQueue(id: string, content: string, filename: string) {
+    if (distillQueue.find(i => i.id === id && (i.status === "queued" || i.status === "distilling" || i.status === "importing"))) return;
+    setDistillQueue(prev => [...prev, {
+      id, filename, content,
+      status: "queued", progress: "Queued", result: "", importedCount: 0
+    }]);
+  }
+
+  function removeFromDistillQueue(id: string) {
+    setDistillQueue(prev => prev.filter(i => i.id !== id));
+  }
+
+  const isDistillRunning = distillQueue.some(i => i.status === "distilling" || i.status === "importing");
+
+  // ── Extraction Queue Processing ───────────────────────────────────────────
   // Auto-process queue — one item at a time
   useEffect(() => {
     async function processNext() {
@@ -217,7 +304,7 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ExtractionContext.Provider value={{ queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, retryItem, stopExtraction }}>
+    <ExtractionContext.Provider value={{ queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, retryItem, stopExtraction, distillQueue, addToDistillQueue, removeFromDistillQueue, isDistillRunning }}>
       {children}
 
       {/* Global floating extraction popup */}
@@ -306,4 +393,14 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
 
 export function useExtraction() {
   return useContext(ExtractionContext);
+}
+
+export function useDistill() {
+  const ctx = useContext(ExtractionContext);
+  return {
+    distillQueue: ctx.distillQueue,
+    addToDistillQueue: ctx.addToDistillQueue,
+    removeFromDistillQueue: ctx.removeFromDistillQueue,
+    isDistillRunning: ctx.isDistillRunning,
+  };
 }
