@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useMusic } from "../MusicPlayer";
 import { useEffect, useState } from "react";
-import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt, saveArchive, pushHistory, undoArchive, redoArchive } from "@/lib/archiveEngine";
+import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt, saveArchive, pushHistory, undoArchive, redoArchive,
+  getGistToken, setGistToken, clearGistToken, hasGistToken, testGistConnection,
+  saveToGist, loadFromGist, getGistAutoSave, setGistAutoSave } from "@/lib/archiveEngine";
 import {
   getGeminiKey, setGeminiKey, clearGeminiKey, testGeminiConnection, hasGeminiKey,
   getGeminiQualityKey, setGeminiQualityKey, clearGeminiQualityKey, testGeminiQualityConnection, hasGeminiQualityKey,
@@ -102,7 +104,7 @@ const INSTRUCTIONS = [
 
 export default function SettingsPage() {
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
-  const [activeSection, setActiveSection] = useState<"display" | "personalisation" | "instructions" | "ai" | "danger" | "music">("display");
+  const [activeSection, setActiveSection] = useState<"display" | "personalisation" | "instructions" | "ai" | "danger" | "music" | "cloud">("display");
   const { songs, currentIndex, isPlaying, volume, loopMode, addSongs, removeSong, playSong, togglePlay, setVolume, setLoopMode, clearAll } = useMusic();
   const [saved, setSaved] = useState(false);
   const [vaultCleared, setVaultCleared] = useState(false);
@@ -126,6 +128,12 @@ export default function SettingsPage() {
   const [qualityApiKey3, setQualityApiKey3] = useState("");
   const [qualityApiKey3Visible, setQualityApiKey3Visible] = useState(false);
   const [qualityApiStatus3, setQualityApiStatus3] = useState<{ ok: boolean; message: string } | null>(null);
+  const [gistToken, setGistTokenState] = useState("");
+  const [gistStatus, setGistStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [gistSaving, setGistSaving] = useState(false);
+  const [gistLoading, setGistLoading] = useState(false);
+  const [gistAutoSave, setGistAutoSaveState] = useState(false);
+  const [gistTokenVisible, setGistTokenVisible] = useState(false);
   const [aiViewMode, setAiViewMode] = useState<"simple" | "advanced">("simple");
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
@@ -145,6 +153,8 @@ export default function SettingsPage() {
     const savedGroqKey = getGroqKey(); if (savedGroqKey) setGroqKeyState(savedGroqKey);
     const savedQK2 = getGeminiQualityKey2(); if (savedQK2) setQualityApiKey2(savedQK2);
     const savedQK3 = getGeminiQualityKey3(); if (savedQK3) setQualityApiKey3(savedQK3);
+    const savedGistToken = getGistToken(); if (savedGistToken) setGistTokenState(savedGistToken);
+    setGistAutoSaveState(getGistAutoSave());
   }, []);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
@@ -506,6 +516,83 @@ export default function SettingsPage() {
             </div>
           )}
 
+
+          {/* ── CLOUD BACKUP ── */}
+          {activeSection === "cloud" && (
+            <div>
+              <div style={{ marginBottom: "1.5rem" }}>
+                <h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>☁️ Cloud Backup</h2>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Save your entire vault to GitHub Gist. Free, private, permanent. Works across browsers and devices.</p>
+              </div>
+
+              <div style={S.card}>
+                <p style={{ fontWeight: "700", fontSize: "0.9rem", marginBottom: "0.25rem" }}>🔑 GitHub Personal Access Token</p>
+                <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginBottom: "0.75rem" }}>
+                  github.com → Settings → Developer Settings → Personal Access Tokens → Tokens (classic) → Generate → check <strong>gist</strong> scope only
+                </p>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                  <input type={gistTokenVisible ? "text" : "password"} value={gistToken} onChange={e => setGistTokenState(e.target.value)} placeholder="ghp_..."
+                    style={{ ...S.input, flex: 1 }} />
+                  <button onClick={() => setGistTokenVisible(!gistTokenVisible)} style={{ ...S.btn("var(--va-border)", "var(--va-text-muted)"), padding: "0.5rem 0.75rem" }}>{gistTokenVisible ? "Hide" : "Show"}</button>
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                  <button onClick={() => { if (gistToken.trim()) { setGistToken(gistToken.trim()); setGistStatus({ ok: true, message: "Saved" }); setTimeout(() => setGistStatus(null), 2000); } }} disabled={!gistToken.trim()}
+                    style={{ ...S.btn("var(--va-accent)"), opacity: !gistToken.trim() ? 0.4 : 1 }}>Save</button>
+                  <button onClick={async () => { if (gistToken.trim()) setGistToken(gistToken.trim()); const r = await testGistConnection(); setGistStatus(r); }} disabled={!gistToken.trim()}
+                    style={{ ...S.btn("var(--va-border)", "var(--va-text)"), opacity: !gistToken.trim() ? 0.4 : 1 }}>Test</button>
+                  <button onClick={() => { clearGistToken(); setGistTokenState(""); setGistStatus(null); }}
+                    style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
+                </div>
+                {gistStatus && <p style={{ fontSize: "0.8rem", color: gistStatus.ok ? "#4ade80" : "#f87171", marginBottom: "0.5rem" }}>{gistStatus.ok ? "✓" : "✗"} {gistStatus.message}</p>}
+
+                {/* Auto-save toggle */}
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.625rem 0.875rem", background: "var(--va-bg)", borderRadius: "0.5rem", marginBottom: "0.75rem" }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: "0.875rem", fontWeight: "600" }}>Auto-save to Gist</p>
+                    <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>Automatically saves every time you import entries or make changes</p>
+                  </div>
+                  <button onClick={() => { const newVal = !gistAutoSave; setGistAutoSaveState(newVal); setGistAutoSave(newVal); }}
+                    style={{ width: "44px", height: "24px", borderRadius: "9999px", border: "none", cursor: "pointer", background: gistAutoSave ? "#22c55e" : "var(--va-border)", position: "relative", flexShrink: 0, transition: "background 0.2s" }}>
+                    <div style={{ position: "absolute", top: "2px", left: gistAutoSave ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", background: "white", transition: "left 0.2s" }} />
+                  </button>
+                </div>
+
+                {/* Manual save/restore */}
+                <div style={{ display: "flex", gap: "0.75rem" }}>
+                  <button onClick={async () => {
+                    if (!hasGistToken()) { setGistStatus({ ok: false, message: "Save your token first" }); return; }
+                    setGistSaving(true);
+                    const archive = loadArchive();
+                    const result = await saveToGist(archive);
+                    setGistStatus(result);
+                    setGistSaving(false);
+                  }} disabled={!hasGistToken() || gistSaving}
+                    style={{ ...S.btn("#22c55e"), flex: 1, opacity: (!hasGistToken() || gistSaving) ? 0.4 : 1 }}>
+                    {gistSaving ? "☁️ Saving..." : "☁️ Save to GitHub Now"}
+                  </button>
+                  <button onClick={async () => {
+                    if (!hasGistToken()) { setGistStatus({ ok: false, message: "Save your token first" }); return; }
+                    setGistLoading(true);
+                    const result = await loadFromGist();
+                    if (result.ok && result.data) {
+                      saveArchive(result.data);
+                      setGistStatus(result);
+                      setTimeout(() => window.location.reload(), 1500);
+                    } else {
+                      setGistStatus(result);
+                    }
+                    setGistLoading(false);
+                  }} disabled={!hasGistToken() || gistLoading}
+                    style={{ ...S.btn("#3b82f6"), flex: 1, opacity: (!hasGistToken() || gistLoading) ? 0.4 : 1 }}>
+                    {gistLoading ? "☁️ Loading..." : "☁️ Restore from GitHub"}
+                  </button>
+                </div>
+                <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.5rem" }}>
+                  Restore will reload the page after loading. Your token is stored locally only — never sent anywhere except GitHub.
+                </p>
+              </div>
+            </div>
+          )}
           {/* ── MUSIC ── */}
           {activeSection === "music" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
