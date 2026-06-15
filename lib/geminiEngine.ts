@@ -325,7 +325,7 @@ export async function testGroqConnection(): Promise<{ ok: boolean; message: stri
 
 // ─── OpenRouter (Owl Alpha + Nemotron 3 Ultra) ────────────────────────────────
 const OPENROUTER_KEY_STORAGE = "valArchivesOpenRouterKey";
-const OWL_ALPHA_MODEL = "meta-llama/llama-4-maverick:free"; // Strong free model for story/chat
+const OWL_ALPHA_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free"; // Nemotron Ultra - confirmed free
 const NEMOTRON_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free";
 const OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions";
 
