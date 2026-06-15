@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -93,7 +93,7 @@ function guessSubcategory(text: string, category: StoryCategory): string | null 
   return "General";
 }
 
-export default function CategoryPage() {
+function CategoryPageInner() {
   const params = useParams();
   const searchParams = useSearchParams();
   const subtab = (searchParams.get("subtab") ?? "canon") as "canon" | "player";
@@ -371,5 +371,13 @@ export default function CategoryPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function CategoryPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: "100vh", background: "var(--va-bg)", color: "var(--va-text)", padding: "2rem" }}>Loading...</div>}>
+      <CategoryPageInner />
+    </Suspense>
   );
 }
