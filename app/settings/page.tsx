@@ -412,7 +412,7 @@ export default function SettingsPage() {
                   {/* Gemini Key 2 */}
                   <div style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
-                      <div>
+                           <div>
                         <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 2 — Inbox <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Dedicated to Inbox distill + import</span></p>
                         <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>Inbox Distill → Key 2 → Key 3 fallback</p>
                       </div>
