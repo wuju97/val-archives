@@ -16,6 +16,8 @@ const CEREBRAS_API_BASE = "https://api.cerebras.ai/v1/chat/completions";
 
 // ─── Gemini (The Librarian — quality tasks) ───────────────────────────────────
 const GEMINI_KEY_STORAGE = "valArchivesGeminiKeyQuality";
+const GEMINI_KEY_STORAGE_2 = "valArchivesGeminiKeyQuality2";
+const GEMINI_KEY_STORAGE_3 = "valArchivesGeminiKeyQuality3";
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -78,6 +80,70 @@ export function clearGeminiQualityKey(): void {
 export function hasGeminiQualityKey(): boolean {
   return !!getGeminiQualityKey();
 }
+// Gemini quality key 2
+export function getGeminiQualityKey2(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(GEMINI_KEY_STORAGE_2) || null;
+}
+export function setGeminiQualityKey2(key: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GEMINI_KEY_STORAGE_2, key.trim());
+}
+export function clearGeminiQualityKey2(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(GEMINI_KEY_STORAGE_2);
+}
+export function hasGeminiQualityKey2(): boolean { return !!getGeminiQualityKey2(); }
+
+// Gemini quality key 3
+export function getGeminiQualityKey3(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(GEMINI_KEY_STORAGE_3) || null;
+}
+export function setGeminiQualityKey3(key: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GEMINI_KEY_STORAGE_3, key.trim());
+}
+export function clearGeminiQualityKey3(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(GEMINI_KEY_STORAGE_3);
+}
+export function hasGeminiQualityKey3(): boolean { return !!getGeminiQualityKey3(); }
+
+// Get all available Gemini quality keys in order
+export function getGeminiQualityKeys(): string[] {
+  const keys: string[] = [];
+  const k1 = getGeminiQualityKey(); if (k1) keys.push(k1);
+  const k2 = getGeminiQualityKey2(); if (k2) keys.push(k2);
+  const k3 = getGeminiQualityKey3(); if (k3) keys.push(k3);
+  return keys;
+}
+
+// Track which key is currently active and rate-limited
+const _keyRateLimitedUntil: Record<number, number> = {}; // key index → timestamp when limit resets
+
+function getAvailableGeminiKey(): { key: string; index: number } | null {
+  if (typeof window === "undefined") return null;
+  const keys = getGeminiQualityKeys();
+  const now = Date.now();
+  for (let i = 0; i < keys.length; i++) {
+    const limitedUntil = _keyRateLimitedUntil[i] ?? 0;
+    if (now >= limitedUntil) return { key: keys[i], index: i };
+  }
+  return null; // all keys rate limited
+}
+
+function markKeyRateLimited(index: number, waitMs: number): void {
+  _keyRateLimitedUntil[index] = Date.now() + waitMs;
+}
+
+function getEarliestKeyReset(): number {
+  const values = Object.values(_keyRateLimitedUntil);
+  if (values.length === 0) return 0;
+  return Math.min(...values);
+}
+
+
 // ─── DeepSeek Key Management ─────────────────────────────────────────────────
 export function getDeepSeekKey(): string | null {
   if (typeof window === "undefined") return null;
@@ -419,44 +485,32 @@ export async function testGeminiConnection(): Promise<{ ok: boolean; message: st
 // ─── Gemini Quality API Call ──────────────────────────────────────────────────
 // Used for quality tasks: refine prompts, enhance, chat
 
-export async function geminiQualityCall(
+// ─── Single Gemini call with a specific key ──────────────────────────────────
+async function geminiQualityCallWithKey(
+  key: string,
   prompt: string,
   systemInstruction?: string,
   history?: Array<{ role: "user" | "model"; text: string }>
 ): Promise<string> {
-  const key = getGeminiQualityKey();
-  if (!key) {
-    // Fall back to Cerebras if no Gemini key
-    return geminiCall(prompt, systemInstruction, history);
-  }
-
   const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-
   if (history) {
     for (const msg of history) {
       contents.push({ role: msg.role, parts: [{ text: msg.text }] });
     }
   }
   contents.push({ role: "user", parts: [{ text: prompt }] });
-
   const body: Record<string, unknown> = { contents };
-  if (systemInstruction) {
-    body.systemInstruction = { parts: [{ text: systemInstruction }] };
-  }
+  if (systemInstruction) body.systemInstruction = { parts: [{ text: systemInstruction }] };
   body.generationConfig = { temperature: 0.7, maxOutputTokens: 65536 };
 
   const response = await fetch(
     `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
   );
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    const msg = err?.error?.message || `HTTP ${response.status}`;
+    const msg = (err as any)?.error?.message || `HTTP ${response.status}`;
     if (response.status === 403) throw new Error("INVALID_KEY");
     if (response.status === 429) throw new Error("RATE_LIMIT");
     throw new Error(`API_ERROR: ${msg}`);
@@ -466,6 +520,53 @@ export async function geminiQualityCall(
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("EMPTY_RESPONSE");
   return text.trim();
+}
+
+// ─── Gemini Quality Call with automatic key rotation ─────────────────────────
+// Tries Key 1 → Key 2 → Key 3 on rate limit.
+// If ALL keys are rate limited, waits for the earliest reset and retries.
+export async function geminiQualityCall(
+  prompt: string,
+  systemInstruction?: string,
+  history?: Array<{ role: "user" | "model"; text: string }>
+): Promise<string> {
+  const keys = getGeminiQualityKeys();
+  if (keys.length === 0) {
+    // No Gemini key — fall back to Cerebras
+    return geminiCall(prompt, systemInstruction, history);
+  }
+
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    const available = getAvailableGeminiKey();
+
+    if (!available) {
+      // All keys rate limited — wait for earliest reset
+      const resetAt = getEarliestKeyReset();
+      const waitMs = Math.max(resetAt - Date.now(), 5000);
+      const waitSec = Math.ceil(waitMs / 1000);
+      // Throw a pauseable error — callers that support pausing will catch this
+      throw new Error(`ALL_KEYS_LIMITED:${waitSec}`);
+    }
+
+    try {
+      return await geminiQualityCallWithKey(available.key, prompt, systemInstruction, history);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "error";
+      if (msg === "RATE_LIMIT" || msg.includes("429")) {
+        // Mark this key as rate limited for 60 seconds, try next key
+        markKeyRateLimited(available.index, 60000);
+        continue;
+      }
+      if (msg === "INVALID_KEY") {
+        // Mark as permanently limited for this session
+        markKeyRateLimited(available.index, 24 * 60 * 60 * 1000);
+        continue;
+      }
+      throw e; // non-rate-limit error — propagate
+    }
+  }
 }
 
 // Test Gemini quality connection
@@ -756,10 +857,6 @@ export async function geminiChat(
 
   const systemInstruction = `You are The Archivist — an intelligent AI assistant for a story/RPG campaign.\nYou have complete knowledge of this archive including both Canon Story facts and the Player's current journey.\nBe helpful, specific, and always stay consistent with established facts.\nYou can help with: storytelling, character analysis, world-building, quest planning, theories, and anything related to this campaign.\n\nARCHIVE CONTEXT:\n${masterPrompt.slice(0, 8000)}`;
 
-  // Use Owl Alpha for chat if available (better story intelligence)
-  if (hasOpenRouterKey()) {
-    return owlAlphaCall(message, systemInstruction, history);
-  }
   return geminiQualityCall(message, systemInstruction, history);
 }
 
@@ -918,6 +1015,21 @@ export async function geminiTargetedDelete(
 
 // ─── FEATURE: Semantic Search ─────────────────────────────────────────────────
 
+
+// ─── Pause helper for ALL_KEYS_LIMITED ───────────────────────────────────────
+async function waitForKeyReset(
+  msg: string,
+  onProgress?: (msg: string) => void
+): Promise<void> {
+  const match = msg.match(/ALL_KEYS_LIMITED:(\d+)/);
+  const waitSec = match ? parseInt(match[1]) : 65;
+  for (let remaining = waitSec; remaining > 0; remaining -= 5) {
+    if (onProgress) onProgress("⏸ All Gemini keys rate limited — resuming in " + remaining + "s...");
+    await new Promise(r => setTimeout(r, Math.min(5000, remaining * 1000)));
+  }
+  if (onProgress) onProgress("▶ Resuming...");
+}
+
 // ─── Canon Distill ────────────────────────────────────────────────────────────
 // Uses Gemini to read an entire source file and produce a structured canon
 // reference document. Much better than direct extraction because Gemini reads
@@ -977,17 +1089,21 @@ export async function geminiDistillCanon(
       return result;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") || 
+      if (msg.startsWith("ALL_KEYS_LIMITED")) {
+        await waitForKeyReset(msg, onProgress);
+        continue;
+      }
+      const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
                            msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
                            msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
                            msg.includes("timeout") || msg.includes("TIMEOUT") || msg.includes("AbortError");
       if (isOverloaded) {
-        const waitSec = Math.min(30 + attempt * 5, 120); // 35s, 40s... up to 120s
+        const waitSec = Math.min(30 + attempt * 5, 120);
         if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
         await new Promise(r => setTimeout(r, waitSec * 1000));
-        continue; // retry
+        continue;
       }
-      throw new Error(msg); // non-retryable error
+      throw new Error(msg);
     }
   }
 }
@@ -1106,6 +1222,10 @@ export async function geminiImportCanonToVault(
         break;
       } catch (e) {
         const msg = e instanceof Error ? e.message : "error";
+        if (msg.startsWith("ALL_KEYS_LIMITED")) {
+          await waitForKeyReset(msg, onProgress);
+          continue;
+        }
         const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
                             msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
                             msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
@@ -1195,10 +1315,6 @@ export async function geminiPensieveFinalAnswer(
     + "If there are contradictions in the evidence, highlight them.";
 
   try {
-    // Use Owl Alpha for Pensieve answers if available
-    if (hasOpenRouterKey()) {
-      return await owlAlphaCall(prompt);
-    }
     return await geminiQualityCall(prompt);
   } catch {
     return "Based on the archive:\n\n" + evidence.map(e => "• " + e.text).join("\n");

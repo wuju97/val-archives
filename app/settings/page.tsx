@@ -9,7 +9,8 @@ import {
   getGeminiQualityKey, setGeminiQualityKey, clearGeminiQualityKey, testGeminiQualityConnection, hasGeminiQualityKey,
   getDeepSeekKey, setDeepSeekKey, clearDeepSeekKey, testDeepSeekConnection, hasDeepSeekKey,
   getGroqKey, setGroqKey, clearGroqKey, testGroqConnection, hasGroqKey,
-  getOpenRouterKey, setOpenRouterKey, clearOpenRouterKey, testOpenRouterConnection, hasOpenRouterKey,
+  getGeminiQualityKey2, setGeminiQualityKey2, clearGeminiQualityKey2, hasGeminiQualityKey2,
+  getGeminiQualityKey3, setGeminiQualityKey3, clearGeminiQualityKey3, hasGeminiQualityKey3,
   geminiChat, geminiErrorMessage, geminiTargetedDelete,
 } from "../../lib/geminiEngine";
 
@@ -116,9 +117,10 @@ export default function SettingsPage() {
   const [groqKey, setGroqKeyState] = useState("");
   const [testingGroq, setTestingGroq] = useState(false);
   const [groqStatus, setGroqStatus] = useState<{ ok: boolean; message: string } | null>(null);
-  const [openRouterKey, setOpenRouterKeyState] = useState("");
-  const [testingOpenRouter, setTestingOpenRouter] = useState(false);
-  const [openRouterStatus, setOpenRouterStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [qualityApiKey2, setQualityApiKey2] = useState("");
+  const [qualityApiStatus2, setQualityApiStatus2] = useState<{ ok: boolean; message: string } | null>(null);
+  const [qualityApiKey3, setQualityApiKey3] = useState("");
+  const [qualityApiStatus3, setQualityApiStatus3] = useState<{ ok: boolean; message: string } | null>(null);
   const [aiViewMode, setAiViewMode] = useState<"simple" | "advanced">("simple");
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
@@ -136,7 +138,8 @@ export default function SettingsPage() {
     const savedQualityKey = getGeminiQualityKey(); if (savedQualityKey) setQualityApiKey(savedQualityKey);
     const savedDSKey = getDeepSeekKey(); if (savedDSKey) setDeepSeekKeyState(savedDSKey);
     const savedGroqKey = getGroqKey(); if (savedGroqKey) setGroqKeyState(savedGroqKey);
-    const savedORKey = getOpenRouterKey(); if (savedORKey) setOpenRouterKeyState(savedORKey);
+    const savedQK2 = getGeminiQualityKey2(); if (savedQK2) setQualityApiKey2(savedQK2);
+    const savedQK3 = getGeminiQualityKey3(); if (savedQK3) setQualityApiKey3(savedQK3);
   }, []);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
@@ -402,27 +405,45 @@ export default function SettingsPage() {
                     {qualityApiStatus && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: qualityApiStatus.ok ? "#4ade80" : "#f87171" }}>{qualityApiStatus.ok ? "✓" : "✗"} {qualityApiStatus.message}</p>}
                   </div>
 
-                  {/* OpenRouter */}
+                  {/* Gemini Key 2 */}
                   <div style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
                       <div>
-                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>🦉 OpenRouter <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Owl Alpha + Nemotron</span></p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>openrouter.ai · Free models available</p>
-                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>Owl Alpha: Pensieve answers, Character AI, Chat · Nemotron: Series Synthesis</p>
-                        <p style={{ fontSize: "0.72rem", color: "#fbbf24" }}>Falls back to Gemini if not set.</p>
+                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 2 <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Backup (auto-rotates when Key 1 hits rate limit)</span></p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>aistudio.google.com · Free · Different Google account</p>
                       </div>
-                      {hasOpenRouterKey() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
+                      {hasGeminiQualityKey2() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                      <input type="password" value={openRouterKey} onChange={e => setOpenRouterKeyState(e.target.value)} placeholder="sk-or-..."
+                      <input type="password" value={qualityApiKey2} onChange={e => setQualityApiKey2(e.target.value)} placeholder="AIzaSy..."
                         style={{ ...S.input, flex: 1 }} />
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem" }}>
-                      <button onClick={() => { if (openRouterKey.trim()) { setOpenRouterKey(openRouterKey.trim()); setOpenRouterStatus({ ok: true, message: "Saved" }); setTimeout(() => setOpenRouterStatus(null), 2000); } }} disabled={!openRouterKey.trim()} style={{ ...S.btn("var(--va-accent)"), opacity: !openRouterKey.trim() ? 0.4 : 1 }}>Save</button>
-                      <button onClick={async () => { setTestingOpenRouter(true); if (openRouterKey.trim()) setOpenRouterKey(openRouterKey.trim()); const r = await testOpenRouterConnection(); setOpenRouterStatus(r); setTestingOpenRouter(false); }} disabled={!openRouterKey.trim() || testingOpenRouter} style={{ ...S.btn("var(--va-border)", "var(--va-text)"), opacity: (!openRouterKey.trim() || testingOpenRouter) ? 0.4 : 1 }}>{testingOpenRouter ? "Testing..." : "Test"}</button>
-                      <button onClick={() => { clearOpenRouterKey(); setOpenRouterKeyState(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
+                      <button onClick={() => { if (qualityApiKey2.trim()) { setGeminiQualityKey2(qualityApiKey2.trim()); setQualityApiStatus2({ ok: true, message: "Saved" }); setTimeout(() => setQualityApiStatus2(null), 2000); } }} disabled={!qualityApiKey2.trim()} style={{ ...S.btn("#7c3aed"), opacity: !qualityApiKey2.trim() ? 0.4 : 1 }}>Save</button>
+                      <button onClick={() => { clearGeminiQualityKey2(); setQualityApiKey2(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
                     </div>
-                    {openRouterStatus && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: openRouterStatus.ok ? "#4ade80" : "#f87171" }}>{openRouterStatus.ok ? "✓" : "✗"} {openRouterStatus.message}</p>}
+                    {qualityApiStatus2 && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: qualityApiStatus2.ok ? "#4ade80" : "#f87171" }}>{qualityApiStatus2.ok ? "✓" : "✗"} {qualityApiStatus2.message}</p>}
+                  </div>
+
+                  {/* Gemini Key 3 */}
+                  <div style={S.card}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
+                      <div>
+                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>✨ Gemini Key 3 <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Optional 3rd backup</span></p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>aistudio.google.com · Free · 3rd Google account</p>
+                        <p style={{ fontSize: "0.72rem", color: "#fbbf24" }}>If all 3 keys hit rate limit, process pauses and auto-resumes when a key resets.</p>
+                      </div>
+                      {hasGeminiQualityKey3() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                      <input type="password" value={qualityApiKey3} onChange={e => setQualityApiKey3(e.target.value)} placeholder="AIzaSy..."
+                        style={{ ...S.input, flex: 1 }} />
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <button onClick={() => { if (qualityApiKey3.trim()) { setGeminiQualityKey3(qualityApiKey3.trim()); setQualityApiStatus3({ ok: true, message: "Saved" }); setTimeout(() => setQualityApiStatus3(null), 2000); } }} disabled={!qualityApiKey3.trim()} style={{ ...S.btn("#7c3aed"), opacity: !qualityApiKey3.trim() ? 0.4 : 1 }}>Save</button>
+                      <button onClick={() => { clearGeminiQualityKey3(); setQualityApiKey3(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
+                    </div>
+                    {qualityApiStatus3 && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: qualityApiStatus3.ok ? "#4ade80" : "#f87171" }}>{qualityApiStatus3.ok ? "✓" : "✗"} {qualityApiStatus3.message}</p>}
                   </div>
                 </div>
               )}
