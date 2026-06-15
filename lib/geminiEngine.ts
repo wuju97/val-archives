@@ -32,7 +32,7 @@ const GROQ_API_BASE = "https://api.groq.com/openai/v1/chat/completions";
 
 // ─── OpenRouter (Gemma 4 + Nemotron 3 Ultra) ─────────────────────────────────
 const OPENROUTER_KEY_STORAGE = "valArchivesOpenRouterKey";
-const OWL_ALPHA_MODEL = "google/gemma-4-26b-a4b-it:free"; // Gemma 4 26B - free, strong story/chat
+const OWL_ALPHA_MODEL = "qwen/qwen3-30b-a3b:free"; // Qwen3 30B - free, strong reasoning
 const NEMOTRON_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free";
 const OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions";
 
