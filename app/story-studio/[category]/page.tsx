@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  loadArchive, saveArchive, addEntry, updateEntry, deleteEntry,
+  loadArchive, saveArchive, addEntry, addPlayerEntry, updateEntry, deleteEntry,
   regenerateMasterPrompt, CATEGORY_LABELS, CATEGORY_ICONS, StoryCategory,
   getPriorityLevel, setPriority,
 } from "@/lib/archiveEngine";
@@ -95,6 +95,8 @@ function guessSubcategory(text: string, category: StoryCategory): string | null 
 
 export default function CategoryPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const subtab = (searchParams.get("subtab") ?? "canon") as "canon" | "player";
   const category = params.category as StoryCategory;
   const [archive, setArchive] = useState(loadArchive());
   const [input, setInput] = useState("");
@@ -111,10 +113,10 @@ export default function CategoryPage() {
   const label = CATEGORY_LABELS[category] ?? category;
   const icon = CATEGORY_ICONS[category] ?? "📁";
   const subcategories = SUBCATEGORIES[category] ?? [];
-  const allEntries = archive.entries.filter((e) => e.category === category);
+  const allEntries = (subtab === "player" ? (archive.playerEntries ?? []) : archive.entries).filter((e) => e.category === category);
 
   // Priority
-  const priorityId = `story-${category}`;
+  const priorityId = `${subtab === "player" ? "player" : "story"}-${category}`;
   const priority = getPriorityLevel(archive, priorityId);
 
   function handlePriorityClick() {
@@ -166,7 +168,7 @@ export default function CategoryPage() {
   function handleAdd() {
     if (!input.trim()) return;
     const text = selectedSub ? `[${selectedSub}] ${input.trim()}` : input.trim();
-    const updated = regenerateMasterPrompt(addEntry(archive, text, category));
+    const updated = regenerateMasterPrompt(subtab === "player" ? addPlayerEntry(archive, text, category) : addEntry(archive, text, category));
     saveArchive(updated); setArchive(updated); setInput(""); setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   }
@@ -178,7 +180,14 @@ export default function CategoryPage() {
   }
 
   function doDelete(id: string) {
-    const updated = regenerateMasterPrompt(deleteEntry(archive, id));
+    // Delete from correct subtab
+    let updated;
+    if (subtab === "player") {
+      const newArchive = { ...archive, playerEntries: (archive.playerEntries ?? []).filter(e => e.id !== id) };
+      updated = regenerateMasterPrompt(newArchive);
+    } else {
+      updated = regenerateMasterPrompt(deleteEntry(archive, id));
+    }
     saveArchive(updated); setArchive(updated); setDeleteConfirmId(null);
   }
 
@@ -204,13 +213,13 @@ export default function CategoryPage() {
           <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
             <Link href="/dashboard" style={{ ...S.muted, fontSize: "0.875rem" }}>← Home</Link>
             <span style={{ ...S.muted, fontSize: "0.875rem" }}>/</span>
-            <Link href="/story-studio" style={{ ...S.muted, fontSize: "0.875rem" }}>Story Studio</Link>
+            <Link href={`/story-studio`} style={{ ...S.muted, fontSize: "0.875rem" }}>{subtab === "player" ? "🎮 Player Story" : "📖 Canon Story"}</Link>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <span style={{ fontSize: "2.5rem" }}>{icon}</span>
             <div>
               <h1 style={{ fontSize: "2rem", fontWeight: "bold" }}>{label}</h1>
-              <p style={{ ...S.muted, fontSize: "0.875rem" }}>{allEntries.length} {allEntries.length === 1 ? "entry" : "entries"}</p>
+              <p style={{ ...S.muted, fontSize: "0.875rem" }}>{allEntries.length} {allEntries.length === 1 ? "entry" : "entries"} · <span style={{ color: subtab === "player" ? "#7c3aed" : "#3b82f6" }}>{subtab === "player" ? "🎮 Player Story" : "📖 Canon Story"}</span></p>
             </div>
           </div>
         </div>
