@@ -1249,6 +1249,203 @@ export async function geminiImportCanonToVault(
   return allEntries;
 }
 
+
+// ─── Distill Story (Inbox) ────────────────────────────────────────────────────
+// Like Distill Canon but for player session notes, story content, campaign info.
+// Output goes to Player Story subtab only.
+export async function geminiDistillStory(
+  sourceText: string,
+  filename: string,
+  onProgress?: (msg: string) => void
+): Promise<string> {
+  if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
+  if (onProgress) onProgress("Sending to Gemini for distillation...");
+
+  const cappedText = sourceText.slice(0, 900000);
+
+  const prompt = "You are a Story Archivist for a tabletop RPG campaign. "
+    + "Your job is to read this player content and produce a structured STORY REFERENCE DOCUMENT "
+    + "that captures everything relevant to the player\'s current campaign state.\n\n"
+    + "SOURCE: " + filename + "\n\n"
+    + "---\n" + cappedText + "\n---\n\n"
+    + "Create a comprehensive Story Reference Document with these sections:\n\n"
+    + "## PLAYER CHARACTER\n"
+    + "Everything about the player character: name, appearance, personality, abilities, backstory, current status, inventory.\n\n"
+    + "## CHARACTERS MET\n"
+    + "Every NPC and character encountered: name, description, role, relationship to player, what they revealed.\n\n"
+    + "## LOCATIONS VISITED\n"
+    + "Every place visited or mentioned: description, significance, what happened there.\n\n"
+    + "## RELATIONSHIPS\n"
+    + "All relationships between player character and others: nature, history, current status, tensions.\n\n"
+    + "## ROMANCE & BONDS\n"
+    + "Any romantic interests, deep bonds, or emotional connections: who, what happened, current status.\n\n"
+    + "## EVENTS & SESSIONS\n"
+    + "Everything that happened in chronological order: what occurred, decisions made, consequences.\n\n"
+    + "## ACTIVE QUESTS\n"
+    + "All ongoing quests and objectives: goal, progress, obstacles, who gave it.\n\n"
+    + "## DISCOVERIES & LORE\n"
+    + "New information learned: world facts, secrets revealed, mysteries uncovered.\n\n"
+    + "## ITEMS & INVENTORY\n"
+    + "All items, weapons, artifacts, and equipment the player has or has encountered.\n\n"
+    + "## PLAYER DECISIONS\n"
+    + "Major choices made, paths taken, consequences, moral decisions.\n\n"
+    + "## CURRENT STATUS\n"
+    + "Where things stand right now: location, active threats, immediate situation, what happens next.\n\n"
+    + "Be thorough. Include everything that affects the ongoing campaign. "
+    + "This document will be used as the definitive reference for the player\'s story.";
+
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      if (attempt > 1 && onProgress) onProgress("Attempt " + attempt + " — sending to Gemini...");
+      const result = await geminiQualityCall(prompt);
+      if (onProgress) onProgress("Distillation complete!");
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      if (msg.startsWith("ALL_KEYS_LIMITED")) {
+        await waitForKeyReset(msg, onProgress);
+        continue;
+      }
+      const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
+                          msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                          msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                          msg.includes("timeout") || msg.includes("AbortError");
+      if (isRetryable) {
+        const waitSec = Math.min(30 + attempt * 5, 120);
+        if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        continue;
+      }
+      throw new Error(msg);
+    }
+  }
+}
+
+// ─── Import Story Reference to Vault (Player Story subtab) ───────────────────
+export async function geminiImportStoryToVault(
+  storyReference: string,
+  filename: string,
+  onProgress?: (msg: string) => void
+): Promise<Array<{ text: string; category: string }>> {
+  if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
+
+  const SECTION_CATEGORY_MAP: Record<string, string> = {
+    "PLAYER CHARACTER": "player-character",
+    "CHARACTERS MET": "characters",
+    "CHARACTERS": "characters",
+    "LOCATIONS VISITED": "locations",
+    "LOCATIONS": "locations",
+    "RELATIONSHIPS": "relationships",
+    "ROMANCE & BONDS": "romance",
+    "ROMANCE": "romance",
+    "BONDS": "romance",
+    "EVENTS & SESSIONS": "timeline-continuity",
+    "EVENTS": "timeline-continuity",
+    "SESSIONS": "session-notes",
+    "ACTIVE QUESTS": "quests-plotlines",
+    "QUESTS": "quests-plotlines",
+    "DISCOVERIES & LORE": "lore-mythology",
+    "DISCOVERIES": "lore-mythology",
+    "LORE": "lore-mythology",
+    "ITEMS & INVENTORY": "items-equipment",
+    "ITEMS": "items-equipment",
+    "INVENTORY": "items-equipment",
+    "PLAYER DECISIONS": "meta-information",
+    "DECISIONS": "meta-information",
+    "CURRENT STATUS": "timeline-continuity",
+    "STATUS": "timeline-continuity",
+    "MAGIC": "magic-supernatural",
+    "ABILITIES": "player-character",
+    "HISTORY": "history",
+    "MYSTERIES": "mysteries",
+    "CONFLICTS": "conflict-combat",
+  };
+
+  function getSectionCategory(header: string): string {
+    const upper = header.toUpperCase().trim();
+    if (SECTION_CATEGORY_MAP[upper]) return SECTION_CATEGORY_MAP[upper];
+    for (const key of Object.keys(SECTION_CATEGORY_MAP)) {
+      if (upper.includes(key)) return SECTION_CATEGORY_MAP[key];
+    }
+    return "session-notes";
+  }
+
+  const rawSections = storyReference.split("\n## ");
+  const sections = rawSections
+    .slice(1)
+    .map(s => ({ raw: "## " + s, header: s.split("\n")[0].trim() }))
+    .filter(s => s.raw.length > 50);
+
+  if (sections.length === 0) {
+    sections.push({ raw: storyReference, header: "CONTENT" });
+  }
+
+  const allEntries: Array<{ text: string; category: string }> = [];
+  if (onProgress) onProgress("Found " + sections.length + " sections to process...");
+
+  for (let i = 0; i < sections.length; i++) {
+    const { raw, header } = sections[i];
+    const category = getSectionCategory(header);
+
+    if (onProgress) onProgress("(" + (i + 1) + "/" + sections.length + ") " + header + " → " + category + "...");
+
+    const prompt = "Convert this section of a Story Reference Document into individual vault entries for the Player Story.\n\n"
+      + "SECTION: " + header + "\n"
+      + "TARGET CATEGORY: " + category + "\n\n"
+      + raw + "\n\n"
+      + "RULES:\n"
+      + "- Each entry = one clear self-contained factual sentence\n"
+      + "- Every bullet point and sub-bullet becomes at least one entry\n"
+      + "- Do NOT modify — only split into individual facts\n"
+      + "- All entries use category: \"" + category + "\"\n\n"
+      + "Return ONLY a JSON array:\n"
+      + '[{"text": "fact here", "category": "' + category + '"}]';
+
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        if (attempt > 1 && onProgress) onProgress("Retry " + attempt + " for section " + (i+1) + "...");
+        const result = await geminiQualityCall(prompt);
+        const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
+        const jsonMatch = clean.match(/\[([\s\S]*)\]/);
+        if (!jsonMatch) { if (attempt < 5) { await new Promise(r => setTimeout(r, 10000)); continue; } break; }
+        const parsed: Array<{ text: string; category: string }> = JSON.parse("[" + jsonMatch[1] + "]");
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter(e => e.text && e.text.trim().length > 15);
+          allEntries.push(...valid);
+          if (onProgress) onProgress("✓ " + header + ": " + valid.length + " entries · " + allEntries.length + " total");
+        }
+        break;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "error";
+        if (msg.startsWith("ALL_KEYS_LIMITED")) {
+          await waitForKeyReset(msg, onProgress);
+          continue;
+        }
+        const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
+                            msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                            msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                            msg.includes("timeout") || msg.includes("AbortError");
+        if (isRetryable) {
+          const waitSec = Math.min(20 + attempt * 10, 90);
+          if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s...");
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+          continue;
+        }
+        if (onProgress) onProgress("⚠ Section " + (i+1) + " failed: " + msg + " — skipping");
+        break;
+      }
+    }
+    if (i < sections.length - 1) await new Promise(r => setTimeout(r, 2000));
+  }
+
+  if (onProgress) onProgress("✓ Complete — " + allEntries.length + " total entries");
+  return allEntries;
+}
+
 // [PENSIEVE PIPELINE] Three-stage: Cerebras pre-filter → DeepSeek Investigation → Gemini answer
 // This function handles Stage 2: DeepSeek Investigation
 // Stage 1 (Cerebras keyword pre-filter) happens in the Pensieve page before calling this
