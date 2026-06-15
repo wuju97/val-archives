@@ -859,6 +859,41 @@ Return 3 branch suggestions, one per line, starting with "What if":`;
 
 // ─── FEATURE: Chat with Archive Context ──────────────────────────────────────
 
+const VAL_ARCHIVES_KNOWLEDGE = `
+VAL ARCHIVES — COMPLETE FEATURE GUIDE:
+
+TABS & FEATURES:
+- 📥 Inbox: Player content entry. Copy & Paste tab or Upload Files tab (TXT/MD/PDF, stored in IDB permanently). ✨ Distill Story button → opens panel → Gemini reads content in 4 passes → creates Story Reference → ⚡ Import to 🎮 Player Story. Quick import: ✨ Analyze → classify → Import to Player Story. 💾 Save Prompt generates session extraction prompt.
+- 🏛 Canon Archives: Canon source files. Upload TXT/PDF (stored in IDB). ✨ Distill Canon → Gemini reads entire file → Canon Reference document → View & Save → ⚡ Import to Vault → Canon Story subtab. Separate from Inbox — never mixes.
+- 📖 Story Studio: Two subtabs — 📖 Canon Story (from Canon Archives) and 🎮 Player Story (from Inbox). 30+ categories including 💕 Romance & Love. Priority dots: once=blue, twice=red. Canon Story and Player Story are COMPLETELY SEPARATE — never mix.
+- 🌀 Pensieve: AI search across both subtabs. Filter: All / Canon Story / Player Story. 3-stage: Cerebras keyword scan → Cerebras investigation → Gemini answer. Results labeled 📖 or 🎮.
+- 👑 Master Prompt: Auto-compiled from both subtabs. Priority order: red (top+bottom) → blue (middle) → interleaved by category. Canon then Player per section. Click ✨ AI Refine.
+- 🕰 Custom Prompt: Global AI instructions. Click ✨ AI Enhance.
+- ⚒ Prompt Forge: Build specialized prompts. Describe goal → Analyze → Forge → ✨ AI Refine → Send to Final Prompt.
+- 📋 Rule Book: World rules and game mechanics. Feed into Master Prompt first. Click ✨ to AI-enhance each rule.
+- ⏳ Timeline Save: Store session saves intact. + Branch for alternate timelines. Active timeline feeds into Master Prompt verbatim.
+- 👤 Character Dashboard: Up to 5 character panels. Auto-searches both subtabs. Click ✨ AI for refined character summary.
+
+AI SYSTEM:
+- Gemini Key 1 (Canon): Distill Canon + Import to Vault → fallback Key 3
+- Gemini Key 2 (Inbox): Distill Story + Import to Player Story → fallback Key 3  
+- Gemini Key 3 (General): Pensieve, Chat, Refine, Master Prompt → fallback Key 1 → Key 2
+- Groq: Extract to Vault (raw txt), Timeline checks, Contradiction detection
+- Cerebras: Pensieve keyword search, Inbox classify, fast tasks
+- All 3 keys rate limited → process pauses automatically → resumes when any key resets
+
+SETTINGS:
+- Display: theme, colors, fonts
+- AI: Add Gemini Key 1/2/3, Groq, Cerebras keys. Test each. Show/Hide toggle.
+- Alert Zone: Clear Vault (wipes story entries only, never files), Undo, AI Targeted Delete (checkboxes), Export Vault
+
+STORAGE:
+- Vault entries: localStorage + IDB (IDB is primary, never truncates)
+- Canon files: valArchivesCanonDB IDB (permanent)
+- Inbox files: valArchivesInboxDB IDB (permanent)
+- Clear Vault: only wipes story entries, NEVER files or Canon References
+`;
+
 export async function geminiChat(
   message: string,
   masterPrompt: string,
@@ -866,7 +901,19 @@ export async function geminiChat(
 ): Promise<string> {
   if (!hasGeminiKey() && !hasGeminiQualityKey() && !hasGeminiQualityKey2() && !hasGeminiQualityKey3()) throw new Error("NO_KEY");
 
-  const systemInstruction = `You are The Archivist — an intelligent AI assistant for a story/RPG campaign.\nYou have complete knowledge of this archive including both Canon Story facts and the Player's current journey.\nBe helpful, specific, and always stay consistent with established facts.\nYou can help with: storytelling, character analysis, world-building, quest planning, theories, and anything related to this campaign.\n\nARCHIVE CONTEXT:\n${masterPrompt.slice(0, 8000)}`;
+  const systemInstruction = `You are The Archivist — the built-in AI assistant for Val Archives, a story/RPG archive system.
+
+You have two roles:
+1. WEBSITE ASSISTANT: You know everything about how Val Archives works. Answer any questions about features, tabs, how to use the system, workflows, AI keys, storage, etc. Use the knowledge below.
+2. STORY/RPG ASSISTANT: You know this user's complete archive — both Canon Story facts and their Player's current journey. Help with storytelling, character analysis, world-building, quest planning, theories, continuity questions.
+
+VAL ARCHIVES KNOWLEDGE:
+${VAL_ARCHIVES_KNOWLEDGE}
+
+ARCHIVE CONTEXT (this user's actual story data):
+${masterPrompt.slice(0, 7000)}
+
+Be helpful, specific, and friendly. If asked about the website, explain clearly. If asked about the story, stay consistent with the archive data above.`;
 
   return geminiQualityCall(message, systemInstruction, history);
 }
