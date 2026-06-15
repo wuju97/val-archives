@@ -130,12 +130,13 @@ async function owlAlphaCall(
 ): Promise<string> {
   const key = getOpenRouterKey();
   if (!key) {
-    // Fall back to Gemini if no OpenRouter key
     return geminiQualityCall(prompt, systemInstruction, history);
   }
 
   const messages: Array<{ role: string; content: string }> = [];
-  if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+  // Nemotron Ultra requires "detailed thinking on" to enable reasoning
+  const sysContent = ((systemInstruction || "") + "\n\ndetailed thinking on").trim();
+  messages.push({ role: "system", content: sysContent });
   if (history) {
     for (const msg of history) {
       messages.push({ role: msg.role === "model" ? "assistant" : "user", content: msg.text });
@@ -194,7 +195,9 @@ async function nemotronCall(
   if (!key) return geminiQualityCall(prompt, systemInstruction);
 
   const messages: Array<{ role: string; content: string }> = [];
-  if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+  // Nemotron Ultra requires "detailed thinking on" to enable reasoning
+  const sysPrompt = (systemInstruction || "") + "\n\ndetailed thinking on";
+  messages.push({ role: "system", content: sysPrompt.trim() });
   messages.push({ role: "user", content: prompt });
 
   const controller = new AbortController();
@@ -239,7 +242,7 @@ async function nemotronCall(
 
 export async function testOpenRouterConnection(): Promise<{ ok: boolean; message: string }> {
   try {
-    const result = await owlAlphaCall("Reply with exactly: CONNECTED");
+    const result = await owlAlphaCall("Reply with exactly: CONNECTED", "detailed thinking on");
     return { ok: true, message: result.includes("CONNECTED") ? "Connected (OpenRouter ready)" : "Connected" };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
@@ -325,7 +328,7 @@ export async function testGroqConnection(): Promise<{ ok: boolean; message: stri
 
 // ─── OpenRouter (Owl Alpha + Nemotron 3 Ultra) ────────────────────────────────
 const OPENROUTER_KEY_STORAGE = "valArchivesOpenRouterKey";
-const OWL_ALPHA_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free"; // Nemotron Ultra - confirmed free
+const OWL_ALPHA_MODEL = "google/gemma-4-26b-a4b-it:free"; // Gemma 4 26B - free, strong story/chat
 const NEMOTRON_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free";
 const OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions";
 
