@@ -1387,3 +1387,185 @@ export function clearHistory(): void {
   localStorage.removeItem(HISTORY_KEY);
   localStorage.removeItem(FUTURE_KEY);
 }
+// ═══════════════════════════════════════════════════════════════════════════════
+// GITHUB GIST CLOUD BACKUP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const GIST_TOKEN_KEY = "valArchivesGistToken";
+const GIST_ID_KEY = "valArchivesGistId";
+const GIST_FILENAME = "val-archives-vault.json";
+const GIST_AUTO_SAVE_KEY = "valArchivesGistAutoSave";
+
+export function getGistToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(GIST_TOKEN_KEY);
+}
+export function setGistToken(token: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GIST_TOKEN_KEY, token.trim());
+}
+export function clearGistToken(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(GIST_TOKEN_KEY);
+  localStorage.removeItem(GIST_ID_KEY);
+}
+export function hasGistToken(): boolean { return !!getGistToken(); }
+
+export function getGistAutoSave(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(GIST_AUTO_SAVE_KEY) === "true";
+}
+export function setGistAutoSave(val: boolean): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GIST_AUTO_SAVE_KEY, val ? "true" : "false");
+}
+
+export function getGistId(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(GIST_ID_KEY);
+}
+
+// Save vault to GitHub Gist
+export async function saveToGist(archive: ArchiveData): Promise<{ ok: boolean; message: string }> {
+  const token = getGistToken();
+  if (!token) return { ok: false, message: "No GitHub token set" };
+
+  const payload = JSON.stringify({
+    version: "1.0",
+    savedAt: new Date().toISOString(),
+    archiveName: archive.archiveName,
+    data: archive,
+  }, null, 2);
+
+  const gistId = getGistId();
+  const url = gistId
+    ? `https://api.github.com/gists/${gistId}`
+    : "https://api.github.com/gists";
+
+  const method = gistId ? "PATCH" : "POST";
+  const body = gistId
+    ? { files: { [GIST_FILENAME]: { content: payload } } }
+    : {
+        description: `Val Archives — ${archive.archiveName}`,
+        public: false,
+        files: { [GIST_FILENAME]: { content: payload } },
+      };
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (res.status === 401) return { ok: false, message: "Invalid GitHub token" };
+      if (res.status === 404 && gistId) {
+        // Gist was deleted — create a new one
+        localStorage.removeItem(GIST_ID_KEY);
+        return saveToGist(archive);
+      }
+      return { ok: false, message: (err as any)?.message || `HTTP ${res.status}` };
+    }
+
+    const data = await res.json();
+    if (data.id) localStorage.setItem(GIST_ID_KEY, data.id);
+
+    const entryCount = (archive.entries?.length ?? 0) + (archive.playerEntries?.length ?? 0);
+    return { ok: true, message: `✓ Saved ${entryCount} entries to GitHub Gist` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
+// Load vault from GitHub Gist
+export async function loadFromGist(): Promise<{ ok: boolean; message: string; data?: ArchiveData }> {
+  const token = getGistToken();
+  if (!token) return { ok: false, message: "No GitHub token set" };
+
+  const gistId = getGistId();
+  if (!gistId) {
+    // Try to find existing Val Archives gist
+    try {
+      const res = await fetch("https://api.github.com/gists", {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
+      if (!res.ok) return { ok: false, message: "Could not fetch gists" };
+      const gists = await res.json();
+      const found = gists.find((g: any) => g.files?.[GIST_FILENAME]);
+      if (!found) return { ok: false, message: "No Val Archives backup found on GitHub" };
+      localStorage.setItem(GIST_ID_KEY, found.id);
+      return loadFromGist();
+    } catch {
+      return { ok: false, message: "Network error finding gist" };
+    }
+  }
+
+  try {
+    const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        localStorage.removeItem(GIST_ID_KEY);
+        return { ok: false, message: "Gist not found — may have been deleted" };
+      }
+      return { ok: false, message: `HTTP ${res.status}` };
+    }
+
+    const gist = await res.json();
+    const file = gist.files?.[GIST_FILENAME];
+    if (!file?.content) return { ok: false, message: "No vault data in gist" };
+
+    const parsed = JSON.parse(file.content);
+    const archive: ArchiveData = parsed.data ?? parsed;
+    if (!archive.entries) archive.entries = [];
+    if (!archive.playerEntries) archive.playerEntries = [];
+    if (!archive.inboxDistillCategories) archive.inboxDistillCategories = [];
+
+    const entryCount = (archive.entries?.length ?? 0) + (archive.playerEntries?.length ?? 0);
+    const savedAt = parsed.savedAt ? new Date(parsed.savedAt).toLocaleString() : "unknown";
+
+    return {
+      ok: true,
+      message: `✓ Loaded ${entryCount} entries (saved ${savedAt})`,
+      data: archive,
+    };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Parse error" };
+  }
+}
+
+// Test gist connection
+export async function testGistConnection(): Promise<{ ok: boolean; message: string }> {
+  const token = getGistToken();
+  if (!token) return { ok: false, message: "No token set" };
+  try {
+    const res = await fetch("https://api.github.com/user", {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github+json",
+      },
+    });
+    if (!res.ok) return { ok: false, message: res.status === 401 ? "Invalid token" : `HTTP ${res.status}` };
+    const user = await res.json();
+    return { ok: true, message: `Connected as ${user.login}` };
+  } catch {
+    return { ok: false, message: "Network error" };
+  }
+}
