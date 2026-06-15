@@ -31,6 +31,7 @@ export type StoryCategory =
   | "information-architecture"
   | "rules"
   | "player-character"
+  | "romance"
   | "custom";
 
 export const CATEGORY_LABELS: Record<StoryCategory, string> = {
@@ -64,6 +65,7 @@ export const CATEGORY_LABELS: Record<StoryCategory, string> = {
   "information-architecture": "Information Architecture",
   "rules": "Core Rules",
   "player-character": "Player Character",
+  "romance": "Romance & Love",
   "custom": "Custom",
 };
 
@@ -98,6 +100,7 @@ export const CATEGORY_ICONS: Record<StoryCategory, string> = {
   "information-architecture": "🗂️",
   "rules": "📋",
   "player-character": "⭐",
+  "romance": "💕",
   "custom": "➕",
 };
 
@@ -233,7 +236,8 @@ export interface CanonCategory {
 export interface ArchiveData {
   archiveName: string;
   lastSaved: string;
-  entries: VaultEntry[];
+  entries: VaultEntry[];        // Canon Story subtab entries
+  playerEntries: VaultEntry[]; // Player Story subtab entries
   masterPrompt: string;
   savePrompt: string;
   customPrompt: string;
@@ -244,6 +248,7 @@ export interface ArchiveData {
   canonCategories: CanonCategory[];
   timelineSaves: TimelineSave[];
   activeTimelineId: string | null;
+  inboxDistillCategories: CanonCategory[]; // Distilled inbox reference files
 }
 
 export interface ContradictionResult {
@@ -326,11 +331,21 @@ export function detectContradiction(
 // ─── Master Prompt Compiler ───────────────────────────────────────────────────
 
 export function compileMasterPrompt(archive: ArchiveData): string {
-  const seen = new Set<string>();
+  // Dedupe canon entries
+  const seenCanon = new Set<string>();
   const deduped = archive.entries.filter((e) => {
     const key = `${e.category}::${e.text.trim()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
+    if (seenCanon.has(key)) return false;
+    seenCanon.add(key);
+    return true;
+  });
+
+  // Dedupe player entries
+  const seenPlayer = new Set<string>();
+  const dedupedPlayer = (archive.playerEntries ?? []).filter((e) => {
+    const key = `${e.category}::${e.text.trim()}`;
+    if (seenPlayer.has(key)) return false;
+    seenPlayer.add(key);
     return true;
   });
 
@@ -338,15 +353,18 @@ export function compileMasterPrompt(archive: ArchiveData): string {
   const blues = archive.bluePriorities ?? [];
 
   const redCats = MASTER_PROMPT_ORDER.filter(c =>
-    archive.activePriority === `story-${c}`
+    archive.activePriority === `story-${c}` || archive.activePriority === `player-${c}`
   );
   const blueCats = MASTER_PROMPT_ORDER.filter(c =>
-    blues.includes(`story-${c}`)
+    blues.includes(`story-${c}`) || blues.includes(`player-${c}`)
   );
 
   sections.push(`# ${archive.archiveName}`);
   sections.push(
-    `You are operating within a structured story archive. Use ALL information below as absolute authoritative context. Maintain perfect internal consistency. Prioritize established facts. Never contradict stored information unless explicitly instructed.`
+    `You are operating within a structured story archive with TWO distinct data sources:\n` +
+    `- 📖 CANON STORY: The established canon facts of the world (what the author wrote)\n` +
+    `- 🎮 PLAYER STORY: The player character's actual journey and current game state\n` +
+    `Use ALL information below as authoritative context. Canon facts are the baseline reality. Player facts represent what has actually happened in the current campaign. Never contradict stored information unless explicitly instructed.`
   );
 
   const ruleEntries = deduped.filter(e => e.category === "rules");
@@ -357,10 +375,13 @@ export function compileMasterPrompt(archive: ArchiveData): string {
 
   if (redCats.length > 0) {
     for (const category of redCats) {
-      const entries = deduped.filter(e => e.category === category);
-      if (entries.length === 0) continue;
-      const body = entries.map(e => `- ${e.text.trim()}`).join("\n");
-      sections.push(`## 🔴 FIRST PRIORITY — ${CATEGORY_ICONS[category]} ${CATEGORY_LABELS[category]}\n⚡ This is the PRIMARY story context. Give this category maximum weight in all responses.\n${body}`);
+      const canonE = deduped.filter(e => e.category === category);
+      const playerE = dedupedPlayer.filter(e => e.category === category);
+      if (canonE.length === 0 && playerE.length === 0) continue;
+      const parts: string[] = [];
+      if (canonE.length > 0) parts.push(`### 📖 Canon Story\n${canonE.map(e => `- ${e.text.trim()}`).join("\n")}`);
+      if (playerE.length > 0) parts.push(`### 🎮 Player Story\n${playerE.map(e => `- ${e.text.trim()}`).join("\n")}`);
+      sections.push(`## 🔴 FIRST PRIORITY — ${CATEGORY_ICONS[category]} ${CATEGORY_LABELS[category]}\n⚡ This is the PRIMARY story context. Give this category maximum weight in all responses.\n${parts.join("\n\n")}`);
     }
   }
 
@@ -383,16 +404,23 @@ export function compileMasterPrompt(archive: ArchiveData): string {
   for (const category of MASTER_PROMPT_ORDER) {
     if (category === "rules") continue;
     if (redCats.includes(category)) continue;
-    const entries = deduped.filter(e => e.category === category);
-    if (entries.length === 0) continue;
+    const canonEntries = deduped.filter(e => e.category === category);
+    const playerEntries = dedupedPlayer.filter(e => e.category === category);
+    if (canonEntries.length === 0 && playerEntries.length === 0) continue;
     const icon = CATEGORY_ICONS[category];
     const label = CATEGORY_LABELS[category];
-    const body = entries.map(e => `- ${e.text.trim()}`).join("\n");
     const isBlue = blueCats.includes(category);
     const header = isBlue
       ? `## 🔵 SECOND PRIORITY — ${icon} ${label}\n📌 Important secondary context:`
       : `## ${icon} ${label}`;
-    sections.push(`${header}\n${body}`);
+    const parts: string[] = [];
+    if (canonEntries.length > 0) {
+      parts.push(`### 📖 Canon Story\n${canonEntries.map(e => `- ${e.text.trim()}`).join("\n")}`);
+    }
+    if (playerEntries.length > 0) {
+      parts.push(`### 🎮 Player Story\n${playerEntries.map(e => `- ${e.text.trim()}`).join("\n")}`);
+    }
+    sections.push(`${header}\n${parts.join("\n\n")}`);
   }
 
   if (blues.includes("canon")) {
@@ -513,7 +541,8 @@ export function createEmptyArchive(): ArchiveData {
   return {
     archiveName: "Untitled Archive",
     lastSaved: "",
-    entries: [],
+    entries: [],          // Canon Story subtab
+    playerEntries: [],    // Player Story subtab
     masterPrompt: "",
     savePrompt: "",
     customPrompt: "",
@@ -521,6 +550,7 @@ export function createEmptyArchive(): ArchiveData {
     bluePriorities: [],
     inbox: [],
     canonCategories: [],
+    inboxDistillCategories: [],
     timelineSaves: [],
     activeTimelineId: null,
     customTabs: [],
@@ -595,6 +625,8 @@ export function loadArchive(): ArchiveData {
   if (saved) {
     try {
       const parsed = JSON.parse(saved) as ArchiveData;
+      if (!parsed.playerEntries) parsed.playerEntries = [];
+      if (!parsed.inboxDistillCategories) parsed.inboxDistillCategories = [];
       // Only use localStorage if it has actual entries — not empty/stripped
       if (parsed && (parsed.entries?.length > 0 || parsed.masterPrompt)) {
         return parsed;
@@ -643,7 +675,8 @@ export function clearArchive(): void {
     ...createEmptyArchive(),
     archiveName: current.archiveName,
     customTabs: current.customTabs ?? [],
-    canonCategories: current.canonCategories ?? [], // NEVER wipe canon files
+    canonCategories: current.canonCategories ?? [],       // NEVER wipe canon files
+    inboxDistillCategories: current.inboxDistillCategories ?? [], // NEVER wipe inbox distill files
     masterPrompt: "",
   };
 
@@ -662,6 +695,24 @@ export function clearArchive(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cleared));
   } catch {}
+}
+
+// Add entry to Player Story subtab
+export function addPlayerEntry(
+  archive: ArchiveData,
+  text: string,
+  category: StoryCategory
+): ArchiveData {
+  const trimmed = text.trim();
+  if (!trimmed) return archive;
+  const now = new Date().toISOString();
+  return {
+    ...archive,
+    playerEntries: [
+      ...(archive.playerEntries ?? []),
+      { id: crypto.randomUUID(), text: trimmed, category, createdAt: now, updatedAt: now },
+    ],
+  };
 }
 
 export function addEntry(

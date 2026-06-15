@@ -49,6 +49,7 @@ export default function PensievePage() {
   const [aiSearching, setAiSearching] = useState(false);
   const [aiStage, setAiStage] = useState<"idle" | "filtering" | "investigating" | "answering">("idle");
   const [aiMode, setAiMode] = useState(false);
+  const [pensieveSubTab, setPensieveSubTab] = useState<"all" | "canon" | "player">("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -63,16 +64,23 @@ export default function PensievePage() {
   }, []);
 
   const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as StoryCategory[];
+  // Combine both subtabs for display
+  const allVaultEntries = [
+    ...archive.entries.map(e => ({ ...e, subtab: "canon" as const })),
+    ...((archive.playerEntries ?? []).map(e => ({ ...e, subtab: "player" as const }))),
+  ];
+
   const categoryCounts: Partial<Record<StoryCategory, number>> = {};
-  for (const entry of archive.entries) {
+  for (const entry of allVaultEntries) {
     categoryCounts[entry.category] = (categoryCounts[entry.category] ?? 0) + 1;
   }
 
-  const entries = archive.entries
+  const entries = allVaultEntries
     .filter(entry => {
       const matchesSearch = search.trim() === "" || entry.text.toLowerCase().includes(search.toLowerCase());
       const matchesCategory = selectedCategory === "all" || entry.category === selectedCategory;
-      return matchesSearch && matchesCategory;
+      const matchesSubTab = pensieveSubTab === "all" || entry.subtab === pensieveSubTab;
+      return matchesSearch && matchesCategory && matchesSubTab;
     })
     .sort((a, b) => sortOrder === "newest"
       ? new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -87,7 +95,10 @@ export default function PensievePage() {
     setAiResults(null);
     setAiAnswer(null);
 
-    const allEntries = archive.entries.map(e => ({ id: e.id, text: e.text, category: e.category }));
+    // Include both Canon Story and Player Story entries with subtab label
+    const canonEntries = archive.entries.map(e => ({ id: e.id, text: e.text, category: e.category, subtab: "canon" as const }));
+    const playerEntries = (archive.playerEntries ?? []).map(e => ({ id: e.id, text: e.text, category: e.category, subtab: "player" as const }));
+    const allEntries = [...canonEntries, ...playerEntries];
 
     // Stage 1 — Cerebras: keyword pre-filter (instant, no API)
     setAiStage("filtering");
@@ -156,7 +167,17 @@ export default function PensievePage() {
     <div style={S.page}>
       <Link href="/dashboard" style={{ ...S.muted, fontSize: "0.875rem", display: "block", marginBottom: "1.5rem" }}>← Home</Link>
       <h1 style={{ fontSize: "3rem", fontWeight: "bold", marginBottom: "0.5rem" }}>🌀 Pensieve</h1>
-      <p style={{ ...S.muted, marginBottom: "2rem" }}>{archive.entries.length} {archive.entries.length === 1 ? "memory" : "memories"} in vault</p>
+      <p style={{ ...S.muted, marginBottom: "1rem" }}>{archive.entries.length + (archive.playerEntries ?? []).length} total memories — {archive.entries.length} canon · {(archive.playerEntries ?? []).length} player</p>
+
+      {/* Subtab filter */}
+      <div style={{ display: "flex", gap: "0.375rem", marginBottom: "1.5rem" }}>
+        {(["all", "canon", "player"] as const).map(tab => (
+          <button key={tab} onClick={() => setPensieveSubTab(tab)}
+            style={{ padding: "0.375rem 0.875rem", borderRadius: "0.5rem", border: "none", background: pensieveSubTab === tab ? (tab === "canon" ? "#3b82f6" : tab === "player" ? "#7c3aed" : "var(--va-accent)") : "var(--va-surface)", color: pensieveSubTab === tab ? "white" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.8rem", fontWeight: pensieveSubTab === tab ? "700" : "400" }}>
+            {tab === "all" ? "🔍 All" : tab === "canon" ? "📖 Canon Story" : "🎮 Player Story"}
+          </button>
+        ))}
+      </div>
 
       {/* ── Pensieve AI Search ─────────────────────────────────────────────── */}
       <div style={{ marginBottom: "1.5rem" }}>
@@ -203,9 +224,16 @@ export default function PensievePage() {
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               {aiResults.map(result => (
                 <div key={result.id} style={{ background: "var(--va-surface)", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "0.625rem", padding: "0.875rem", borderLeft: "3px solid #7c3aed" }}>
-                  <span style={{ fontSize: "0.68rem", color: "#c4b5fd", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    {CATEGORY_ICONS[result.category as StoryCategory] ?? "📄"} {CATEGORY_LABELS[result.category as StoryCategory] ?? result.category}
-                  </span>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.25rem" }}>
+                    <span style={{ fontSize: "0.68rem", color: "#c4b5fd", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {CATEGORY_ICONS[result.category as StoryCategory] ?? "📄"} {CATEGORY_LABELS[result.category as StoryCategory] ?? result.category}
+                    </span>
+                    {(result as any).subtab && (
+                      <span style={{ fontSize: "0.62rem", padding: "0.1rem 0.35rem", borderRadius: "9999px", background: (result as any).subtab === "canon" ? "rgba(59,130,246,0.15)" : "rgba(124,58,237,0.15)", color: (result as any).subtab === "canon" ? "#3b82f6" : "#c4b5fd" }}>
+                        {(result as any).subtab === "canon" ? "📖 Canon" : "🎮 Player"}
+                      </span>
+                    )}
+                  </div>
                   <p style={{ fontSize: "0.875rem", color: "var(--va-text)", lineHeight: "1.6", margin: "0.375rem 0 0.25rem" }}>{result.text}</p>
                   <p style={{ fontSize: "0.72rem", color: "#7c3aed", fontStyle: "italic" }}>↳ {result.relevance}</p>
                 </div>
@@ -257,7 +285,12 @@ export default function PensievePage() {
           {entries.map(entry => (
             <div key={entry.id} style={{ ...S.surface, padding: "1rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 <span style={{ fontSize: "0.875rem", color: "var(--va-accent)" }}>{CATEGORY_ICONS[entry.category]} {CATEGORY_LABELS[entry.category]}</span>
+                <span style={{ fontSize: "0.65rem", padding: "0.1rem 0.375rem", borderRadius: "9999px", background: (entry as any).subtab === "canon" ? "rgba(59,130,246,0.15)" : "rgba(124,58,237,0.15)", color: (entry as any).subtab === "canon" ? "#3b82f6" : "#c4b5fd", fontWeight: "600" }}>
+                  {(entry as any).subtab === "canon" ? "📖" : "🎮"}
+                </span>
+              </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                   <span style={{ ...S.muted, fontSize: "0.75rem" }}>{new Date(entry.updatedAt).toLocaleString()}</span>
                   {editingId !== entry.id && deleteConfirmId !== entry.id && (

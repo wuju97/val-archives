@@ -381,7 +381,7 @@ export default function CanonPage() {
       }
 
       // ATOMIC SAVE — load fresh archive, add all entries, save ONCE
-      setImportProgress("Saving " + entries.length + " entries to vault...");
+      setImportProgress("Saving " + entries.length + " entries to Canon Story subtab...");
       await new Promise(r => setTimeout(r, 50));
 
       let currentArchive = loadArchive();
@@ -400,7 +400,7 @@ export default function CanonPage() {
 
       setImportingEntryId(null);
       setImportDone(true);
-      setImportProgress("✓ Done! " + entries.length + " entries imported from " + entryFilename);
+      setImportProgress("✓ Done! " + entries.length + " entries saved to 📖 Canon Story subtab from " + entryFilename);
       flash("✓ " + entries.length + " entries imported to vault!");
 
     } catch (e) {

@@ -9,6 +9,7 @@ import {
   getGeminiQualityKey, setGeminiQualityKey, clearGeminiQualityKey, testGeminiQualityConnection, hasGeminiQualityKey,
   getDeepSeekKey, setDeepSeekKey, clearDeepSeekKey, testDeepSeekConnection, hasDeepSeekKey,
   getGroqKey, setGroqKey, clearGroqKey, testGroqConnection, hasGroqKey,
+  getOpenRouterKey, setOpenRouterKey, clearOpenRouterKey, testOpenRouterConnection, hasOpenRouterKey,
   geminiChat, geminiErrorMessage, geminiTargetedDelete,
 } from "../../lib/geminiEngine";
 
@@ -115,13 +116,16 @@ export default function SettingsPage() {
   const [groqKey, setGroqKeyState] = useState("");
   const [testingGroq, setTestingGroq] = useState(false);
   const [groqStatus, setGroqStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [openRouterKey, setOpenRouterKeyState] = useState("");
+  const [testingOpenRouter, setTestingOpenRouter] = useState(false);
+  const [openRouterStatus, setOpenRouterStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [aiViewMode, setAiViewMode] = useState<"simple" | "advanced">("simple");
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
   const [deleteQuery, setDeleteQuery] = useState("");
-  const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; text: string; category: string; reason: string }>>([]);
+  const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; text: string; category: string; reason: string; selected: boolean }>>([]);
   const [deletingTargets, setDeletingTargets] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [undoStatus, setUndoStatus] = useState("");
@@ -132,6 +136,7 @@ export default function SettingsPage() {
     const savedQualityKey = getGeminiQualityKey(); if (savedQualityKey) setQualityApiKey(savedQualityKey);
     const savedDSKey = getDeepSeekKey(); if (savedDSKey) setDeepSeekKeyState(savedDSKey);
     const savedGroqKey = getGroqKey(); if (savedGroqKey) setGroqKeyState(savedGroqKey);
+    const savedORKey = getOpenRouterKey(); if (savedORKey) setOpenRouterKeyState(savedORKey);
   }, []);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
@@ -396,6 +401,29 @@ export default function SettingsPage() {
                     </div>
                     {qualityApiStatus && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: qualityApiStatus.ok ? "#4ade80" : "#f87171" }}>{qualityApiStatus.ok ? "✓" : "✗"} {qualityApiStatus.message}</p>}
                   </div>
+
+                  {/* OpenRouter */}
+                  <div style={S.card}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
+                      <div>
+                        <p style={{ fontWeight: "700", fontSize: "0.9rem" }}>🦉 OpenRouter <span style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", fontWeight: "400" }}>— Owl Alpha + Nemotron</span></p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", marginTop: "0.2rem" }}>openrouter.ai · Free models available</p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>Owl Alpha: Pensieve answers, Character AI, Chat · Nemotron: Series Synthesis</p>
+                        <p style={{ fontSize: "0.72rem", color: "#fbbf24" }}>Falls back to Gemini if not set.</p>
+                      </div>
+                      {hasOpenRouterKey() && <span style={{ fontSize: "0.7rem", color: "#4ade80", flexShrink: 0 }}>✓ Connected</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                      <input type="password" value={openRouterKey} onChange={e => setOpenRouterKeyState(e.target.value)} placeholder="sk-or-..."
+                        style={{ ...S.input, flex: 1 }} />
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <button onClick={() => { if (openRouterKey.trim()) { setOpenRouterKey(openRouterKey.trim()); setOpenRouterStatus({ ok: true, message: "Saved" }); setTimeout(() => setOpenRouterStatus(null), 2000); } }} disabled={!openRouterKey.trim()} style={{ ...S.btn("var(--va-accent)"), opacity: !openRouterKey.trim() ? 0.4 : 1 }}>Save</button>
+                      <button onClick={async () => { setTestingOpenRouter(true); if (openRouterKey.trim()) setOpenRouterKey(openRouterKey.trim()); const r = await testOpenRouterConnection(); setOpenRouterStatus(r); setTestingOpenRouter(false); }} disabled={!openRouterKey.trim() || testingOpenRouter} style={{ ...S.btn("var(--va-border)", "var(--va-text)"), opacity: (!openRouterKey.trim() || testingOpenRouter) ? 0.4 : 1 }}>{testingOpenRouter ? "Testing..." : "Test"}</button>
+                      <button onClick={() => { clearOpenRouterKey(); setOpenRouterKeyState(""); }} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)" }}>Remove</button>
+                    </div>
+                    {openRouterStatus && <p style={{ marginTop: "0.375rem", fontSize: "0.8rem", color: openRouterStatus.ok ? "#4ade80" : "#f87171" }}>{openRouterStatus.ok ? "✓" : "✗"} {openRouterStatus.message}</p>}
+                  </div>
                 </div>
               )}
 
@@ -538,30 +566,60 @@ export default function SettingsPage() {
                     const archive = loadArchive();
                     const entries = archive.entries.map(e => ({ id: e.id, text: e.text, category: e.category }));
                     const targets = await geminiTargetedDelete(deleteQuery, entries);
-                    setDeleteTargets(targets); setDeletingTargets(false);
+                    // Search both subtabs
+                    const allEntries = [
+                      ...archive.entries.map(e => ({ id: e.id, text: e.text, category: e.category })),
+                      ...((archive.playerEntries ?? []).map(e => ({ id: e.id, text: e.text, category: e.category }))),
+                    ];
+                    const allTargets = await geminiTargetedDelete(deleteQuery, allEntries);
+                    setDeleteTargets(allTargets.map(t => ({ ...t, selected: true }))); setDeletingTargets(false);
                   }} disabled={!deleteQuery.trim() || deletingTargets}
                     style={{ ...S.btn("#b45309"), opacity: (!deleteQuery.trim() || deletingTargets) ? 0.5 : 1 }}>
                     {deletingTargets ? "✨ Scanning..." : "✨ Find Entries to Delete"}
                   </button>
                   {deleteTargets.length > 0 && (
                     <div style={{ marginTop: "1rem" }}>
-                      <p style={{ fontSize: "0.875rem", color: "#fbbf24", marginBottom: "0.5rem", fontWeight: "600" }}>Found {deleteTargets.length} matching {deleteTargets.length === 1 ? "entry" : "entries"}:</p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginBottom: "0.875rem", maxHeight: "200px", overflowY: "auto" }}>
-                        {deleteTargets.map(t => (
-                          <div key={t.id} style={{ background: "var(--va-bg)", border: "1px solid #b45309", borderRadius: "0.375rem", padding: "0.625rem 0.875rem" }}>
-                            <p style={{ fontSize: "0.8rem", color: "var(--va-text)", marginBottom: "0.25rem" }}>{t.text.slice(0, 100)}{t.text.length > 100 ? "..." : ""}</p>
-                            <p style={{ fontSize: "0.7rem", color: "#fbbf24" }}>[{t.category}] — {t.reason}</p>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                        <p style={{ fontSize: "0.875rem", color: "#fbbf24", fontWeight: "600" }}>Found {deleteTargets.length} matching {deleteTargets.length === 1 ? "entry" : "entries"} — tick to select:</p>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                          <button onClick={() => setDeleteTargets(prev => prev.map(t => ({ ...t, selected: true })))}
+                            style={{ fontSize: "0.72rem", background: "none", border: "1px solid #b45309", color: "#fbbf24", borderRadius: "0.25rem", padding: "0.15rem 0.5rem", cursor: "pointer" }}>All</button>
+                          <button onClick={() => setDeleteTargets(prev => prev.map(t => ({ ...t, selected: false })))}
+                            style={{ fontSize: "0.72rem", background: "none", border: "1px solid var(--va-border)", color: "var(--va-text-muted)", borderRadius: "0.25rem", padding: "0.15rem 0.5rem", cursor: "pointer" }}>None</button>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginBottom: "0.875rem", maxHeight: "250px", overflowY: "auto" }}>
+                        {deleteTargets.map((t, i) => (
+                          <div key={t.id} onClick={() => setDeleteTargets(prev => prev.map((item, idx) => idx === i ? { ...item, selected: !item.selected } : item))}
+                            style={{ background: "var(--va-bg)", border: `1px solid ${(t as any).selected ? "#b91c1c" : "var(--va-border)"}`, borderRadius: "0.375rem", padding: "0.625rem 0.875rem", cursor: "pointer", display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                            <div style={{ width: "16px", height: "16px", borderRadius: "3px", border: `2px solid ${(t as any).selected ? "#b91c1c" : "var(--va-text-muted)"}`, background: (t as any).selected ? "#b91c1c" : "transparent", flexShrink: 0, marginTop: "2px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              {(t as any).selected && <span style={{ color: "white", fontSize: "0.6rem", fontWeight: "bold" }}>✓</span>}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <p style={{ fontSize: "0.8rem", color: "var(--va-text)", marginBottom: "0.2rem" }}>{t.text.slice(0, 120)}{t.text.length > 120 ? "..." : ""}</p>
+                              <p style={{ fontSize: "0.7rem", color: "#fbbf24" }}>[{t.category}] — {t.reason}</p>
+                            </div>
                           </div>
                         ))}
                       </div>
                       <button onClick={() => {
+                        const selected = deleteTargets.filter(t => (t as any).selected);
+                        if (selected.length === 0) return;
                         const archive = loadArchive(); pushHistory(archive);
-                        const ids = new Set(deleteTargets.map(t => t.id));
-                        const updated = { ...archive, entries: archive.entries.filter(e => !ids.has(e.id)) };
+                        const ids = new Set(selected.map(t => t.id));
+                        // Delete from both canon and player entries
+                        const updated = {
+                          ...archive,
+                          entries: archive.entries.filter(e => !ids.has(e.id)),
+                          playerEntries: (archive.playerEntries ?? []).filter(e => !ids.has(e.id)),
+                        };
                         saveArchive(regenerateMasterPrompt(updated));
                         setDeleteTargets([]); setDeleteQuery(""); setDeleteConfirmed(true);
                         setTimeout(() => setDeleteConfirmed(false), 3000);
-                      }} style={S.btn("#b91c1c")}>🗑️ Delete These {deleteTargets.length} {deleteTargets.length === 1 ? "Entry" : "Entries"}</button>
+                      }} disabled={!deleteTargets.some(t => (t as any).selected)}
+                        style={{ ...S.btn("#b91c1c"), opacity: !deleteTargets.some(t => (t as any).selected) ? 0.4 : 1 }}>
+                        🗑️ Delete {deleteTargets.filter(t => (t as any).selected).length} Selected {deleteTargets.filter(t => (t as any).selected).length === 1 ? "Entry" : "Entries"}
+                      </button>
                       {deleteConfirmed && <p style={{ fontSize: "0.875rem", color: "#4ade80", marginTop: "0.5rem" }}>✓ Deleted. Use Undo if needed.</p>}
                     </div>
                   )}

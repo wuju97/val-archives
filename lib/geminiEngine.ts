@@ -105,6 +105,151 @@ export function hasGroqKey(): boolean {
   return !!getGroqKey();
 }
 
+// ─── OpenRouter Key Management ───────────────────────────────────────────────
+export function getOpenRouterKey(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(OPENROUTER_KEY_STORAGE) || null;
+}
+export function setOpenRouterKey(key: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(OPENROUTER_KEY_STORAGE, key.trim());
+}
+export function clearOpenRouterKey(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(OPENROUTER_KEY_STORAGE);
+}
+export function hasOpenRouterKey(): boolean {
+  return !!getOpenRouterKey();
+}
+
+// ─── OpenRouter API Call (Owl Alpha) ─────────────────────────────────────────
+async function owlAlphaCall(
+  prompt: string,
+  systemInstruction?: string,
+  history?: Array<{ role: "user" | "model"; text: string }>
+): Promise<string> {
+  const key = getOpenRouterKey();
+  if (!key) {
+    // Fall back to Gemini if no OpenRouter key
+    return geminiQualityCall(prompt, systemInstruction, history);
+  }
+
+  const messages: Array<{ role: string; content: string }> = [];
+  if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+  if (history) {
+    for (const msg of history) {
+      messages.push({ role: msg.role === "model" ? "assistant" : "user", content: msg.text });
+    }
+  }
+  messages.push({ role: "user", content: prompt });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  let response: Response;
+  try {
+    response = await fetch(OPENROUTER_API_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`,
+        "HTTP-Referer": "https://val-archives.vercel.app",
+        "X-Title": "Val Archives",
+      },
+      body: JSON.stringify({
+        model: OWL_ALPHA_MODEL,
+        messages,
+        temperature: 0.7,
+        max_tokens: 8192,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timeout);
+    if ((err as Error)?.name === "AbortError") throw new Error("RATE_LIMIT");
+    throw err;
+  }
+  clearTimeout(timeout);
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const msg = (err as any)?.error?.message || `HTTP ${response.status}`;
+    if (response.status === 401) throw new Error("INVALID_KEY");
+    if (response.status === 429) throw new Error("RATE_LIMIT");
+    throw new Error(`API_ERROR: ${msg}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("EMPTY_RESPONSE");
+  return text.trim();
+}
+
+// ─── OpenRouter API Call (Nemotron 3 Ultra) ───────────────────────────────────
+async function nemotronCall(
+  prompt: string,
+  systemInstruction?: string
+): Promise<string> {
+  const key = getOpenRouterKey();
+  if (!key) return geminiQualityCall(prompt, systemInstruction);
+
+  const messages: Array<{ role: string; content: string }> = [];
+  if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+  messages.push({ role: "user", content: prompt });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000); // 2 min for large synthesis
+
+  let response: Response;
+  try {
+    response = await fetch(OPENROUTER_API_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`,
+        "HTTP-Referer": "https://val-archives.vercel.app",
+        "X-Title": "Val Archives",
+      },
+      body: JSON.stringify({
+        model: NEMOTRON_MODEL,
+        messages,
+        temperature: 0.3,
+        max_tokens: 16384,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timeout);
+    if ((err as Error)?.name === "AbortError") throw new Error("RATE_LIMIT");
+    throw err;
+  }
+  clearTimeout(timeout);
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    const msg = (err as any)?.error?.message || `HTTP ${response.status}`;
+    throw new Error(`API_ERROR: ${msg}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("EMPTY_RESPONSE");
+  return text.trim();
+}
+
+export async function testOpenRouterConnection(): Promise<{ ok: boolean; message: string }> {
+  try {
+    const result = await owlAlphaCall("Reply with exactly: CONNECTED");
+    return { ok: true, message: result.includes("CONNECTED") ? "Connected (Owl Alpha ready)" : "Connected" };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    if (msg === "INVALID_KEY") return { ok: false, message: "Invalid OpenRouter API key" };
+    if (msg === "RATE_LIMIT") return { ok: false, message: "Rate limit — try again shortly" };
+    return { ok: false, message: msg };
+  }
+}
+
+
 // ─── Groq API Call ────────────────────────────────────────────────────────────
 async function groqCall(
   prompt: string,
@@ -176,6 +321,13 @@ export async function testGroqConnection(): Promise<{ ok: boolean; message: stri
 
 
 
+
+
+// ─── OpenRouter (Owl Alpha + Nemotron 3 Ultra) ────────────────────────────────
+const OPENROUTER_KEY_STORAGE = "valArchivesOpenRouterKey";
+const OWL_ALPHA_MODEL = "openrouter/optimus-alpha";
+const NEMOTRON_MODEL = "nvidia/llama-3.1-nemotron-ultra-253b-v1:free";
+const OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions";
 
 // ─── Core API Call ────────────────────────────────────────────────────────────
 
@@ -595,16 +747,14 @@ export async function geminiChat(
   masterPrompt: string,
   history: Array<{ role: "user" | "model"; text: string }>
 ): Promise<string> {
-  if (!hasGeminiKey()) throw new Error("NO_KEY");
+  if (!hasGeminiKey() && !hasOpenRouterKey()) throw new Error("NO_KEY");
 
-  const systemInstruction = `You are an AI assistant with complete knowledge of this story/RPG archive.
-Use the archive information below as your primary source of truth.
-Be helpful, specific, and always stay consistent with established facts.
-You can help with: storytelling, character analysis, world-building, quest planning, writing, and anything related to this archive.
+  const systemInstruction = `You are The Archivist — an intelligent AI assistant for a story/RPG campaign.\nYou have complete knowledge of this archive including both Canon Story facts and the Player's current journey.\nBe helpful, specific, and always stay consistent with established facts.\nYou can help with: storytelling, character analysis, world-building, quest planning, theories, and anything related to this campaign.\n\nARCHIVE CONTEXT:\n${masterPrompt.slice(0, 8000)}`;
 
-ARCHIVE CONTEXT:
-${masterPrompt.slice(0, 8000)}`;
-
+  // Use Owl Alpha for chat if available (better story intelligence)
+  if (hasOpenRouterKey()) {
+    return owlAlphaCall(message, systemInstruction, history);
+  }
   return geminiQualityCall(message, systemInstruction, history);
 }
 
@@ -872,72 +1022,106 @@ export async function geminiImportCanonToVault(
 ): Promise<Array<{ text: string; category: string }>> {
   if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
 
-  const CATEGORIES = [
-    "characters", "relationships", "locations", "magic-supernatural",
-    "organizations", "history", "lore-mythology", "items-equipment",
-    "creatures-wildlife", "rules", "timeline-continuity", "world-overview",
-    "conflict-combat", "cultures-society", "quests-plotlines"
-  ];
+  const SECTION_CATEGORY_MAP: Record<string, string> = {
+    "CHARACTERS": "characters", "CHARACTER": "characters",
+    "LOCATIONS": "locations", "LOCATION": "locations",
+    "RELATIONSHIPS": "relationships", "RELATIONSHIP": "relationships",
+    "ROMANCE": "romance", "LOVE": "romance",
+    "MAGIC & SUPERNATURAL": "magic-supernatural", "MAGIC": "magic-supernatural",
+    "SPELLS": "magic-supernatural", "SUPERNATURAL": "magic-supernatural",
+    "ORGANIZATIONS & FACTIONS": "organizations", "ORGANIZATIONS": "organizations",
+    "KEY EVENTS": "timeline-continuity", "EVENTS": "timeline-continuity",
+    "CHRONOLOGICAL EVENTS": "timeline-continuity", "TIMELINE": "timeline-continuity",
+    "WORLD RULES & LORE": "lore-mythology", "WORLD RULES": "lore-mythology",
+    "LORE": "lore-mythology", "RULES": "rules",
+    "ITEMS & ARTIFACTS": "items-equipment", "ITEMS": "items-equipment", "ARTIFACTS": "items-equipment",
+    "CANON FACTS": "world-overview", "IMPORTANT DETAILS": "world-overview",
+    "CREATURES": "creatures-wildlife", "HISTORY": "history",
+    "CULTURES": "cultures-society", "CONFLICT": "conflict-combat",
+  };
 
-  if (onProgress) onProgress("Sending Canon Reference to Gemini...");
-
-  const prompt = "You are converting a Canon Reference Document into individual vault entries for a story/RPG archive.\n\n"
-    + "SOURCE: " + filename + "\n\n"
-    + "CANON REFERENCE:\n" + canonReference + "\n\n"
-    + "TASK:\n"
-    + "Convert every piece of information in this document into individual atomic fact entries.\n"
-    + "Rules:\n"
-    + "- Each entry = one clear, self-contained factual sentence\n"
-    + "- Include EVERY character detail, location, spell, relationship, event, rule, item\n"
-    + "- Do NOT skip anything — every bullet point and sub-bullet becomes at least one entry\n"
-    + "- For characters: create separate entries for physical description, personality, abilities, relationships, history\n"
-    + "- Keep original wording as much as possible — do not summarize or combine facts\n"
-    + "- Assign the most specific matching category from the list below\n\n"
-    + "CATEGORIES: " + CATEGORIES.join(", ") + "\n\n"
-    + "Return ONLY a JSON array, no other text:\n"
-    + '[{"text": "Harry Potter has bright green eyes and a lightning bolt scar on his forehead.", "category": "characters"}]';
-
-  // Auto-retry indefinitely on any error
-  let attempt = 0;
-  while (true) {
-    attempt++;
-    try {
-      if (attempt > 1 && onProgress) onProgress("Attempt " + attempt + " — sending to Gemini...");
-      const result = await geminiQualityCall(prompt);
-      if (onProgress) onProgress("Parsing Gemini response...");
-
-      // Parse JSON
-      const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
-      const jsonMatch = clean.match(/\[([\s\S]*)\]/);
-      if (!jsonMatch) throw new Error("No JSON array in response");
-
-      const parsed: Array<{ text: string; category: string }> = JSON.parse("[" + jsonMatch[1] + "]");
-      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty or invalid JSON array");
-
-      // Validate entries
-      const valid = parsed.filter(e =>
-        e.text && typeof e.text === "string" && e.text.trim().length > 15 &&
-        e.category && CATEGORIES.includes(e.category)
-      );
-
-      if (onProgress) onProgress("✓ Got " + valid.length + " entries from Gemini");
-      return valid;
-
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
-                          msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
-                          msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
-                          msg.includes("timeout") || msg.includes("TIMEOUT") || msg.includes("AbortError");
-      if (isRetryable) {
-        const waitSec = Math.min(30 + attempt * 10, 120);
-        if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
-        await new Promise(r => setTimeout(r, waitSec * 1000));
-        continue;
-      }
-      throw new Error(msg);
+  function getSectionCategory(header: string): string {
+    const upper = header.toUpperCase().trim();
+    if (SECTION_CATEGORY_MAP[upper]) return SECTION_CATEGORY_MAP[upper];
+    for (const key of Object.keys(SECTION_CATEGORY_MAP)) {
+      if (upper.includes(key)) return SECTION_CATEGORY_MAP[key];
     }
+    return "world-overview";
   }
+
+  // Split Canon Reference by ## headers
+  const rawSections = canonReference.split("\n## ");
+  const sections = rawSections
+    .slice(1) // skip preamble
+    .map(s => ({ raw: "## " + s, header: s.split("\n")[0].trim() }))
+    .filter(s => s.raw.length > 50);
+
+  if (sections.length === 0) {
+    // No sections found — treat whole thing as one chunk
+    sections.push({ raw: canonReference, header: "CONTENT" });
+  }
+
+  const allEntries: Array<{ text: string; category: string }> = [];
+  if (onProgress) onProgress("Found " + sections.length + " sections to process...");
+
+  for (let i = 0; i < sections.length; i++) {
+    const { raw, header } = sections[i];
+    const category = getSectionCategory(header);
+
+    if (onProgress) onProgress("(" + (i + 1) + "/" + sections.length + ") " + header + " → " + category + "...");
+
+    const prompt = "Convert this section of a Canon Reference Document into individual vault entries.\n\n"
+      + "SECTION: " + header + "\n"
+      + "TARGET CATEGORY: " + category + "\n\n"
+      + raw + "\n\n"
+      + "RULES:\n"
+      + "- Each entry = one clear self-contained factual sentence\n"
+      + "- Every bullet point and sub-bullet becomes at least one entry\n"
+      + "- For characters: separate entries for physical description, personality, abilities, relationships, history\n"
+      + "- Do NOT modify or summarize — only split into individual facts\n"
+      + "- All entries use category: \"" + category + "\"\n\n"
+      + "Return ONLY a JSON array:\n"
+      + '[{"text": "fact here", "category": "' + category + '"}]';
+
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        if (attempt > 1 && onProgress) onProgress("Retry " + attempt + " for section " + (i+1) + "...");
+        const result = await geminiQualityCall(prompt);
+        const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
+        const jsonMatch = clean.match(/\[([\s\S]*)\]/);
+        if (!jsonMatch) { if (attempt < 5) { await new Promise(r => setTimeout(r, 10000)); continue; } break; }
+        const parsed: Array<{ text: string; category: string }> = JSON.parse("[" + jsonMatch[1] + "]");
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter(e => e.text && e.text.trim().length > 15);
+          allEntries.push(...valid);
+          if (onProgress) onProgress("✓ " + header + ": " + valid.length + " entries · " + allEntries.length + " total");
+        }
+        break;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "error";
+        const isRetryable = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
+                            msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                            msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                            msg.includes("timeout") || msg.includes("AbortError");
+        if (isRetryable) {
+          const waitSec = Math.min(20 + attempt * 10, 90);
+          if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s...");
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+          continue;
+        }
+        if (onProgress) onProgress("⚠ Section " + (i+1) + " failed: " + msg + " — skipping");
+        break;
+      }
+    }
+
+    // Small pause between sections
+    if (i < sections.length - 1) await new Promise(r => setTimeout(r, 2000));
+  }
+
+  if (onProgress) onProgress("✓ Complete — " + allEntries.length + " total entries extracted");
+  return allEntries;
 }
 
 // [PENSIEVE PIPELINE] Three-stage: Cerebras pre-filter → DeepSeek Investigation → Gemini answer
@@ -1006,9 +1190,12 @@ export async function geminiPensieveFinalAnswer(
     + "If there are contradictions in the evidence, highlight them.";
 
   try {
+    // Use Owl Alpha for Pensieve answers if available
+    if (hasOpenRouterKey()) {
+      return await owlAlphaCall(prompt);
+    }
     return await geminiQualityCall(prompt);
   } catch {
-    // Fallback: format evidence as list
     return "Based on the archive:\n\n" + evidence.map(e => "• " + e.text).join("\n");
   }
 }
