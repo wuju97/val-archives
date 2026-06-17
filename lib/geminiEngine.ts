@@ -1150,7 +1150,8 @@ async function waitForKeyReset(
 export async function geminiDistillCanon(
   sourceText: string,
   filename: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  shouldAbort?: () => boolean
 ): Promise<string> {
   if (!hasGeminiQualityKey()) {
     throw new Error("NO_GEMINI_KEY");
@@ -1191,6 +1192,14 @@ export async function geminiDistillCanon(
     + "Write each entry as a clear factual statement. "
     + "This document will be used as the sole reference for running this story as an RPG.";
 
+  // NOTE: This is a single non-chunked Gemini call (whole book read at once).
+  // It can only be cancelled BEFORE the call starts or DURING a retry wait —
+  // not mid-request, since there is no internal loop to check between.
+  if (shouldAbort && shouldAbort()) {
+    if (onProgress) onProgress("⏸ Cancelled before starting");
+    return "";
+  }
+
   // Auto-retry indefinitely on high demand / rate limit errors
   let attempt = 0;
   while (true) {
@@ -1204,6 +1213,7 @@ export async function geminiDistillCanon(
       const msg = e instanceof Error ? e.message : "Unknown error";
       if (msg.startsWith("ALL_KEYS_LIMITED")) {
         await waitForKeyReset(msg, onProgress);
+        if (shouldAbort && shouldAbort()) { if (onProgress) onProgress("⏸ Cancelled during wait"); return ""; }
         continue;
       }
       const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
@@ -1214,6 +1224,7 @@ export async function geminiDistillCanon(
         const waitSec = Math.min(30 + attempt * 5, 120);
         if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
         await new Promise(r => setTimeout(r, waitSec * 1000));
+        if (shouldAbort && shouldAbort()) { if (onProgress) onProgress("⏸ Cancelled during wait"); return ""; }
         continue;
       }
       throw new Error(msg);
@@ -1252,7 +1263,8 @@ export async function geminiRefineDistilledCanon(
 export async function geminiImportCanonToVault(
   canonReference: string,
   filename: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  shouldAbort?: () => boolean
 ): Promise<Array<{ text: string; category: string }>> {
   if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
 
@@ -1299,6 +1311,11 @@ export async function geminiImportCanonToVault(
   if (onProgress) onProgress("Found " + sections.length + " sections to process...");
 
   for (let i = 0; i < sections.length; i++) {
+    if (shouldAbort && shouldAbort()) {
+      if (onProgress) onProgress("⏸ Paused — " + allEntries.length + " entries so far");
+      return allEntries;
+    }
+
     const { raw, header } = sections[i];
     const category = getSectionCategory(header);
 
@@ -1369,7 +1386,8 @@ export async function geminiImportCanonToVault(
 export async function geminiDistillStory(
   sourceText: string,
   filename: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  shouldAbort?: () => boolean
 ): Promise<string> {
   if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
 
@@ -1432,6 +1450,11 @@ export async function geminiDistillStory(
   const results: string[] = [];
 
   for (let i = 0; i < CHUNKS.length; i++) {
+    if (shouldAbort && shouldAbort()) {
+      if (onProgress) onProgress("⏸ Paused after " + i + "/" + CHUNKS.length + " sections");
+      return results.join("\n\n");
+    }
+
     const chunk = CHUNKS[i];
     if (onProgress) onProgress("(" + (i+1) + "/" + CHUNKS.length + ") Distilling: " + chunk.label + "...");
 
@@ -1478,7 +1501,8 @@ export async function geminiDistillStory(
 export async function geminiImportStoryToVault(
   storyReference: string,
   filename: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  shouldAbort?: () => boolean
 ): Promise<Array<{ text: string; category: string }>> {
   if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
 
@@ -1537,6 +1561,11 @@ export async function geminiImportStoryToVault(
   if (onProgress) onProgress("Found " + sections.length + " sections to process...");
 
   for (let i = 0; i < sections.length; i++) {
+    if (shouldAbort && shouldAbort()) {
+      if (onProgress) onProgress("⏸ Paused — " + allEntries.length + " entries so far");
+      return allEntries;
+    }
+
     const { raw, header } = sections[i];
     const category = getSectionCategory(header);
 

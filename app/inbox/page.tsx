@@ -7,6 +7,7 @@ import {
   geminiSmartCategoryReview, geminiGenerateSavePrompt,
   geminiClassifyText, geminiDistillStory, geminiImportStoryToVault
 } from "../../lib/geminiEngine";
+import { useDistill } from "../ExtractionContext";
 import {
   addEntry, addPlayerEntry, addPlayerEntriesWithSource, replaceEntry, loadArchive, saveArchive,
   detectContradiction, regenerateMasterPrompt, addCanonEntry, removeCanonEntry, addCanonCategory,
@@ -107,10 +108,13 @@ export default function InboxPage() {
   const [dynamicSavePrompt, setDynamicSavePrompt] = useState("");
   const [generatingSavePrompt, setGeneratingSavePrompt] = useState(false);
 
-  // Distill Story state — local queue like canon tab
-  type InboxDistillItem = { id: string; sourceId: string; filename: string; status: "queued" | "running" | "done" | "error"; progress: string; result: string; importedCount: number; savedRefId: string | null; };
-  const [distillQueue, setDistillQueue] = useState<InboxDistillItem[]>([]);
-  const distillProcessing = useRef(false);
+  // Distill Story — now backed by shared context, survives navigation
+  const {
+    distillQueue, addToDistillQueue: addToSharedDistillQueue, removeFromDistillQueue,
+    pauseDistillItem, resumeDistillItem, cancelDistillItem, restartDistillItem,
+    distillImportQueue, importDistillItem, pauseDistillImportItem, resumeDistillImportItem,
+    cancelDistillImportItem, restartDistillImportItem,
+  } = useDistill();
   const [showDistillPanel, setShowDistillPanel] = useState(false);
   const [distillSourceId, setDistillSourceId] = useState<"paste" | string>("paste");
   const [viewingDistillResult, setViewingDistillResult] = useState("");
@@ -135,89 +139,9 @@ export default function InboxPage() {
     localStorage.setItem("valArchivesInboxFileMeta", JSON.stringify(files));
   }
 
-  // ── Distill Queue Processing ───────────────────────────────────────────────
-  useEffect(() => {
-    async function processNext() {
-      if (distillProcessing.current) return;
-      const next = distillQueue.find(i => i.status === "queued");
-      if (!next) return;
-
-      distillProcessing.current = true;
-      setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "running", progress: "Loading content..." } : i));
-
-      try {
-        let content = "";
-        if (next.sourceId === "paste") {
-          content = input;
-        } else {
-          const loaded = await loadInboxFileFromIDB(next.sourceId);
-          if (!loaded) throw new Error("Could not load file from storage");
-          content = loaded;
-        }
-
-        const result = await geminiDistillStory(content, next.filename, (msg) => {
-          setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, progress: msg } : i));
-        });
-
-        // Save Story Reference to inboxDistillCategories — persists like Canon References
-        let archiveAfterSave = loadArchive();
-        const refId = crypto.randomUUID();
-        const refFilename = next.filename.replace(/\.[^/.]+$/, "") + " — Story Reference";
-        let inboxCats = archiveAfterSave.inboxDistillCategories ?? [];
-        let defaultCat = inboxCats.find(c => c.name === "Story References");
-        if (!defaultCat) {
-          defaultCat = { id: crypto.randomUUID(), name: "Story References", entries: [] };
-          inboxCats = [...inboxCats, defaultCat];
-        }
-        const newRefEntry: CanonEntry = { id: refId, filename: refFilename, content: result, addedAt: new Date().toISOString() };
-        inboxCats = inboxCats.map(c => c.id === defaultCat!.id ? { ...c, entries: [...c.entries, newRefEntry] } : c);
-        archiveAfterSave = { ...archiveAfterSave, inboxDistillCategories: inboxCats };
-        saveArchive(archiveAfterSave);
-
-        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", result, progress: "✓ Distillation complete! Story Reference saved.", savedRefId: refId } : i));
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Failed";
-        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "error", progress: "✗ " + msg } : i));
-      }
-
-      distillProcessing.current = false;
-    }
-    processNext();
-  }, [distillQueue, input]);
-
-  // ── Import distilled result to Player Story ────────────────────────────────
-  async function importToPlayerStory(item: InboxDistillItem) {
-    if (!item.result) return;
-    setImportingId(item.id);
-    setImportDoneId(null);
-
-    try {
-      const entries = await geminiImportStoryToVault(item.result, item.filename, (msg) => {
-        setDistillQueue(prev => prev.map(i => i.id === item.id ? { ...i, progress: msg } : i));
-      });
-
-      let archive = loadArchive();
-      const seen = new Set<string>();
-      const deduped: Array<{ text: string; category: string }> = [];
-      for (const entry of entries) {
-        const key = entry.text.trim().toLowerCase().slice(0, 60);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        deduped.push({ text: entry.text.trim(), category: entry.category });
-      }
-
-      const sourceId = item.savedRefId ?? crypto.randomUUID();
-      const sourceFilename = item.filename.replace(/\.[^/.]+$/, "") + " — Story Reference";
-      archive = addPlayerEntriesWithSource(archive, deduped as Array<{ text: string; category: StoryCategory }>, sourceId, sourceFilename);
-      saveArchive(regenerateMasterPrompt(archive));
-
-      setDistillQueue(prev => prev.map(i => i.id === item.id ? { ...i, importedCount: deduped.length, progress: "✓ " + deduped.length + " entries imported to 🎮 Player Story" } : i));
-      setImportDoneId(item.id);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Import failed";
-      setDistillQueue(prev => prev.map(i => i.id === item.id ? { ...i, progress: "✗ Import error: " + msg } : i));
-    }
-    setImportingId(null);
+  // ── Manual import trigger — calls the shared distillImportQueue ────────────
+  function importToPlayerStory(distillItemId: string) {
+    importDistillItem(distillItemId);
   }
 
   // ── File upload — saves content to IDB, metadata to localStorage ──────────
@@ -256,17 +180,23 @@ export default function InboxPage() {
     }
   }
 
-  // ── Add to distill queue ──────────────────────────────────────────────────
-  function addFileToDistillQueue(sourceId: "paste" | string) {
+  // ── Add to distill queue — resolves content upfront so it survives navigation ──
+  async function addFileToDistillQueue(sourceId: "paste" | string) {
     if (!hasGeminiQualityKey()) { alert("Gemini key required. Add it in Settings → AI."); return; }
     if (sourceId === "paste" && !input.trim()) { alert("Nothing to distill. Paste some content first."); return; }
     const meta = sourceId !== "paste" ? uploadedFiles.find(f => f.id === sourceId) : null;
     const filename = meta ? meta.name : "Session Notes";
-    if (distillQueue.find(i => i.sourceId === sourceId && (i.status === "queued" || i.status === "running"))) return;
-    setDistillQueue(prev => [...prev, {
-      id: crypto.randomUUID(), sourceId, filename,
-      status: "queued", progress: "Queued", result: "", importedCount: 0, savedRefId: null
-    }]);
+
+    let content = "";
+    if (sourceId === "paste") {
+      content = input;
+    } else {
+      const loaded = await loadInboxFileFromIDB(sourceId);
+      if (!loaded) { alert("✗ Could not load file from storage"); return; }
+      content = loaded;
+    }
+
+    addToSharedDistillQueue(crypto.randomUUID(), content, filename);
   }
 
   // ── Existing inbox functions ───────────────────────────────────────────────
@@ -467,19 +397,17 @@ export default function InboxPage() {
                 Gemini reads your <strong style={{ color: "var(--va-text)" }}>entire content at once</strong> → structured Story Reference → imports to <strong style={{ color: "#c4b5fd" }}>🎮 Player Story subtab only</strong>. You can close this panel while it runs.
               </div>
 
-              {/* Queue list */}
+              {/* Queue list — now backed by shared context, survives navigation */}
               {distillQueue.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
                   <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>
-                    Distill Queue ({distillQueue.length})
+                    Distill Queue ({distillQueue.length}) · also tracked in floating panel
                   </p>
                   {distillQueue.map(item => {
-                    // Parse chunk progress for progress bar: "(2/4) Distilling..."
                     const chunkMatch = item.progress?.match(/\((\d+)\/(\d+)\)/);
                     const currentChunk = chunkMatch ? parseInt(chunkMatch[1]) : 0;
                     const totalChunks = chunkMatch ? parseInt(chunkMatch[2]) : 4;
                     const pct = item.status === "done" ? 100 : item.status === "running" ? Math.round((currentChunk / totalChunks) * 100) : 0;
-                    // Time estimate: ~4 min per chunk
                     const chunksLeft = totalChunks - currentChunk;
                     const minsLeft = chunksLeft * 4;
                     const timeEstimate = item.status === "running" && currentChunk > 0
@@ -488,37 +416,56 @@ export default function InboxPage() {
                       ? "~16 min total"
                       : "";
 
+                    const importItem = distillImportQueue.find(d => d.id === item.id);
+                    const importDone = importItem?.status === "done";
+                    const importActive = importItem && (importItem.status === "running" || importItem.status === "queued" || importItem.status === "paused");
+
                     return (
-                    <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
+                    <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "paused" ? "#fbbf24" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : item.status === "cancelled" ? "var(--va-text-muted)" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.375rem" }}>
                         <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--va-text)" }}>
-                          {item.status === "running" ? "⏳" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "").slice(0, 30)}
+                          {item.status === "running" ? "⏳" : item.status === "paused" ? "⏸" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : item.status === "cancelled" ? "⊘" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "").slice(0, 30)}
                         </span>
                         <div style={{ display: "flex", gap: "0.375rem", alignItems: "center" }}>
                           {timeEstimate && <span style={{ fontSize: "0.65rem", color: "var(--va-text-muted)" }}>{timeEstimate}</span>}
-                          {item.status === "done" && item.importedCount === 0 && (
-                            <button onClick={() => importToPlayerStory(item)} disabled={importingId === item.id}
-                              style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600", opacity: importingId === item.id ? 0.6 : 1 }}>
-                              {importingId === item.id ? "Importing..." : "⚡ Import to 🎮 Player Story"}
+                          {item.status === "running" && (
+                            <button onClick={() => pauseDistillItem(item.id)}
+                              style={{ background: "none", border: "1px solid #fbbf24", borderRadius: "0.25rem", color: "#fbbf24", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Pause</button>
+                          )}
+                          {item.status === "paused" && (
+                            <button onClick={() => resumeDistillItem(item.id)}
+                              style={{ background: "none", border: "1px solid #22c55e", borderRadius: "0.25rem", color: "#22c55e", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Resume</button>
+                          )}
+                          {(item.status === "running" || item.status === "queued" || item.status === "paused") && (
+                            <button onClick={() => cancelDistillItem(item.id)}
+                              style={{ background: "none", border: "1px solid #ef4444", borderRadius: "0.25rem", color: "#ef4444", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Cancel</button>
+                          )}
+                          {(item.status === "error" || item.status === "cancelled") && (
+                            <button onClick={() => restartDistillItem(item.id)}
+                              style={{ background: "none", border: "1px solid #3b82f6", borderRadius: "0.25rem", color: "#93c5fd", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Restart</button>
+                          )}
+                          {item.status === "done" && !importDone && (
+                            <button onClick={() => importToPlayerStory(item.id)} disabled={!!importActive}
+                              style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600", opacity: importActive ? 0.6 : 1 }}>
+                              {importActive ? "Importing..." : "⚡ Import to 🎮 Player Story"}
                             </button>
                           )}
-                          {item.importedCount > 0 && (
-                            <span style={{ fontSize: "0.7rem", color: "#4ade80", fontWeight: "600" }}>✓ {item.importedCount} imported</span>
+                          {importDone && (
+                            <span style={{ fontSize: "0.7rem", color: "#4ade80", fontWeight: "600" }}>✓ {importItem!.importedCount} imported</span>
                           )}
-                          {(item.status === "queued" || item.status === "done" || item.status === "error") && (
-                            <button onClick={() => setDistillQueue(prev => prev.filter(i => i.id !== item.id))}
+                          {(item.status === "queued" || item.status === "done" || item.status === "error" || item.status === "cancelled") && (
+                            <button onClick={() => removeFromDistillQueue(item.id)}
                               style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem" }}>×</button>
                           )}
                         </div>
                       </div>
-                      {/* Progress bar */}
                       {(item.status === "running" || item.status === "done") && (
                         <div style={{ height: "4px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.3rem" }}>
                           <div style={{ height: "100%", background: item.status === "done" ? "#22c55e" : "#7c3aed", borderRadius: "9999px", transition: "width 0.5s", width: pct + "%" }} />
                         </div>
                       )}
-                      <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : "#c4b5fd", margin: 0 }}>
-                        {item.progress}
+                      <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : item.status === "paused" ? "#fbbf24" : "#c4b5fd", margin: 0 }}>
+                        {importActive ? importItem!.progress : item.progress}
                       </p>
                     </div>
                     );

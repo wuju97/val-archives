@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { hasGeminiKey, hasGeminiQualityKey, geminiCanonPlacement, geminiDistillCanon, geminiRefineDistilledCanon, geminiImportCanonToVault, ExtractedVaultEntry } from "../../lib/geminiEngine";
-import { useExtraction, ExtractionQueueItem } from "../ExtractionContext";
+import { useExtraction, ExtractionQueueItem, useCanonDistill, useCanonImport } from "../ExtractionContext";
 import {
   loadArchive, saveArchive, regenerateMasterPrompt, ArchiveData,
   addCanonCategory, removeCanonCategory,
   addCanonEntry, removeCanonEntry,
   getPriorityLevel, setPriority,
-  addEntry, CATEGORY_LABELS,
+  addEntry, addEntriesWithSource, CATEGORY_LABELS,
 } from "@/lib/archiveEngine";
 
 // ─── IDB helpers for large canon content ──────────────────────────────────────
@@ -68,6 +68,8 @@ const BUILTIN_CATEGORIES = [
 
 export default function CanonPage() {
   const { queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, stopExtraction } = useExtraction();
+  const { canonDistillQueue, addToCanonDistillQueue, removeFromCanonDistillQueue, pauseCanonDistillItem, resumeCanonDistillItem, cancelCanonDistillItem, restartCanonDistillItem, isCanonDistillRunning } = useCanonDistill();
+  const { canonImportQueue, addToCanonImportQueue, removeFromCanonImportQueue, pauseCanonImportItem, resumeCanonImportItem, cancelCanonImportItem, restartCanonImportItem, isCanonImportRunning } = useCanonImport();
   const [archive, setArchive] = useState(loadArchive());
   const [activeCatId, setActiveCatId] = useState<string>("pdf-files");
   const [customCatName, setCustomCatName] = useState("");
@@ -100,10 +102,6 @@ export default function CanonPage() {
   const [distilledResult, setDistilledResult] = useState("");
   const [distillTitle, setDistillTitle] = useState("");
   const [refiningDistill, setRefiningDistill] = useState(false);
-  // Distill queue
-  type DistillQueueItem = { id: string; entryId: string; filename: string; status: "queued" | "running" | "done" | "error"; progress: string; result: string; };
-  const [distillQueue, setDistillQueue] = useState<DistillQueueItem[]>([]);
-  const distillProcessing = useRef(false);
   const [viewingDistillId, setViewingDistillId] = useState<string | null>(null);
   const [extractTotalParts, setExtractTotalParts] = useState(0);
   const [extractCurrentPart, setExtractCurrentPart] = useState(0);
@@ -218,54 +216,20 @@ export default function CanonPage() {
     setDistilling(false);
   }
 
-  // ── Distill Queue Processing ──────────────────────────────────────────────
-  useEffect(() => {
-    async function processNextDistill() {
-      if (distillProcessing.current) return;
-      const next = distillQueue.find(i => i.status === "queued");
-      if (!next) return;
+  // ── Add to Distill Queue (now backed by shared context — survives navigation) ──
+  async function addToDistillQueue(entryId: string, filename: string) {
+    const allEntries = getAllCanonEntries();
+    const entry = allEntries.find(e => e.id === entryId);
+    if (!entry) { flash("✗ File not found"); return; }
 
-      distillProcessing.current = true;
-      setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "running", progress: "Loading file..." } : i));
-
-      try {
-        const allEntries = getAllCanonEntries();
-        const entry = allEntries.find(e => e.id === next.entryId);
-        if (!entry) throw new Error("File not found");
-
-        let fullContent = entry.content;
-        if (entry.content === IDB_PLACEHOLDER) {
-          const idbContent = await loadCanonContentFromIDB(entry.id);
-          if (!idbContent) throw new Error("Could not load file");
-          fullContent = idbContent;
-        }
-
-        const result = await geminiDistillCanon(fullContent, entry.filename, (msg) => {
-          setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, progress: msg } : i));
-        });
-
-        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", result, progress: "Complete!" } : i));
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Failed";
-        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "error", progress: "✗ " + msg } : i));
-      }
-
-      distillProcessing.current = false;
+    let fullContent = entry.content;
+    if (entry.content === IDB_PLACEHOLDER) {
+      const idbContent = await loadCanonContentFromIDB(entry.id);
+      if (!idbContent) { flash("✗ Could not load file from storage"); return; }
+      fullContent = idbContent;
     }
 
-    processNextDistill();
-  }, [distillQueue]);
-
-  function addToDistillQueue(entryId: string, filename: string) {
-    if (distillQueue.find(i => i.entryId === entryId && (i.status === "queued" || i.status === "running"))) return;
-    setDistillQueue(prev => [...prev, {
-      id: crypto.randomUUID(), entryId, filename,
-      status: "queued", progress: "Queued", result: ""
-    }]);
-  }
-
-  function removeFromDistillQueue(id: string) {
-    setDistillQueue(prev => prev.filter(i => i.id !== id));
+    addToCanonDistillQueue(entryId, fullContent, filename);
   }
 
   async function refineDistilledResult() {
@@ -386,13 +350,16 @@ export default function CanonPage() {
 
       let currentArchive = loadArchive();
       const seen = new Set<string>();
+      const deduped: Array<{ text: string; category: string }> = [];
 
       for (const entry of entries) {
         const key = entry.text.trim().toLowerCase().slice(0, 60);
         if (seen.has(key)) continue;
         seen.add(key);
-        currentArchive = addEntry(currentArchive, entry.text.trim(), entry.category as any);
+        deduped.push({ text: entry.text.trim(), category: entry.category });
       }
+
+      currentArchive = addEntriesWithSource(currentArchive, deduped as any, entryId, entryFilename);
 
       const refreshed = regenerateMasterPrompt(currentArchive);
       saveArchive(refreshed);
@@ -400,7 +367,7 @@ export default function CanonPage() {
 
       setImportingEntryId(null);
       setImportDone(true);
-      setImportProgress("✓ Done! " + entries.length + " entries saved to 📖 Canon Story subtab from " + entryFilename);
+      setImportProgress("✓ Done! " + deduped.length + " entries saved to 📖 Canon Story subtab from " + entryFilename);
       flash("✓ " + entries.length + " entries imported to vault!");
 
     } catch (e) {
@@ -638,17 +605,17 @@ export default function CanonPage() {
                 Auto-retries indefinitely if Gemini is busy. You can close this panel and use the site while it runs.
               </div>
 
-              {/* Queue list */}
-              {distillQueue.length > 0 && (
+              {/* Queue list — now backed by shared context, survives navigation */}
+              {canonDistillQueue.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
                   <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>
-                    Distill Queue ({distillQueue.length})
+                    Distill Queue ({canonDistillQueue.length}) · also tracked in floating panel
                   </p>
-                  {distillQueue.map(item => (
-                    <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
+                  {canonDistillQueue.map(item => (
+                    <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "paused" ? "#fbbf24" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : item.status === "cancelled" ? "var(--va-text-muted)" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
                         <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--va-text)" }}>
-                          {item.status === "running" ? "⏳" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "")}
+                          {item.status === "running" ? "⏳" : item.status === "paused" ? "⏸" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : item.status === "cancelled" ? "⊘" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "")}
                         </span>
                         <div style={{ display: "flex", gap: "0.375rem" }}>
                           {item.status === "done" && (
@@ -657,13 +624,29 @@ export default function CanonPage() {
                               View & Save
                             </button>
                           )}
-                          {(item.status === "queued" || item.status === "done" || item.status === "error") && (
-                            <button onClick={() => removeFromDistillQueue(item.id)}
+                          {item.status === "running" && (
+                            <button onClick={() => pauseCanonDistillItem(item.id)} title="May finish current request first"
+                              style={{ background: "none", border: "1px solid #fbbf24", borderRadius: "0.25rem", color: "#fbbf24", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Pause</button>
+                          )}
+                          {item.status === "paused" && (
+                            <button onClick={() => resumeCanonDistillItem(item.id)}
+                              style={{ background: "none", border: "1px solid #22c55e", borderRadius: "0.25rem", color: "#22c55e", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Resume</button>
+                          )}
+                          {(item.status === "running" || item.status === "queued" || item.status === "paused") && (
+                            <button onClick={() => cancelCanonDistillItem(item.id)}
+                              style={{ background: "none", border: "1px solid #ef4444", borderRadius: "0.25rem", color: "#ef4444", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Cancel</button>
+                          )}
+                          {(item.status === "error" || item.status === "cancelled") && (
+                            <button onClick={() => restartCanonDistillItem(item.id)}
+                              style={{ background: "none", border: "1px solid #3b82f6", borderRadius: "0.25rem", color: "#93c5fd", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Restart</button>
+                          )}
+                          {(item.status === "done" || item.status === "error" || item.status === "cancelled") && (
+                            <button onClick={() => removeFromCanonDistillQueue(item.id)}
                               style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem" }}>×</button>
                           )}
                         </div>
                       </div>
-                      <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : "#c4b5fd", margin: 0 }}>
+                      <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : item.status === "paused" ? "#fbbf24" : "#c4b5fd", margin: 0 }}>
                         {item.progress}
                       </p>
                     </div>
@@ -1139,22 +1122,28 @@ export default function CanonPage() {
                         {isTimeline && <span style={{ background: "rgba(59,130,246,0.2)", color: "#93c5fd", fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "9999px", flexShrink: 0 }}>VERBATIM</span>}
                       </div>
                       <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0, alignItems: "center" }}>
-                        {/* Import to Vault button — shown on all text entries */}
-                        {!isTimeline && hasGeminiKey() && (
-                          <button onClick={async () => {
-                            let fullContent = entry.content;
-                            if (entry.content === IDB_PLACEHOLDER) {
-                              const idbContent = await loadCanonContentFromIDB(entry.id);
-                              if (idbContent) fullContent = idbContent;
-                              else { flash("✗ Could not load file content"); return; }
-                            }
-                            importDistilledToVault(entry.id, fullContent, entry.filename);
-                          }}
-                            disabled={!!importingEntryId}
-                            style={{ background: importingEntryId === entry.id ? "#4ade80" : importingEntryId ? "var(--va-border)" : "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.625rem", cursor: importingEntryId ? "default" : "pointer", fontSize: "0.72rem", fontWeight: "600", whiteSpace: "nowrap", opacity: importingEntryId && importingEntryId !== entry.id ? 0.3 : 1 }}>
-                            {importingEntryId === entry.id ? "⏳ Importing..." : "⚡ Import to Vault"}
-                          </button>
-                        )}
+                        {/* Import to Vault button — now queue-based, survives navigation */}
+                        {!isTimeline && hasGeminiKey() && (() => {
+                          const queueItem = canonImportQueue.find(q => q.id === entry.id);
+                          const isActive = queueItem && (queueItem.status === "running" || queueItem.status === "queued" || queueItem.status === "paused");
+                          return (
+                            <button onClick={async () => {
+                              if (isActive) return;
+                              let fullContent = entry.content;
+                              if (entry.content === IDB_PLACEHOLDER) {
+                                const idbContent = await loadCanonContentFromIDB(entry.id);
+                                if (idbContent) fullContent = idbContent;
+                                else { flash("✗ Could not load file content"); return; }
+                              }
+                              addToCanonImportQueue(entry.id, fullContent, entry.filename);
+                              flash("✨ Added to import queue — tracked in floating panel");
+                            }}
+                              disabled={isActive}
+                              style={{ background: queueItem?.status === "done" ? "#4ade80" : isActive ? "var(--va-border)" : "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.625rem", cursor: isActive ? "default" : "pointer", fontSize: "0.72rem", fontWeight: "600", whiteSpace: "nowrap", opacity: isActive ? 0.6 : 1 }}>
+                              {queueItem?.status === "running" ? "⏳ Importing..." : queueItem?.status === "paused" ? "⏸ Paused" : queueItem?.status === "done" ? "✓ Imported" : "⚡ Import to Vault"}
+                            </button>
+                          );
+                        })()}
                         <button onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
                           style={{ background: "var(--va-border)", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.5rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
                           {expandedEntry === entry.id ? "▲ Hide" : "▼ View"}
