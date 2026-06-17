@@ -8,9 +8,9 @@ import {
   geminiClassifyText, geminiDistillStory, geminiImportStoryToVault
 } from "../../lib/geminiEngine";
 import {
-  addEntry, addPlayerEntry, replaceEntry, loadArchive, saveArchive,
-  detectContradiction, regenerateMasterPrompt,
-  CATEGORY_LABELS, CATEGORY_ICONS, StoryCategory, VaultEntry, ArchiveData,
+  addEntry, addPlayerEntry, addPlayerEntriesWithSource, replaceEntry, loadArchive, saveArchive,
+  detectContradiction, regenerateMasterPrompt, addCanonEntry, removeCanonEntry, addCanonCategory,
+  CATEGORY_LABELS, CATEGORY_ICONS, StoryCategory, VaultEntry, ArchiveData, CanonEntry,
   saveInboxFileToIDB, loadInboxFileFromIDB, deleteInboxFileFromIDB, listInboxFilesFromIDB,
 } from "@/lib/archiveEngine";
 
@@ -108,7 +108,7 @@ export default function InboxPage() {
   const [generatingSavePrompt, setGeneratingSavePrompt] = useState(false);
 
   // Distill Story state — local queue like canon tab
-  type InboxDistillItem = { id: string; sourceId: string; filename: string; status: "queued" | "running" | "done" | "error"; progress: string; result: string; importedCount: number; };
+  type InboxDistillItem = { id: string; sourceId: string; filename: string; status: "queued" | "running" | "done" | "error"; progress: string; result: string; importedCount: number; savedRefId: string | null; };
   const [distillQueue, setDistillQueue] = useState<InboxDistillItem[]>([]);
   const distillProcessing = useRef(false);
   const [showDistillPanel, setShowDistillPanel] = useState(false);
@@ -159,7 +159,22 @@ export default function InboxPage() {
           setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, progress: msg } : i));
         });
 
-        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", result, progress: "✓ Distillation complete!" } : i));
+        // Save Story Reference to inboxDistillCategories — persists like Canon References
+        let archiveAfterSave = loadArchive();
+        const refId = crypto.randomUUID();
+        const refFilename = next.filename.replace(/\.[^/.]+$/, "") + " — Story Reference";
+        let inboxCats = archiveAfterSave.inboxDistillCategories ?? [];
+        let defaultCat = inboxCats.find(c => c.name === "Story References");
+        if (!defaultCat) {
+          defaultCat = { id: crypto.randomUUID(), name: "Story References", entries: [] };
+          inboxCats = [...inboxCats, defaultCat];
+        }
+        const newRefEntry: CanonEntry = { id: refId, filename: refFilename, content: result, addedAt: new Date().toISOString() };
+        inboxCats = inboxCats.map(c => c.id === defaultCat!.id ? { ...c, entries: [...c.entries, newRefEntry] } : c);
+        archiveAfterSave = { ...archiveAfterSave, inboxDistillCategories: inboxCats };
+        saveArchive(archiveAfterSave);
+
+        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", result, progress: "✓ Distillation complete! Story Reference saved.", savedRefId: refId } : i));
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Failed";
         setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "error", progress: "✗ " + msg } : i));
@@ -183,15 +198,20 @@ export default function InboxPage() {
 
       let archive = loadArchive();
       const seen = new Set<string>();
+      const deduped: Array<{ text: string; category: string }> = [];
       for (const entry of entries) {
         const key = entry.text.trim().toLowerCase().slice(0, 60);
         if (seen.has(key)) continue;
         seen.add(key);
-        archive = addPlayerEntry(archive, entry.text.trim(), entry.category as StoryCategory);
+        deduped.push({ text: entry.text.trim(), category: entry.category });
       }
+
+      const sourceId = item.savedRefId ?? crypto.randomUUID();
+      const sourceFilename = item.filename.replace(/\.[^/.]+$/, "") + " — Story Reference";
+      archive = addPlayerEntriesWithSource(archive, deduped as Array<{ text: string; category: StoryCategory }>, sourceId, sourceFilename);
       saveArchive(regenerateMasterPrompt(archive));
 
-      setDistillQueue(prev => prev.map(i => i.id === item.id ? { ...i, importedCount: entries.length, progress: "✓ " + entries.length + " entries imported to 🎮 Player Story" } : i));
+      setDistillQueue(prev => prev.map(i => i.id === item.id ? { ...i, importedCount: deduped.length, progress: "✓ " + deduped.length + " entries imported to 🎮 Player Story" } : i));
       setImportDoneId(item.id);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Import failed";
@@ -245,7 +265,7 @@ export default function InboxPage() {
     if (distillQueue.find(i => i.sourceId === sourceId && (i.status === "queued" || i.status === "running"))) return;
     setDistillQueue(prev => [...prev, {
       id: crypto.randomUUID(), sourceId, filename,
-      status: "queued", progress: "Queued", result: "", importedCount: 0
+      status: "queued", progress: "Queued", result: "", importedCount: 0, savedRefId: null
     }]);
   }
 
@@ -506,6 +526,76 @@ export default function InboxPage() {
                 </div>
               )}
             </div>
+
+            {/* Saved Story References */}
+            {(() => {
+              const archive = loadArchive();
+              const storyRefCat = (archive.inboxDistillCategories ?? []).find(c => c.name === "Story References");
+              const refs = storyRefCat?.entries ?? [];
+              if (refs.length === 0) return null;
+              return (
+                <div style={{ marginTop: "1.5rem", paddingTop: "1.25rem", borderTop: "1px solid var(--va-border)" }}>
+                  <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.625rem" }}>📄 Saved Story References ({refs.length})</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    {refs.slice().reverse().map(ref => (
+                      <div key={ref.id} style={{ background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.75rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.375rem" }}>
+                          <span style={{ fontSize: "0.8rem", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ref.filename}</span>
+                          <span style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", flexShrink: 0 }}>{ref.content.length.toLocaleString()} chars</span>
+                        </div>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                          <button onClick={() => { setViewingDistillResult(ref.content); setViewingDistillTitle(ref.filename); }}
+                            style={{ background: "var(--va-border)", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.7rem" }}>▼ View</button>
+                          <button onClick={() => {
+                            const blob = new Blob([ref.content], { type: "text/markdown" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url; a.download = ref.filename.replace(/[^a-z0-9]/gi, "_") + ".md"; a.click();
+                            URL.revokeObjectURL(url);
+                          }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem" }} title="Download">⬇️</button>
+                          <button onClick={async () => {
+                            setImportingId(ref.id);
+                            try {
+                              const entries = await geminiImportStoryToVault(ref.content, ref.filename, () => {});
+                              let arc = loadArchive();
+                              const seen = new Set<string>();
+                              const deduped: Array<{ text: string; category: string }> = [];
+                              for (const e of entries) {
+                                const k = e.text.trim().toLowerCase().slice(0, 60);
+                                if (seen.has(k)) continue;
+                                seen.add(k); deduped.push({ text: e.text.trim(), category: e.category });
+                              }
+                              arc = addPlayerEntriesWithSource(arc, deduped as Array<{ text: string; category: StoryCategory }>, ref.id, ref.filename);
+                              saveArchive(regenerateMasterPrompt(arc));
+                              alert("✓ " + deduped.length + " entries imported to 🎮 Player Story");
+                            } catch (e) {
+                              alert("✗ Import failed: " + (e instanceof Error ? e.message : "error"));
+                            }
+                            setImportingId(null);
+                          }} disabled={importingId === ref.id}
+                            style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600", opacity: importingId === ref.id ? 0.6 : 1 }}>
+                            {importingId === ref.id ? "Importing..." : "⚡ Re-import"}
+                          </button>
+                          <button onClick={() => {
+                            if (!confirm("Delete this Story Reference file? (Vault entries already imported are not affected)")) return;
+                            let arc = loadArchive();
+                            const cats = (arc.inboxDistillCategories ?? []).map(c =>
+                              c.id !== storyRefCat!.id ? c : { ...c, entries: c.entries.filter(e => e.id !== ref.id) }
+                            );
+                            saveArchive({ ...arc, inboxDistillCategories: cats });
+                          }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem" }}>🗑️</button>
+                        </div>
+                        {viewingDistillResult === ref.content && (
+                          <div style={{ marginTop: "0.625rem", borderTop: "1px solid var(--va-border)", paddingTop: "0.625rem", maxHeight: "240px", overflowY: "auto" }}>
+                            <pre style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", whiteSpace: "pre-wrap", fontFamily: "monospace", margin: 0 }}>{ref.content}</pre>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>

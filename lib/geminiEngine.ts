@@ -1047,28 +1047,44 @@ export async function geminiTargetedDelete(
   query: string,
   entries: Array<{ id: string; text: string; category: string }>
 ): Promise<Array<{ id: string; text: string; category: string; reason: string }>> {
-  if (!hasGeminiKey() || entries.length === 0) return [];
+  if (entries.length === 0) return [];
+  const hasAnyKey = hasGeminiKey() || hasGeminiQualityKey() || hasGeminiQualityKey2() || hasGeminiQualityKey3();
+  if (!hasAnyKey) return [];
 
-  const entriesList = entries.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 120)).join("\n");
-  const prompt = "A user wants to delete vault entries related to: \"" + query + "\"\n\n"
-    + "Entries:\n" + entriesList + "\n\n"
-    + "Return ONLY a JSON array of matching entry indices:\n"
-    + '[{"index": 0, "reason": "brief reason"}]\n'
-    + "If nothing matches, return: []";
+  // Batch entries to avoid overly long prompts — process in chunks of 200
+  const BATCH_SIZE = 200;
+  const allMatches: Array<{ id: string; text: string; category: string; reason: string }> = [];
 
-  try {
-    const result = await geminiCall(prompt);
-    const clean = result.replace(/```json|```/g, "").trim();
-    const jsonMatch = clean.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return [];
-    const parsed: Array<{ index: number; reason: string }> = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(p => p.index >= 0 && p.index < entries.length)
-      .map(p => ({ ...entries[p.index], reason: p.reason }));
-  } catch {
-    return [];
+  for (let batchStart = 0; batchStart < entries.length; batchStart += BATCH_SIZE) {
+    const batch = entries.slice(batchStart, batchStart + BATCH_SIZE);
+    const entriesList = batch.map((e, i) => i + ". [" + e.category + "] " + e.text.slice(0, 150)).join("\n");
+    const prompt = "A user wants to delete vault entries related to this request: \"" + query + "\"\n\n"
+      + "Here are the entries (numbered):\n" + entriesList + "\n\n"
+      + "Return ONLY a JSON array of indices that match the request, with a brief reason for each. "
+      + "Be reasonably inclusive — if an entry is plausibly related to the request, include it.\n"
+      + 'Format: [{"index": 0, "reason": "brief reason"}]\n'
+      + "If nothing matches in this batch, return exactly: []\n"
+      + "Return ONLY the JSON array, no other text.";
+
+    try {
+      const result = await geminiQualityCallFor("general", prompt);
+      const clean = result.replace(/```json|```/g, "").trim();
+      const jsonMatch = clean.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) continue;
+      const parsed: Array<{ index: number; reason: string }> = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsed)) continue;
+      const matches = parsed
+        .filter(p => typeof p.index === "number" && p.index >= 0 && p.index < batch.length)
+        .map(p => ({ ...batch[p.index], reason: p.reason || "Matches search query" }));
+      allMatches.push(...matches);
+    } catch (e) {
+      // If this batch fails (rate limit etc), skip it and continue with other batches
+      console.error("[TargetedDelete] Batch failed:", e);
+      continue;
+    }
   }
+
+  return allMatches;
 }
 
 // ─── FEATURE: Semantic Search ─────────────────────────────────────────────────

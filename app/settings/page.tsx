@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMusic } from "../MusicPlayer";
 import { useEffect, useState } from "react";
 import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt, saveArchive, pushHistory, undoArchive, redoArchive,
+  clearCanonStory, clearPlayerStory,
   getGistToken, setGistToken, clearGistToken, hasGistToken, testGistConnection,
   saveToGist, loadFromGist, getGistAutoSave, setGistAutoSave } from "@/lib/archiveEngine";
 import {
@@ -108,6 +109,8 @@ export default function SettingsPage() {
   const { songs, currentIndex, isPlaying, volume, loopMode, addSongs, removeSong, playSong, togglePlay, setVolume, setLoopMode, clearAll } = useMusic();
   const [saved, setSaved] = useState(false);
   const [vaultCleared, setVaultCleared] = useState(false);
+  const [canonStoryCleared, setCanonStoryCleared] = useState(false);
+  const [playerStoryCleared, setPlayerStoryCleared] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [testingApi, setTestingApi] = useState(false);
@@ -174,6 +177,20 @@ export default function SettingsPage() {
     localStorage.removeItem("valArchivesDashboardCards");
     setVaultCleared(true);
     // Reload after short delay so IDB clear completes
+    setTimeout(() => window.location.reload(), 500);
+  }
+  function handleClearCanonStory() {
+    if (!confirm("⚠️ Delete all entries in 📖 Canon Story subtab only? Player Story stays untouched. Canon Reference files in Canon Archives stay untouched.")) return;
+    const archive = loadArchive();
+    saveArchive(regenerateMasterPrompt(clearCanonStory(archive)));
+    setCanonStoryCleared(true);
+    setTimeout(() => window.location.reload(), 500);
+  }
+  function handleClearPlayerStory() {
+    if (!confirm("⚠️ Delete all entries in 🎮 Player Story subtab only? Canon Story stays untouched. Story Reference files in Inbox stay untouched.")) return;
+    const archive = loadArchive();
+    saveArchive(regenerateMasterPrompt(clearPlayerStory(archive)));
+    setPlayerStoryCleared(true);
     setTimeout(() => window.location.reload(), 500);
   }
 
@@ -749,6 +766,19 @@ export default function SettingsPage() {
                 <p style={{ fontSize: "0.875rem", color: "var(--va-text-muted)", marginBottom: "1rem" }}>Downloads your entire vault as a .json file.</p>
                 <button onClick={() => { const id = getActiveVaultId(); if (id) exportVault(id); else alert("No active vault found."); }} style={S.btn("var(--va-accent)")}>📤 Export Vault</button>
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div style={{ background: "rgba(59,130,246,0.08)", border: "1px solid #1e3a5f", borderRadius: "0.75rem", padding: "1.25rem" }}>
+                  <h3 style={{ fontWeight: "bold", color: "#93c5fd", marginBottom: "0.5rem" }}>📖 Clear Canon Story</h3>
+                  <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", marginBottom: "1rem" }}>Deletes only Canon Story subtab entries. Player Story and Canon files stay safe.</p>
+                  {canonStoryCleared ? <p style={{ color: "#4ade80", fontSize: "0.875rem" }}>✓ Cleared</p> : <button onClick={handleClearCanonStory} style={S.btn("#1d4ed8")}>Clear Canon Story</button>}
+                </div>
+                <div style={{ background: "rgba(124,58,237,0.08)", border: "1px solid #4c1d95", borderRadius: "0.75rem", padding: "1.25rem" }}>
+                  <h3 style={{ fontWeight: "bold", color: "#c4b5fd", marginBottom: "0.5rem" }}>🎮 Clear Player Story</h3>
+                  <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", marginBottom: "1rem" }}>Deletes only Player Story subtab entries. Canon Story and Inbox files stay safe.</p>
+                  {playerStoryCleared ? <p style={{ color: "#4ade80", fontSize: "0.875rem" }}>✓ Cleared</p> : <button onClick={handleClearPlayerStory} style={S.btn("#7c3aed")}>Clear Player Story</button>}
+                </div>
+              </div>
+
               {vaultCleared ? (
                 <div style={{ background: "rgba(20,83,45,0.3)", border: "1px solid #15803d", borderRadius: "0.75rem", padding: "1.5rem" }}>
                   <p style={{ color: "#4ade80", fontWeight: "600" }}>✓ Vault cleared.</p>
@@ -757,7 +787,7 @@ export default function SettingsPage() {
               ) : (
                 <div style={{ background: "rgba(127,29,29,0.2)", border: "1px solid #7f1d1d", borderRadius: "0.75rem", padding: "1.5rem" }}>
                   <h3 style={{ fontWeight: "bold", color: "#fca5a5", marginBottom: "0.5rem" }}>🗑 Clear Entire Vault</h3>
-                  <p style={{ fontSize: "0.875rem", color: "var(--va-text-muted)", marginBottom: "1rem" }}>Permanently deletes all vault entries. Cannot be undone.</p>
+                  <p style={{ fontSize: "0.875rem", color: "var(--va-text-muted)", marginBottom: "1rem" }}>Permanently deletes BOTH Canon Story and Player Story. Cannot be undone.</p>
                   <button onClick={handleClearVault} style={S.btn("#b91c1c")}>Clear Vault</button>
                 </div>
               )}
@@ -773,4 +803,4 @@ export default function SettingsPage() {
       </div>
     </div>
   );
-}
+} 
