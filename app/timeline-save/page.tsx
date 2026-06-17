@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { hasGeminiKey, geminiCheckTimelineSeparation } from "../../lib/geminiEngine";
+import { hasGeminiKey, hasGeminiQualityKey, hasGeminiQualityKey3, geminiCheckTimelineSeparation, geminiRefineTimelineSave } from "../../lib/geminiEngine";
 import {
   loadArchive, saveArchive,
   addTimelineSave, deleteTimelineSave, renameTimelineSave,
@@ -102,6 +102,31 @@ export default function TimelineSavePage() {
 
   function handleSetActive(id: string) {
     update(setActiveTimeline(archive, activeId === id ? null : id));
+  }
+
+  const [refiningId, setRefiningId] = useState<string | null>(null);
+  const [refineWarnings, setRefineWarnings] = useState<Record<string, string[]>>({});
+
+  async function handleRefineSave(save: { id: string; name: string; content: string }) {
+    setRefiningId(save.id);
+    try {
+      const otherSummaries = saves
+        .filter(s => s.id !== save.id)
+        .map(s => ({ name: s.name, snippet: s.content.slice(0, 300) }));
+      const result = await geminiRefineTimelineSave(save.content, save.name, otherSummaries);
+      const updatedSaves = archive.timelineSaves.map(s =>
+        s.id === save.id ? { ...s, content: result.refined } : s
+      );
+      update({ ...archive, timelineSaves: updatedSaves });
+      if (result.warnings.length > 0) {
+        setRefineWarnings(prev => ({ ...prev, [save.id]: result.warnings }));
+      } else {
+        setRefineWarnings(prev => { const next = { ...prev }; delete next[save.id]; return next; });
+      }
+    } catch (e) {
+      alert("✗ Refine failed: " + (e instanceof Error ? e.message : "error"));
+    }
+    setRefiningId(null);
   }
 
   function handleRename(type: "save" | "branch", saveId: string, branchId?: string) {
@@ -223,6 +248,12 @@ export default function TimelineSavePage() {
                     <span style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", flexShrink: 0 }}>{new Date(save.createdAt).toLocaleDateString()} · {save.branches.length} branch{save.branches.length !== 1 ? "es" : ""}</span>
                     <div style={{ display: "flex", gap: "0.375rem" }}>
                       <button onClick={() => setViewingContent(save.id)} style={{ background: "var(--va-border)", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.7rem" }}>View</button>
+                      {(hasGeminiKey() || hasGeminiQualityKey() || hasGeminiQualityKey3()) && (
+                        <button onClick={() => handleRefineSave(save)} disabled={refiningId === save.id}
+                          style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", color: "#c4b5fd", fontSize: "0.7rem", fontWeight: "600", opacity: refiningId === save.id ? 0.5 : 1 }}>
+                          {refiningId === save.id ? "✨ Refining..." : "✨ AI Refine"}
+                        </button>
+                      )}
                       <button onClick={() => { setRenamingId(save.id); setRenameValue(save.name); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>✏️</button>
                       <button onClick={() => { setBranchingFrom(save.id); setNewBranchContent(save.content); setNewBranchName(""); }}
                         style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", color: "#93c5fd", fontSize: "0.7rem", fontWeight: "600" }}>+ Branch</button>
@@ -230,6 +261,15 @@ export default function TimelineSavePage() {
                         style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>🗑️</button>
                     </div>
                   </div>
+
+                  {refineWarnings[save.id] && refineWarnings[save.id].length > 0 && (
+                    <div style={{ borderTop: "1px solid var(--va-border)", padding: "0.625rem 1rem", background: "rgba(251,191,36,0.08)" }}>
+                      <p style={{ fontSize: "0.75rem", color: "#fbbf24", fontWeight: "600", marginBottom: "0.25rem" }}>⚠️ Possible continuity notes:</p>
+                      {refineWarnings[save.id].map((w, i) => (
+                        <p key={i} style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", margin: "0.125rem 0" }}>• {w}</p>
+                      ))}
+                    </div>
+                  )}
 
                   {branchingFrom === save.id && (
                     <div style={{ borderTop: "1px solid var(--va-border)", padding: "0.875rem 1rem", background: "rgba(59,130,246,0.05)" }}>

@@ -1775,6 +1775,50 @@ export async function geminiCanonPlacement(
 // ─── FEATURE: Timeline Separation Check ──────────────────────────────────────
 
 // [ANALYST] DeepSeek handles timeline separation
+
+// ─── Refine Timeline Save ──────────────────────────────────────────────────────
+// Cleans up and organizes a save's content for clarity while preserving every fact.
+// Optionally checks against other saves to flag (not silently resolve) continuity clashes.
+export async function geminiRefineTimelineSave(
+  content: string,
+  saveName: string,
+  otherSaveSummaries: Array<{ name: string; snippet: string }> = []
+): Promise<{ refined: string; warnings: string[] }> {
+  if (!hasGeminiKey() && !hasGeminiQualityKey() && !hasGeminiQualityKey2() && !hasGeminiQualityKey3()) {
+    throw new Error("NO_KEY");
+  }
+
+  const othersContext = otherSaveSummaries.length > 0
+    ? "\n\nOther existing saves in this timeline (for clash-checking only — do not merge or copy from these):\n"
+      + otherSaveSummaries.map(s => "- \"" + s.name + "\": " + s.snippet.slice(0, 200)).join("\n")
+    : "";
+
+  const prompt = "You are organizing a tabletop RPG timeline save document called \"" + saveName + "\".\n\n"
+    + "TASK: Reorganize and clean up the save below for maximum clarity and readability. "
+    + "Group related information under clear headers (Characters Present, Location, Events, Decisions Made, Current Status, etc — adapt headers to what's actually in the content). "
+    + "Fix any redundancy or awkward phrasing. "
+    + "DO NOT remove, invent, or alter any fact, name, number, or detail — every piece of information must be preserved exactly, just better organized.\n\n"
+    + "SAVE CONTENT:\n---\n" + content + "\n---\n"
+    + othersContext + "\n\n"
+    + "Return your response as JSON with this exact structure:\n"
+    + '{"refined": "the reorganized save content in markdown", "warnings": ["any continuity clash with other saves you noticed, if none then empty array"]}\n'
+    + "Return ONLY the JSON object, no other text, no markdown code fences.";
+
+  const result = await geminiQualityCallFor("general", prompt);
+  const clean = result.replace(/```json|```/g, "").trim();
+
+  try {
+    const parsed = JSON.parse(clean);
+    return {
+      refined: typeof parsed.refined === "string" ? parsed.refined : content,
+      warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+    };
+  } catch {
+    // If JSON parsing fails, fall back to using the raw response as the refined text
+    return { refined: clean, warnings: [] };
+  }
+}
+
 export async function geminiCheckTimelineSeparation(
   currentTimeline: { name: string; content: string },
   otherTimelines: Array<{ name: string; content: string }>
