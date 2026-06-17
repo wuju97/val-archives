@@ -6,7 +6,8 @@ import { hasGeminiKey, geminiVerifyCategories } from "../../lib/geminiEngine";
 import {
   loadArchive, loadArchiveAsync, saveArchive, regenerateMasterPrompt,
   CATEGORY_LABELS, CATEGORY_ICONS, MASTER_PROMPT_ORDER,
-  StoryCategory, getPriorityLevel, setPriority, ArchiveData,
+  StoryCategory, getPriorityLevel, setPriority, ArchiveData, ImportedSource,
+  deleteCanonSource, deletePlayerSource,
 } from "@/lib/archiveEngine";
 
 type SubTab = "canon" | "player";
@@ -14,6 +15,8 @@ type SubTab = "canon" | "player";
 export default function StoryStudioPage() {
   const [archive, setArchive] = useState<ArchiveData>(loadArchive());
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("canon");
+  const [selectedSourceId, setSelectedSourceId] = useState<string>("");
+  const [deletingSource, setDeletingSource] = useState(false);
   const [canonCounts, setCanonCounts] = useState<Partial<Record<StoryCategory, number>>>({});
   const [playerCounts, setPlayerCounts] = useState<Partial<Record<StoryCategory, number>>>({});
   const [search, setSearch] = useState("");
@@ -68,14 +71,14 @@ export default function StoryStudioPage() {
     if (a.entries.length > 0) {
       const canonEntries = a.entries.map(e => ({ id: e.id, text: e.text, category: e.category }));
       const canonResults = await geminiVerifyCategories(canonEntries, ALL_CATS);
-      results.push(...canonResults.map(r => ({ ...r, accepted: true, subtab: "canon" as SubTab })));
+      results.push(...canonResults.map((r: typeof canonResults[0]) => ({ ...r, accepted: true, subtab: "canon" as SubTab })));
     }
 
     // Verify player entries
     if ((a.playerEntries ?? []).length > 0) {
       const playerEntries = (a.playerEntries ?? []).map(e => ({ id: e.id, text: e.text, category: e.category }));
       const playerResults = await geminiVerifyCategories(playerEntries, ALL_CATS);
-      results.push(...playerResults.map(r => ({ ...r, accepted: true, subtab: "player" as SubTab })));
+      results.push(...playerResults.map((r: typeof playerResults[0]) => ({ ...r, accepted: true, subtab: "player" as SubTab })));
     }
 
     setVerifyResults(results);
@@ -161,6 +164,46 @@ export default function StoryStudioPage() {
           ? "📖 Canon Story — established facts from source material. Imported from Canon Archives."
           : "🎮 Player Story — your character's actual journey. Imported from Inbox."}
       </p>
+
+      {/* Imported Sources dropdown — delete by source */}
+      {(() => {
+        const archive = loadArchive();
+        const sources: ImportedSource[] = activeSubTab === "canon"
+          ? (archive.importedCanonSources ?? [])
+          : (archive.importedPlayerSources ?? []);
+        if (sources.length === 0) return null;
+        const sortedSources = [...sources].sort((a, b) => new Date(a.importedAt).getTime() - new Date(b.importedAt).getTime());
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "1.25rem", background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.625rem 0.875rem" }}>
+            <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--va-text-muted)", whiteSpace: "nowrap" }}>
+              📥 Imported sources ({sortedSources.length}):
+            </span>
+            <select value={selectedSourceId} onChange={e => setSelectedSourceId(e.target.value)}
+              style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.375rem 0.625rem", color: "var(--va-text)", fontSize: "0.8rem", outline: "none" }}>
+              <option value="">Select a source to manage...</option>
+              {sortedSources.map((s, i) => (
+                <option key={s.id} value={s.id}>{i + 1}. {s.filename} ({s.entryCount} entries)</option>
+              ))}
+            </select>
+            <button onClick={() => {
+              if (!selectedSourceId) return;
+              const source = sortedSources.find(s => s.id === selectedSourceId);
+              if (!source) return;
+              if (!confirm(`Delete all ${source.entryCount} entries from "${source.filename}"? The original reference file stays in ${activeSubTab === "canon" ? "Canon Archives" : "Inbox"} and can be re-imported anytime.`)) return;
+              setDeletingSource(true);
+              let arc = loadArchive();
+              arc = activeSubTab === "canon" ? deleteCanonSource(arc, selectedSourceId) : deletePlayerSource(arc, selectedSourceId);
+              saveArchive(regenerateMasterPrompt(arc));
+              setSelectedSourceId("");
+              setDeletingSource(false);
+              window.location.reload();
+            }} disabled={!selectedSourceId || deletingSource}
+              style={{ background: "#b91c1c", color: "white", border: "none", borderRadius: "0.375rem", padding: "0.375rem 0.75rem", cursor: "pointer", fontSize: "0.78rem", fontWeight: "600", opacity: (!selectedSourceId || deletingSource) ? 0.4 : 1, whiteSpace: "nowrap" }}>
+              🗑️ Delete This Source
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Verify results */}
       {showVerify && (
