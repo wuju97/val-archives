@@ -1250,7 +1250,10 @@ export function createVault(name: string): VaultMeta {
   const meta: VaultMeta = { id, name: name.trim() || "Untitled Vault", createdAt: now, lastSaved: now, entryCount: 0 };
   const empty = { ...createEmptyArchive(), archiveName: name.trim() || "Untitled Vault" };
   if (typeof window !== "undefined") {
-    localStorage.setItem(getVaultStorageKey(id), JSON.stringify(empty));
+    const key = getVaultStorageKey(id);
+    const serialized = JSON.stringify(empty);
+    localStorage.setItem(key, serialized);
+    openIDB().then(db => idbPut(db, key, serialized)).catch(() => {});
   }
   const index = getVaultIndex();
   index.push(meta);
@@ -1260,7 +1263,14 @@ export function createVault(name: string): VaultMeta {
 
 export function deleteVault(vaultId: string): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(getVaultStorageKey(vaultId));
+  const key = getVaultStorageKey(vaultId);
+  localStorage.removeItem(key);
+  openIDB().then(db => {
+    try {
+      const tx = db.transaction("archive", "readwrite");
+      tx.objectStore("archive").delete(key);
+    } catch {}
+  }).catch(() => {});
   const index = getVaultIndex().filter(v => v.id !== vaultId);
   setVaultIndex(index);
   if (getActiveVaultId() === vaultId) {
@@ -1274,13 +1284,15 @@ export function renameVault(vaultId: string, name: string): void {
   );
   setVaultIndex(index);
   if (typeof window !== "undefined") {
+    const key = getVaultStorageKey(vaultId);
     try {
-      const key = getVaultStorageKey(vaultId);
       const raw = localStorage.getItem(key);
       if (raw) {
         const data = JSON.parse(raw);
         data.archiveName = name.trim();
-        localStorage.setItem(key, JSON.stringify(data));
+        const serialized = JSON.stringify(data);
+        localStorage.setItem(key, serialized);
+        openIDB().then(db => idbPut(db, key, serialized)).catch(() => {});
       }
     } catch {}
   }
@@ -1290,29 +1302,37 @@ export function loadVaultById(vaultId: string): ArchiveData {
   if (typeof window === "undefined") return createEmptyArchive();
   try {
     const raw = localStorage.getItem(getVaultStorageKey(vaultId));
-    if (raw) return { ...createEmptyArchive(), ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Treat as stale/empty if localStorage was wiped but data still exists in IDB —
+      // callers needing accuracy should use loadVaultByIdAsync instead.
+      return { ...createEmptyArchive(), ...parsed };
+    }
   } catch {}
   return createEmptyArchive();
 }
 
 export async function loadVaultByIdAsync(vaultId: string): Promise<ArchiveData> {
   if (typeof window === "undefined") return createEmptyArchive();
+  const key = getVaultStorageKey(vaultId);
 
-  // Try localStorage first
-  try {
-    const raw = localStorage.getItem(getVaultStorageKey(vaultId));
-    if (raw) return { ...createEmptyArchive(), ...JSON.parse(raw) };
-  } catch {}
-
-  // Fall back to IndexedDB
+  // IDB is the source of truth — check it FIRST (mirrors loadArchiveAsync behavior)
   try {
     const db = await openIDB();
-    const result = await idbGet(db, getVaultStorageKey(vaultId));
+    const result = await idbGet(db, key);
     if (result) {
-      // Restore to localStorage for future fast access
-      try { localStorage.setItem(getVaultStorageKey(vaultId), result); } catch {}
-      return { ...createEmptyArchive(), ...JSON.parse(result) };
+      const parsed = JSON.parse(result);
+      try { localStorage.setItem(key, result); } catch {
+        try { localStorage.removeItem(key); } catch {}
+      }
+      return { ...createEmptyArchive(), ...parsed };
     }
+  } catch {}
+
+  // Fall back to localStorage only if IDB has nothing
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return { ...createEmptyArchive(), ...JSON.parse(raw) };
   } catch {}
 
   return createEmptyArchive();
@@ -1323,7 +1343,14 @@ export async function loadVaultByIdAsync(vaultId: string): Promise<ArchiveData> 
 // NEVER strips or truncates data under any circumstances.
 export function saveVaultById(vaultId: string, data: ArchiveData): void {
   if (typeof window === "undefined") return;
-  const prepared = { ...data, lastSaved: new Date().toISOString() };
+  const prepared: ArchiveData = {
+    ...data,
+    lastSaved: new Date().toISOString(),
+    playerEntries: data.playerEntries ?? [],
+    inboxDistillCategories: data.inboxDistillCategories ?? [],
+    importedCanonSources: data.importedCanonSources ?? [],
+    importedPlayerSources: data.importedPlayerSources ?? [],
+  };
   const storageKey = getVaultStorageKey(vaultId);
   const fullSerialized = JSON.stringify(prepared);
 

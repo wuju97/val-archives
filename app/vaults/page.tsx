@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   getVaultIndex, createVault, deleteVault, renameVault,
   setActiveVaultId, getActiveVaultId, exportVault, importVault,
-  migrateOldVault, VaultMeta, loadVaultById,
+  migrateOldVault, VaultMeta, loadVaultByIdAsync,
 } from "@/lib/archiveEngine";
 
 export default function VaultSwitcherPage() {
@@ -21,26 +21,57 @@ export default function VaultSwitcherPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
+  // Preview cache — loaded async from IDB-first source so counts are always accurate
+  const [previews, setPreviews] = useState<Record<string, { name: string; text: string }>>({});
+
   useEffect(() => {
     migrateOldVault();
     const index = getVaultIndex();
     setVaults(index);
     setActiveId(getActiveVaultId());
-    // If only one vault and none active, auto-select it
     if (index.length === 1 && !getActiveVaultId()) {
       setActiveVaultId(index[0].id);
       setActiveId(index[0].id);
     }
+    loadPreviews(index);
   }, []);
 
+  async function loadPreviews(vaultList: VaultMeta[]) {
+    for (const vault of vaultList) {
+      try {
+        const data = await loadVaultByIdAsync(vault.id);
+        const entries = data.entries?.length ?? 0;
+        const playerEntries = data.playerEntries?.length ?? 0;
+        const saves = data.timelineSaves?.length ?? 0;
+        const canon = (data.canonCategories ?? []).reduce((sum, c) => sum + c.entries.length, 0);
+        const parts: string[] = [];
+        if (entries > 0) parts.push(`${entries} canon entries`);
+        if (playerEntries > 0) parts.push(`${playerEntries} player entries`);
+        if (saves > 0) parts.push(`${saves} saves`);
+        if (canon > 0) parts.push(`${canon} canon files`);
+        setPreviews(prev => ({
+          ...prev,
+          [vault.id]: {
+            name: data.archiveName?.trim() || "",
+            text: parts.length > 0 ? parts.join(" · ") : "Empty vault",
+          },
+        }));
+      } catch {
+        setPreviews(prev => ({ ...prev, [vault.id]: { name: "", text: "Empty vault" } }));
+      }
+    }
+  }
+
   function refresh() {
-    setVaults(getVaultIndex());
+    const index = getVaultIndex();
+    setVaults(index);
     setActiveId(getActiveVaultId());
+    loadPreviews(index);
   }
 
   function handleCreateVault() {
     if (!newVaultName.trim()) return;
-    const meta = createVault(newVaultName.trim());
+    createVault(newVaultName.trim());
     setNewVaultName(""); setShowCreate(false);
     refresh();
   }
@@ -86,27 +117,12 @@ export default function VaultSwitcherPage() {
     if (importRef.current) importRef.current.value = "";
   }
 
-  // Get entry count preview + real name for a vault
   function getPreview(id: string): string {
-    try {
-      const data = loadVaultById(id);
-      const entries = data.entries?.length ?? 0;
-      const saves = data.timelineSaves?.length ?? 0;
-      const canon = (data.canonCategories ?? []).reduce((sum, c) => sum + c.entries.length, 0);
-      const parts = [];
-      if (entries > 0) parts.push(`${entries} entries`);
-      if (saves > 0) parts.push(`${saves} saves`);
-      if (canon > 0) parts.push(`${canon} canon files`);
-      return parts.length > 0 ? parts.join(" · ") : "Empty vault";
-    } catch { return "Empty vault"; }
+    return previews[id]?.text ?? "Loading...";
   }
 
-  // Get actual archive name from inside vault data (may differ from meta name)
   function getActualName(id: string): string {
-    try {
-      const data = loadVaultById(id);
-      return data.archiveName?.trim() || "";
-    } catch { return ""; }
+    return previews[id]?.name ?? "";
   }
 
   return (
@@ -264,7 +280,7 @@ export default function VaultSwitcherPage() {
         </label>
 
         <p style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", textAlign: "center", marginTop: "1.5rem", lineHeight: "1.6" }}>
-          Each vault is completely isolated · Data stored in your browser only<br />
+          Each vault is completely isolated · Data stored in your browser + IndexedDB<br />
           Export regularly to keep backups
         </p>
       </div>
