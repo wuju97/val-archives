@@ -201,8 +201,11 @@ export interface VaultEntry {
   category: StoryCategory;
   createdAt: string;
   updatedAt: string;
-  sourceId?: string;       // ID of the Canon Reference / Story Reference this entry was imported from
-  sourceFilename?: string; // Display name of that source (e.g. "HP1 — Canon Reference")
+  sourceId?: string;          // ID of the Canon Reference / Story Reference this entry was imported from
+  sourceFilename?: string;    // Display name of that source (e.g. "HP1 — Canon Reference")
+  entity?: string;            // The character/location/item/organization this fact is about (e.g. "Harry Potter")
+  tags?: string[];            // Free-form tags for finer filtering (e.g. ["appearance"], ["belief"], ["betrayal"])
+  timelinePosition?: string;  // Optional chronological marker for ordering facts about the same entity over time
 }
 
 export interface ImportedSource {
@@ -831,22 +834,49 @@ export function addPlayerEntry(
 
 
 // ─── Source-Tagged Bulk Import (Canon Story) ──────────────────────────────────
+// ─── Entity-aware dedup key ─────────────────────────────────────────────────
+// Two facts are considered duplicates only if they're about the SAME entity
+// (when known) AND have near-identical text. This avoids false-positive collisions
+// between unrelated short facts about different characters/locations, while still
+// catching the same fact about the same character repeated across multiple imports
+// (e.g. "Harry Potter is brave" appearing in both HP1's and HP3's Canon Reference).
+function dedupKey(text: string, entity?: string): string {
+  const normalizedText = text.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 80);
+  const normalizedEntity = (entity ?? "").trim().toLowerCase();
+  return normalizedEntity + "::" + normalizedText;
+}
+
 export function addEntriesWithSource(
   archive: ArchiveData,
-  entries: Array<{ text: string; category: StoryCategory }>,
+  entries: Array<{ text: string; category: StoryCategory; entity?: string; tags?: string[] }>,
   sourceId: string,
   sourceFilename: string
 ): ArchiveData {
   const now = new Date().toISOString();
-  const newEntries: VaultEntry[] = entries.map(e => ({
-    id: crypto.randomUUID(),
-    text: e.text.trim(),
-    category: e.category,
-    createdAt: now,
-    updatedAt: now,
-    sourceId,
-    sourceFilename,
-  }));
+
+  // Vault-wide dedup — checks against EVERY existing entry in Canon Story, not just this batch
+  const existingKeys = new Set(archive.entries.map(e => dedupKey(e.text, e.entity)));
+  const seenInBatch = new Set<string>();
+
+  const newEntries: VaultEntry[] = [];
+  for (const e of entries) {
+    const trimmed = e.text.trim();
+    if (!trimmed) continue;
+    const key = dedupKey(trimmed, e.entity);
+    if (existingKeys.has(key) || seenInBatch.has(key)) continue;
+    seenInBatch.add(key);
+    newEntries.push({
+      id: crypto.randomUUID(),
+      text: trimmed,
+      category: e.category,
+      createdAt: now,
+      updatedAt: now,
+      sourceId,
+      sourceFilename,
+      entity: e.entity,
+      tags: e.tags,
+    });
+  }
 
   const existingSources = archive.importedCanonSources ?? [];
   const filtered = existingSources.filter(s => s.id !== sourceId);
@@ -862,20 +892,35 @@ export function addEntriesWithSource(
 // ─── Source-Tagged Bulk Import (Player Story) ─────────────────────────────────
 export function addPlayerEntriesWithSource(
   archive: ArchiveData,
-  entries: Array<{ text: string; category: StoryCategory }>,
+  entries: Array<{ text: string; category: StoryCategory; entity?: string; tags?: string[] }>,
   sourceId: string,
   sourceFilename: string
 ): ArchiveData {
   const now = new Date().toISOString();
-  const newEntries: VaultEntry[] = entries.map(e => ({
-    id: crypto.randomUUID(),
-    text: e.text.trim(),
-    category: e.category,
-    createdAt: now,
-    updatedAt: now,
-    sourceId,
-    sourceFilename,
-  }));
+
+  const existingEntries = archive.playerEntries ?? [];
+  const existingKeys = new Set(existingEntries.map(e => dedupKey(e.text, e.entity)));
+  const seenInBatch = new Set<string>();
+
+  const newEntries: VaultEntry[] = [];
+  for (const e of entries) {
+    const trimmed = e.text.trim();
+    if (!trimmed) continue;
+    const key = dedupKey(trimmed, e.entity);
+    if (existingKeys.has(key) || seenInBatch.has(key)) continue;
+    seenInBatch.add(key);
+    newEntries.push({
+      id: crypto.randomUUID(),
+      text: trimmed,
+      category: e.category,
+      createdAt: now,
+      updatedAt: now,
+      sourceId,
+      sourceFilename,
+      entity: e.entity,
+      tags: e.tags,
+    });
+  }
 
   const existingSources = archive.importedPlayerSources ?? [];
   const filtered = existingSources.filter(s => s.id !== sourceId);
@@ -883,7 +928,7 @@ export function addPlayerEntriesWithSource(
 
   return {
     ...archive,
-    playerEntries: [...(archive.playerEntries ?? []), ...newEntries],
+    playerEntries: [...existingEntries, ...newEntries],
     importedPlayerSources: [...filtered, newSource],
   };
 }

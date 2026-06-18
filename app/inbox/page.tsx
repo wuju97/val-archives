@@ -505,16 +505,12 @@ export default function InboxPage() {
                             try {
                               const entries = await geminiImportStoryToVault(ref.content, ref.filename, () => {});
                               let arc = loadArchive();
-                              const seen = new Set<string>();
-                              const deduped: Array<{ text: string; category: string }> = [];
-                              for (const e of entries) {
-                                const k = e.text.trim().toLowerCase().slice(0, 60);
-                                if (seen.has(k)) continue;
-                                seen.add(k); deduped.push({ text: e.text.trim(), category: e.category });
-                              }
-                              arc = addPlayerEntriesWithSource(arc, deduped as Array<{ text: string; category: StoryCategory }>, ref.id, ref.filename);
+                              const cleaned = entries
+                                .filter(e => e.text && e.text.trim())
+                                .map(e => ({ text: e.text.trim(), category: e.category, entity: (e as any).entity, tags: (e as any).tags }));
+                              arc = addPlayerEntriesWithSource(arc, cleaned as Array<{ text: string; category: StoryCategory; entity?: string; tags?: string[] }>, ref.id, ref.filename);
                               saveArchive(regenerateMasterPrompt(arc));
-                              alert("✓ " + deduped.length + " entries imported to 🎮 Player Story");
+                              alert("✓ " + cleaned.length + " entries processed (duplicates against your vault skipped) — imported to 🎮 Player Story");
                             } catch (e) {
                               alert("✗ Import failed: " + (e instanceof Error ? e.message : "error"));
                             }

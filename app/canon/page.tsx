@@ -744,17 +744,13 @@ export default function CanonPage() {
       await new Promise(r => setTimeout(r, 50));
 
       let currentArchive = loadArchive();
-      const seen = new Set<string>();
-      const deduped: Array<{ text: string; category: string }> = [];
+      // Entity-aware dedup now happens inside addEntriesWithSource itself (checks
+      // against the whole vault, not just this batch) — just pass entries through as-is.
+      const cleaned = entries
+        .filter(e => e.text && e.text.trim())
+        .map(e => ({ text: e.text.trim(), category: e.category, entity: (e as any).entity, tags: (e as any).tags }));
 
-      for (const entry of entries) {
-        const key = entry.text.trim().toLowerCase().slice(0, 60);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        deduped.push({ text: entry.text.trim(), category: entry.category });
-      }
-
-      currentArchive = addEntriesWithSource(currentArchive, deduped as any, entryId, entryFilename);
+      currentArchive = addEntriesWithSource(currentArchive, cleaned as any, entryId, entryFilename);
 
       const refreshed = regenerateMasterPrompt(currentArchive);
       saveArchive(refreshed);
@@ -762,7 +758,7 @@ export default function CanonPage() {
 
       setImportingEntryId(null);
       setImportDone(true);
-      setImportProgress("✓ Done! " + deduped.length + " entries saved to 📖 Canon Story subtab from " + entryFilename);
+      setImportProgress("✓ Done! " + cleaned.length + " entries processed (duplicates against your vault automatically skipped) saved to 📖 Canon Story subtab from " + entryFilename);
       flash("✓ " + entries.length + " entries imported to vault!");
 
     } catch (e) {

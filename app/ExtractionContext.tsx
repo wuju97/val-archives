@@ -393,18 +393,15 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
         }
 
         let archive = loadArchive();
-        const seen = new Set<string>();
-        const deduped: Array<{ text: string; category: string }> = [];
-        for (const entry of entries) {
-          const key = entry.text.trim().toLowerCase().slice(0, 60);
-          if (seen.has(key)) continue;
-          seen.add(key); deduped.push({ text: entry.text.trim(), category: entry.category });
-        }
-        archive = addPlayerEntriesWithSource(archive, deduped as Array<{ text: string; category: StoryCategory }>, next.id, next.filename);
+        // Entity-aware dedup happens inside addPlayerEntriesWithSource itself.
+        const cleaned = entries
+          .filter(e => e.text && e.text.trim())
+          .map(e => ({ text: e.text.trim(), category: e.category, entity: (e as any).entity, tags: (e as any).tags }));
+        archive = addPlayerEntriesWithSource(archive, cleaned as Array<{ text: string; category: StoryCategory; entity?: string; tags?: string[] }>, next.id, next.filename);
         saveArchive(archive);
 
-        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, importedCount: deduped.length } : i));
-        setDistillImportQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", importedCount: deduped.length, progress: "✓ " + deduped.length + " entries imported to Player Story" } : i));
+        setDistillQueue(prev => prev.map(i => i.id === next.id ? { ...i, importedCount: cleaned.length } : i));
+        setDistillImportQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", importedCount: cleaned.length, progress: "✓ " + cleaned.length + " entries imported to Player Story" } : i));
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Failed";
         setDistillImportQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "error", progress: "✗ " + msg } : i));
@@ -546,17 +543,14 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
         }
 
         let archive = loadArchive();
-        const seen = new Set<string>();
-        const deduped: Array<{ text: string; category: string }> = [];
-        for (const entry of entries) {
-          const key = entry.text.trim().toLowerCase().slice(0, 60);
-          if (seen.has(key)) continue;
-          seen.add(key); deduped.push({ text: entry.text.trim(), category: entry.category });
-        }
-        archive = addEntriesWithSource(archive, deduped as Array<{ text: string; category: StoryCategory }>, next.id, next.filename);
+        // Entity-aware dedup happens inside addEntriesWithSource itself.
+        const cleaned = entries
+          .filter(e => e.text && e.text.trim())
+          .map(e => ({ text: e.text.trim(), category: e.category, entity: (e as any).entity, tags: (e as any).tags }));
+        archive = addEntriesWithSource(archive, cleaned as Array<{ text: string; category: StoryCategory; entity?: string; tags?: string[] }>, next.id, next.filename);
         saveArchive(archive);
 
-        setCanonImportQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", importedCount: deduped.length, progress: "✓ " + deduped.length + " entries imported to Canon Story" } : i));
+        setCanonImportQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "done", importedCount: cleaned.length, progress: "✓ " + cleaned.length + " entries imported to Canon Story" } : i));
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Failed";
         setCanonImportQueue(prev => prev.map(i => i.id === next.id ? { ...i, status: "error", progress: "✗ " + msg } : i));

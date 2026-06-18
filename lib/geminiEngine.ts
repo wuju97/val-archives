@@ -1688,7 +1688,7 @@ export async function geminiImportCanonToVault(
   filename: string,
   onProgress?: (msg: string) => void,
   shouldAbort?: () => boolean
-): Promise<Array<{ text: string; category: string }>> {
+): Promise<Array<{ text: string; category: string; entity?: string; tags?: string[] }>> {
   if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
 
   const SECTION_CATEGORY_MAP: Record<string, string> = {
@@ -1846,7 +1846,7 @@ Preserve information. Never compress.`;
     sections.push({ raw: canonReference, header: "CONTENT" });
   }
 
-  const allEntries: Array<{ text: string; category: string }> = [];
+  const allEntries: Array<{ text: string; category: string; entity?: string; tags?: string[] }> = [];
   if (onProgress) onProgress("Found " + sections.length + " sections to process...");
 
   for (let i = 0; i < sections.length; i++) {
@@ -1866,8 +1866,9 @@ Preserve information. Never compress.`;
       + "SUGGESTED PRIMARY CATEGORY: " + category + " (use this for most entries, but assign whichever category from the rules above actually fits each individual fact — duplicate across categories when appropriate, per the rules)\n\n"
       + raw + "\n\n"
       + "OUTPUT FORMAT\n"
+      + "For each atomic fact, also identify the primary named entity (character, location, item, or organization) the fact is about, if any — use the exact name as written. Add 1-3 short lowercase tags describing the type of fact (e.g. \"appearance\", \"belief\", \"betrayal\", \"ability\", \"relationship\").\n"
       + "Return ONLY a JSON array, no markdown, no commentary:\n"
-      + '[{"text": "Atomic canon fact", "category": "appropriate_category_id"}]';
+      + '[{"text": "Atomic canon fact", "category": "appropriate_category_id", "entity": "Name of character/location/item this is about, or omit if none", "tags": ["tag1", "tag2"]}]';
 
     let attempt = 0;
     while (true) {
@@ -1878,7 +1879,7 @@ Preserve information. Never compress.`;
         const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
         const jsonMatch = clean.match(/\[([\s\S]*)\]/);
         if (!jsonMatch) { if (attempt < 5) { await new Promise(r => setTimeout(r, 10000)); continue; } break; }
-        const parsed: Array<{ text: string; category: string }> = JSON.parse("[" + jsonMatch[1] + "]");
+        const parsed: Array<{ text: string; category: string; entity?: string; tags?: string[] }> = JSON.parse("[" + jsonMatch[1] + "]");
         if (Array.isArray(parsed)) {
           const valid = parsed.filter(e => e.text && e.text.trim().length > 15);
           allEntries.push(...valid);
@@ -2038,7 +2039,7 @@ export async function geminiImportStoryToVault(
   filename: string,
   onProgress?: (msg: string) => void,
   shouldAbort?: () => boolean
-): Promise<Array<{ text: string; category: string }>> {
+): Promise<Array<{ text: string; category: string; entity?: string; tags?: string[] }>> {
   if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
 
   const SECTION_CATEGORY_MAP: Record<string, string> = {
@@ -2092,7 +2093,7 @@ export async function geminiImportStoryToVault(
     sections.push({ raw: storyReference, header: "CONTENT" });
   }
 
-  const allEntries: Array<{ text: string; category: string }> = [];
+  const allEntries: Array<{ text: string; category: string; entity?: string; tags?: string[] }> = [];
   if (onProgress) onProgress("Found " + sections.length + " sections to process...");
 
   for (let i = 0; i < sections.length; i++) {
@@ -2114,9 +2115,10 @@ export async function geminiImportStoryToVault(
       + "- Each entry = one clear self-contained factual sentence\n"
       + "- Every bullet point and sub-bullet becomes at least one entry\n"
       + "- Do NOT modify — only split into individual facts\n"
-      + "- All entries use category: \"" + category + "\"\n\n"
+      + "- All entries use category: \"" + category + "\"\n"
+      + "- For each fact, also identify the primary named entity (character, location, item) it's about, if any — use the exact name as written. Add 1-3 short lowercase tags describing the type of fact.\n\n"
       + "Return ONLY a JSON array:\n"
-      + '[{"text": "fact here", "category": "' + category + '"}]';
+      + '[{"text": "fact here", "category": "' + category + '", "entity": "Name or omit if none", "tags": ["tag1"]}]';
 
     let attempt = 0;
     while (true) {
@@ -2127,7 +2129,7 @@ export async function geminiImportStoryToVault(
         const clean = result.replace(/```json/g, "").replace(/```/g, "").trim();
         const jsonMatch = clean.match(/\[([\s\S]*)\]/);
         if (!jsonMatch) { if (attempt < 5) { await new Promise(r => setTimeout(r, 10000)); continue; } break; }
-        const parsed: Array<{ text: string; category: string }> = JSON.parse("[" + jsonMatch[1] + "]");
+        const parsed: Array<{ text: string; category: string; entity?: string; tags?: string[] }> = JSON.parse("[" + jsonMatch[1] + "]");
         if (Array.isArray(parsed)) {
           const valid = parsed.filter(e => e.text && e.text.trim().length > 15);
           allEntries.push(...valid);
