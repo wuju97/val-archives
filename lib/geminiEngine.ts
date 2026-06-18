@@ -1718,6 +1718,122 @@ export async function geminiImportCanonToVault(
     return "world-overview";
   }
 
+  // ── Vault Architect prompt — exact rules as specified, category IDs corrected
+  // to match the app's actual hyphenated StoryCategory values (the source prompt
+  // used underscores in a few places — e.g. magic_supernatural, player_character —
+  // which would not match any real category and fall through unrecognized).
+  const VAULT_ARCHITECT_RULES = `You are a Vault Architect.
+Your task is to convert canon information into vault entries optimized for long-term retrieval, search, continuity tracking, and RPG memory.
+
+GOAL
+Transform information into atomic facts.
+An atomic fact is the smallest self-contained piece of canon information that remains meaningful when viewed alone.
+
+RULES
+1. Never summarize.
+2. Never combine multiple facts into one entry when they can be separated.
+3. Preserve exact canon meaning.
+4. Create as many entries as necessary.
+5. Duplicate information across categories when appropriate.
+6. Every entry must be understandable without reading any other entry.
+7. Preserve names exactly.
+8. Preserve chronology.
+9. Preserve causes and consequences.
+10. Preserve relationships.
+
+ATOMIC FACT RULE
+Bad:
+"Harry Potter is a brave wizard and best friends with Ron Weasley."
+Good:
+"Harry Potter is a wizard."
+"Harry Potter is brave."
+"Ron Weasley is Harry Potter's best friend."
+"Harry Potter is Ron Weasley's best friend."
+
+CATEGORY RULES
+CHARACTERS (category: "characters")
+Store: physical descriptions, personality traits, abilities, motivations, goals, fears, possessions, status
+
+RELATIONSHIPS (category: "relationships")
+Store: friendships, rivalries, family ties, mentorships, alliances, enemies
+Create relationship entries in BOTH directions.
+
+LOCATIONS (category: "locations")
+Store: descriptions, residents, events, significance, history
+
+TIMELINE & CONTINUITY (category: "timeline-continuity")
+Store: events, actions, decisions, consequences. One event per entry.
+
+HISTORY (category: "history")
+Store: historical events, wars, past discoveries, founding events
+
+LORE & MYTHOLOGY (category: "lore-mythology")
+Store: legends, myths, prophecies, ancient stories
+
+MAGIC & SUPERNATURAL (category: "magic-supernatural")
+Store: powers, spells, magical rules, magical limitations
+
+ORGANIZATIONS (category: "organizations")
+Store: groups, memberships, hierarchy, goals
+
+FACTIONS & POWER (category: "factions")
+Store: political influence, territorial control, rival factions
+
+POLITICAL SYSTEMS (category: "political-systems")
+Store: governments, laws, authority structures
+
+CONFLICT & COMBAT (category: "conflict-combat")
+Store: battles, duels, combat techniques, military actions
+
+QUESTS & PLOTLINES (category: "quests-plotlines")
+Store: objectives, investigations, missions, story arcs
+
+ITEMS & EQUIPMENT (category: "items-equipment")
+Store: artifacts, weapons, equipment, ownership
+
+CREATURES & WILDLIFE (category: "creatures-wildlife")
+Store: beasts, monsters, animals
+
+CULTURES & SOCIETY (category: "cultures-society")
+Store: traditions, customs, social norms
+
+SPECIES & RACES (category: "species-races")
+Store: species, racial traits, biological distinctions
+
+ECONOMY (category: "economy")
+Store: trade, currency, wealth systems
+
+SCIENCE & TECHNOLOGY (category: "science-technology")
+Store: inventions, technology, scientific principles
+
+MYSTERIES (category: "mysteries")
+Store: unanswered questions, secrets, hidden identities, unknown motives
+
+CORE RULES (category: "rules")
+Store: fundamental world rules, campaign rules, setting rules, meta rules, continuity rules
+
+PLAYER CHARACTER (category: "player-character")
+Store: player character information, history, abilities, status
+
+ROMANCE & LOVE (category: "romance")
+Store: romantic relationships, attractions, marriages, romantic feelings
+
+WORLD OVERVIEW (category: "world-overview")
+Store: broad setting descriptions, major world facts, world-level information
+
+GEOGRAPHY (category: "geography")
+Store: regions, countries, terrain, natural features, maps, environmental information
+
+THEMES & TONE (category: "themes-tone")
+Store: recurring themes, moral ideas, narrative tone, thematic concepts
+
+WRITING STYLE (category: "writing-style")
+Store: stylistic rules, narrative techniques, authorial patterns
+
+OUTPUT FORMAT
+Create multiple entries whenever multiple categories apply.
+Preserve information. Never compress.`;
+
   // Split Canon Reference by ## headers
   const rawSections = canonReference.split("\n## ");
   const sections = rawSections
@@ -1744,18 +1860,14 @@ export async function geminiImportCanonToVault(
 
     if (onProgress) onProgress("(" + (i + 1) + "/" + sections.length + ") " + header + " → " + category + "...");
 
-    const prompt = "Convert this section of a Canon Reference Document into individual vault entries.\n\n"
-      + "SECTION: " + header + "\n"
-      + "TARGET CATEGORY: " + category + "\n\n"
+    const prompt = VAULT_ARCHITECT_RULES + "\n\n---\n\n"
+      + "You are processing this section of a Canon Reference Document:\n"
+      + "SECTION HEADER: " + header + "\n"
+      + "SUGGESTED PRIMARY CATEGORY: " + category + " (use this for most entries, but assign whichever category from the rules above actually fits each individual fact — duplicate across categories when appropriate, per the rules)\n\n"
       + raw + "\n\n"
-      + "RULES:\n"
-      + "- Each entry = one clear self-contained factual sentence\n"
-      + "- Every bullet point and sub-bullet becomes at least one entry\n"
-      + "- For characters: separate entries for physical description, personality, abilities, relationships, history\n"
-      + "- Do NOT modify or summarize — only split into individual facts\n"
-      + "- All entries use category: \"" + category + "\"\n\n"
-      + "Return ONLY a JSON array:\n"
-      + '[{"text": "fact here", "category": "' + category + '"}]';
+      + "OUTPUT FORMAT\n"
+      + "Return ONLY a JSON array, no markdown, no commentary:\n"
+      + '[{"text": "Atomic canon fact", "category": "appropriate_category_id"}]';
 
     let attempt = 0;
     while (true) {
