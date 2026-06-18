@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import { createContext, useContext, useRef, useState, useEffect, ReactNode } from "react";
 
@@ -17,6 +17,8 @@ interface MusicContextType {
   isPlaying: boolean;
   volume: number;
   loopMode: LoopMode;
+  currentTime: number;
+  duration: number;
   addSongs: (files: FileList) => void;
   removeSong: (id: string) => void;
   playSong: (index: number) => void;
@@ -25,14 +27,16 @@ interface MusicContextType {
   prev: () => void;
   setVolume: (v: number) => void;
   setLoopMode: (m: LoopMode) => void;
+  seek: (time: number) => void;
   clearAll: () => void;
 }
 
 const MusicContext = createContext<MusicContextType>({
   songs: [], currentIndex: null, isPlaying: false, volume: 70,
-  loopMode: "loop-all", addSongs: () => {}, removeSong: () => {},
+  loopMode: "loop-all", currentTime: 0, duration: 0,
+  addSongs: () => {}, removeSong: () => {},
   playSong: () => {}, togglePlay: () => {}, next: () => {}, prev: () => {},
-  setVolume: () => {}, setLoopMode: () => {}, clearAll: () => {},
+  setVolume: () => {}, setLoopMode: () => {}, seek: () => {}, clearAll: () => {},
 });
 
 // ─── IndexedDB helpers ────────────────────────────────────────────────────────
@@ -109,6 +113,8 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const [volume, setVolumeState] = useState(70);
   const [loopMode, setLoopModeState] = useState<LoopMode>("loop-all");
   const [loaded, setLoaded] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const songsRef = useRef<Song[]>([]);
   const loopModeRef = useRef<LoopMode>("loop-all");
@@ -141,6 +147,9 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const audio = new Audio();
     audio.volume = volume / 100;
     audioRef.current = audio;
+
+    audio.addEventListener("timeupdate", () => setCurrentTime(audio.currentTime));
+    audio.addEventListener("loadedmetadata", () => setDuration(audio.duration || 0));
 
     audio.addEventListener("ended", async () => {
       const mode = loopModeRef.current;
@@ -180,6 +189,8 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       URL.revokeObjectURL(audio.src);
     }
     audio.src = url;
+    setCurrentTime(0);
+    setDuration(0);
     await audio.play().catch(() => {});
     setCurrentIndex(index);
     currentIndexRef.current = index;
@@ -260,6 +271,14 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("vaMusicLoop", m);
   }
 
+  function seek(time: number) {
+    const audio = audioRef.current;
+    if (!audio || !isFinite(time)) return;
+    const clamped = Math.max(0, Math.min(time, audio.duration || time));
+    audio.currentTime = clamped;
+    setCurrentTime(clamped);
+  }
+
   async function clearAll() {
     for (const s of songsRef.current) await deleteAudioFromDB(s.id);
     audioRef.current?.pause();
@@ -271,7 +290,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <MusicContext.Provider value={{ songs, currentIndex, isPlaying, volume, loopMode, addSongs, removeSong, playSong, togglePlay, next, prev, setVolume, setLoopMode, clearAll }}>
+    <MusicContext.Provider value={{ songs, currentIndex, isPlaying, volume, loopMode, currentTime, duration, addSongs, removeSong, playSong, togglePlay, next, prev, setVolume, setLoopMode, seek, clearAll }}>
       {children}
       {loaded && <MiniPlayer />}
     </MusicContext.Provider>
@@ -282,7 +301,7 @@ export function useMusic() { return useContext(MusicContext); }
 
 // ─── Mini Player ──────────────────────────────────────────────────────────────
 function MiniPlayer() {
-  const { songs, currentIndex, isPlaying, volume, loopMode, togglePlay, next, prev, setVolume, setLoopMode } = useMusic();
+  const { songs, currentIndex, isPlaying, volume, loopMode, currentTime, duration, togglePlay, next, prev, setVolume, setLoopMode, seek } = useMusic();
   const [collapsed, setCollapsed] = useState(false);
 
   if (songs.length === 0) return null;
@@ -295,6 +314,22 @@ function MiniPlayer() {
     else if (loopMode === "loop-one") setLoopMode("play-once");
     else setLoopMode("loop-all");
   }
+
+  function formatTime(t: number): string {
+    if (!isFinite(t) || t < 0) return "0:00";
+    const mins = Math.floor(t / 60);
+    const secs = Math.floor(t % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
+
+  function handleSeekClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (!duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seek(ratio * duration);
+  }
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
     <div style={{ position: "fixed", bottom: "1.5rem", left: "1.5rem", zIndex: 8888, background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", boxShadow: "0 4px 20px rgba(0,0,0,0.4)", width: collapsed ? "auto" : "260px" }}>
@@ -314,6 +349,20 @@ function MiniPlayer() {
           <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", margin: "0.5rem 0 0.625rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {current ? `${(currentIndex ?? 0) + 1} / ${songs.length} — ${current.name}` : `${songs.length} song${songs.length !== 1 ? "s" : ""} in playlist`}
           </p>
+          {/* Seekable progress bar */}
+          {current && (
+            <div style={{ marginBottom: "0.625rem" }}>
+              <div onClick={handleSeekClick}
+                style={{ position: "relative", width: "100%", height: "8px", borderRadius: "9999px", background: "var(--va-border)", cursor: "pointer" }}>
+                <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${progress}%`, borderRadius: "9999px", background: "var(--va-accent)", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", top: "50%", left: `${progress}%`, transform: "translate(-50%, -50%)", width: "12px", height: "12px", borderRadius: "50%", background: "var(--va-accent)", boxShadow: "0 0 0 2px var(--va-surface)", pointerEvents: "none" }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
+                <span style={{ fontSize: "0.65rem", color: "var(--va-text-muted)" }}>{formatTime(currentTime)}</span>
+                <span style={{ fontSize: "0.65rem", color: "var(--va-text-muted)" }}>{formatTime(duration)}</span>
+              </div>
+            </div>
+          )}
           {/* Controls */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem", marginBottom: "0.625rem" }}>
             <button onClick={prev} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1rem", color: "var(--va-text-muted)", padding: "0.25rem" }}>⏮</button>
