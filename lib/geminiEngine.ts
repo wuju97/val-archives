@@ -748,35 +748,6 @@ Return ONLY the enhanced entry text, no commentary:`;
 
 // ─── FEATURE: Detect Contradictions ──────────────────────────────────────────
 
-export async function geminiCheckContradictions(
-  newEntry: string,
-  existingEntries: string[],
-  category: string
-): Promise<{ hasContradiction: boolean; explanation: string }> {
-  if (!hasGeminiKey() || existingEntries.length === 0) {
-    return { hasContradiction: false, explanation: "" };
-  }
-
-  const prompt = `Check if this new entry contradicts any existing entries in the archive.
-
-Category: ${category}
-New entry: "${newEntry}"
-
-Existing entries:
-${existingEntries.slice(0, 20).map((e, i) => `${i + 1}. ${e}`).join("\n")}
-
-Reply with JSON only:
-{"hasContradiction": true/false, "explanation": "brief explanation or empty string"}`;
-
-  try {
-    const result = await groqCall(prompt);
-    const clean = result.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
-  } catch {
-    return { hasContradiction: false, explanation: "" };
-  }
-}
-
 // ─── FEATURE: Refine Forge Output ────────────────────────────────────────────
 
 export async function geminiRefineForgeOutput(
