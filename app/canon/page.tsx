@@ -678,8 +678,8 @@ export default function CanonPage() {
       }
     }
 
-    addToQueue(entry.id, fullContent, entry.filename);
-    flash(`✓ "${entry.filename}" added to extraction queue`);
+    addToCanonImportQueue(entry.id, fullContent, entry.filename);
+    flash(`✓ "${entry.filename}" added to import queue`);
   }
 
   const [viewingQueueItem, setViewingQueueItem] = useState<string | null>(null);
@@ -1146,174 +1146,86 @@ export default function CanonPage() {
         </div>
       )}
 
-      {/* ── Extract to Vault Side Panel ───────────────────────────────────── */}
+      {/* ── Import to Vault Side Panel — queue-based, uses Key 1 to split Canon Reference into facts ── */}
       {showExtractModal && (
         <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1000, width: "min(480px, 95vw)", background: "var(--va-surface)", borderLeft: "1px solid var(--va-border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.3)" }}>
 
           {/* Panel header */}
           <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>✨ Extract Canon to Vault</h2>
+              <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>⚡ Import to Vault</h2>
               <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                AI reads a canon file and extracts facts into Story Studio
+                Splits a distilled Canon Reference into individual facts by category — no changes, no summarizing, just sorting.
               </p>
             </div>
             <button onClick={() => setShowExtractModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem", padding: "0.25rem" }}>×</button>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
+            <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a file to import:</p>
+            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.875rem" }}>
+              <select
+                value={extractSourceId}
+                onChange={e => setExtractSourceId(e.target.value)}
+                style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", outline: "none" }}
+              >
+                {getAllCanonEntries().map(e => (
+                  <option key={e.id} value={e.id}>{e.filename}</option>
+                ))}
+              </select>
+              <button onClick={addFileToQueue}
+                style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem 1rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem", whiteSpace: "nowrap" }}>
+                ✨ Add
+              </button>
+            </div>
 
-            {/* Step 1 — pick file */}
-            {!extractDone && (
-              <div>
-                <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a file to extract from:</p>
-                <select
-                  value={extractSourceId}
-                  onChange={e => setExtractSourceId(e.target.value)}
-                  disabled={extracting}
-                  style={{ width: "100%", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", marginBottom: "1rem", outline: "none", opacity: extracting ? 0.6 : 1 }}
-                >
-                  {getAllCanonEntries().map(e => (
-                    <option key={e.id} value={e.id}>{e.filename}</option>
-                  ))}
-                </select>
+            <div style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "0.5rem", padding: "0.75rem", marginBottom: "0.875rem", fontSize: "0.75rem", color: "var(--va-text-muted)", lineHeight: "1.6" }}>
+              Works best on already-distilled Canon Reference files (from Distill Canon, or your own AI chat using the Distill Canon Prompt). You can add multiple files — they'll process one at a time and each gets tracked in the floating panel with pause/cancel/restart.
+            </div>
 
-                {/* Queue status */}
-                {queue.length > 0 && (
-                  <div style={{ marginBottom: "0.75rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-                      <p style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                        Extraction Queue ({queue.length})
-                      </p>
-                      {isRunning && (
-                        <button onClick={stopExtraction}
-                          style={{ fontSize: "0.7rem", color: "#f87171", background: "none", border: "1px solid #f87171", borderRadius: "0.25rem", padding: "0.15rem 0.5rem", cursor: "pointer" }}>
-                          ⏹ Stop
-                        </button>
-                      )}
+            {/* Queue list — backed by shared context, survives navigation */}
+            {canonImportQueue.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>
+                  Import Queue ({canonImportQueue.length}) · also tracked in floating panel
+                </p>
+                {canonImportQueue.map(item => (
+                  <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "paused" ? "#fbbf24" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : item.status === "cancelled" ? "var(--va-text-muted)" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+                      <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--va-text)" }}>
+                        {item.status === "running" ? "⏳" : item.status === "paused" ? "⏸" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : item.status === "cancelled" ? "⊘" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "")}
+                      </span>
+                      <div style={{ display: "flex", gap: "0.375rem" }}>
+                        {item.status === "running" && (
+                          <button onClick={() => pauseCanonImportItem(item.id)} title="Pauses after current section"
+                            style={{ background: "none", border: "1px solid #fbbf24", borderRadius: "0.25rem", color: "#fbbf24", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Pause</button>
+                        )}
+                        {item.status === "paused" && (
+                          <button onClick={() => resumeCanonImportItem(item.id)}
+                            style={{ background: "none", border: "1px solid #22c55e", borderRadius: "0.25rem", color: "#22c55e", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Resume</button>
+                        )}
+                        {(item.status === "running" || item.status === "queued" || item.status === "paused") && (
+                          <button onClick={() => cancelCanonImportItem(item.id)}
+                            style={{ background: "none", border: "1px solid #ef4444", borderRadius: "0.25rem", color: "#ef4444", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Cancel</button>
+                        )}
+                        {(item.status === "error" || item.status === "cancelled") && (
+                          <button onClick={() => restartCanonImportItem(item.id)}
+                            style={{ background: "none", border: "1px solid #3b82f6", borderRadius: "0.25rem", color: "#93c5fd", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Restart</button>
+                        )}
+                        {(item.status === "queued" || item.status === "done" || item.status === "error" || item.status === "cancelled") && (
+                          <button onClick={() => removeFromCanonImportQueue(item.id)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem" }}>×</button>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-                      {queue.map(item => (
-                        <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: item.status === "running" ? "0.375rem" : 0 }}>
-                            <span style={{ fontSize: "0.78rem", color: "var(--va-text)", fontWeight: "600", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {item.status === "running" ? "⏳" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : "🕐"} {item.filename.replace(/\.(txt|pdf)$/i, "")}
-                            </span>
-                            <div style={{ display: "flex", gap: "0.375rem", alignItems: "center", flexShrink: 0 }}>
-                              {item.status === "done" && (
-                                <button onClick={() => { setViewingQueueItem(item.id); setExtractedEntries(item.results); setSelectedEntries(new Set(item.results.map((_,i) => i))); setExtractDone(true); }}
-                                  style={{ background: "var(--va-accent)", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.2rem 0.5rem", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600" }}>
-                                  Save {item.factsFound}
-                                </button>
-                              )}
-                              {(item.status === "queued" || item.status === "done" || item.status === "error") && (
-                                <button onClick={() => removeFromQueue(item.id)}
-                                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.8rem", padding: "0.1rem" }}>×</button>
-                              )}
-                            </div>
-                          </div>
-                          {item.status === "running" && (
-                            <>
-                              <div style={{ height: "3px", background: "var(--va-border)", borderRadius: "9999px", overflow: "hidden", marginBottom: "0.25rem" }}>
-                                <div style={{ height: "100%", background: "#7c3aed", borderRadius: "9999px", transition: "width 0.5s", width: item.totalParts > 0 ? `${Math.min(100, (item.currentPart / item.totalParts) * 100)}%` : "5%" }} />
-                              </div>
-                              <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", margin: 0 }}>Part {item.currentPart} of {item.totalParts} · {item.factsFound} facts</p>
-                            </>
-                          )}
-                          {item.status === "done" && (
-                            <p style={{ fontSize: "0.68rem", color: "#4ade80", margin: 0 }}>{item.factsFound} facts extracted</p>
-                          )}
-                          {item.status === "error" && (
-                            <p style={{ fontSize: "0.68rem", color: "#f87171", margin: 0 }}>{item.message}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    {queue.some(i => i.status === "done") && (
-                      <button onClick={clearCompleted} style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", background: "none", border: "none", cursor: "pointer", marginTop: "0.375rem" }}>
-                        Clear completed
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <button onClick={addFileToQueue}
-                    style={{ width: "100%", background: "var(--va-accent)", color: "white", padding: "0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "700", fontSize: "0.9rem" }}>
-                    ✨ Add to Queue
-                </button>
-              </div>
-            )}
-
-            {/* Step 2 — no results */}
-            {extractDone && extractedEntries.length === 0 && (
-              <div style={{ textAlign: "center", padding: "2rem", color: "var(--va-text-muted)" }}>
-                <p style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🤷</p>
-                <p>No usable facts found. Try a different file.</p>
-                <button onClick={() => setExtractDone(false)} style={{ marginTop: "1rem", background: "var(--va-border)", border: "none", borderRadius: "0.375rem", padding: "0.5rem 1rem", cursor: "pointer", color: "var(--va-text)", fontSize: "0.875rem" }}>
-                  Try Another File
-                </button>
-              </div>
-            )}
-
-            {/* Step 3 — results */}
-            {extractDone && extractedEntries.length > 0 && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                  <p style={{ fontWeight: "600", fontSize: "0.875rem" }}>
-                    Found {extractedEntries.length} entries — {selectedEntries.size} selected
-                  </p>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <button onClick={() => setSelectedEntries(new Set(extractedEntries.map((_, i) => i)))}
-                      style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                      All
-                    </button>
-                    <button onClick={() => setSelectedEntries(new Set())}
-                      style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                      None
-                    </button>
-                    <button onClick={() => setExtractDone(false)}
-                      style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.3rem 0.6rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
-                      ← Back
-                    </button>
-                  </div>
-                </div>
-
-                {Object.entries(groupedExtracted).map(([category, items]) => (
-                  <div key={category} style={{ marginBottom: "1rem" }}>
-                    <p style={{ fontSize: "0.7rem", color: "var(--va-accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: "700", marginBottom: "0.4rem" }}>
-                      {(CATEGORY_LABELS as any)[category] ?? category} ({items.length})
+                    <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : item.status === "paused" ? "#fbbf24" : "#c4b5fd", margin: 0 }}>
+                      {item.status === "done" ? "✓ " + item.importedCount + " entries imported to Canon Story" : item.progress}
                     </p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                      {items.map(({ entry, index }) => (
-                        <div key={index}
-                          onClick={() => toggleEntry(index)}
-                          style={{ display: "flex", alignItems: "flex-start", gap: "0.625rem", padding: "0.5rem 0.75rem", borderRadius: "0.375rem", border: `1px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "rgba(59,130,246,0.08)" : "var(--va-bg)", cursor: "pointer", transition: "all 0.15s" }}>
-                          <div style={{ width: "16px", height: "16px", borderRadius: "3px", border: `2px solid ${selectedEntries.has(index) ? "var(--va-accent)" : "var(--va-border)"}`, background: selectedEntries.has(index) ? "var(--va-accent)" : "transparent", flexShrink: 0, marginTop: "1px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            {selectedEntries.has(index) && <span style={{ color: "white", fontSize: "10px" }}>✓</span>}
-                          </div>
-                          <p style={{ fontSize: "0.8rem", color: "var(--va-text)", lineHeight: "1.4", margin: 0 }}>{entry.text}</p>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
-
-          {/* Panel footer */}
-          {extractDone && extractedEntries.length > 0 && (
-            <div style={{ padding: "1rem 1.5rem", borderTop: "1px solid var(--va-border)", display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
-              <button onClick={() => setShowExtractModal(false)}
-                style={{ background: "none", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>
-                Cancel
-              </button>
-              <button onClick={saveSelectedEntries} disabled={selectedEntries.size === 0}
-                style={{ background: "var(--va-accent)", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem 1.5rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem", opacity: selectedEntries.size === 0 ? 0.4 : 1 }}>
-                Save {selectedEntries.size} Entries to Vault
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -1369,10 +1281,10 @@ export default function CanonPage() {
               ✨ Distill Canon (in-app)
             </button>
           )}
-          {/* Extract to Vault button */}
+          {/* Import to Vault button — opens queue-based picker, uses Key 1 */}
           <button onClick={openExtractModal}
             style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid #7c3aed", background: "rgba(124,58,237,0.15)", color: "#c4b5fd", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
-            ✨ Extract to Vault
+            ⚡ Import to Vault
           </button>
           <button onClick={handleCanonPriority}
             style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: `2px solid ${canonPriority !== "none" ? (canonPriority === "red" ? "#ef4444" : "#3b82f6") : "var(--va-border)"}`, background: canonPriority !== "none" ? (canonPriority === "red" ? "#ef4444" : "#3b82f6") : "transparent", color: canonPriority !== "none" ? "white" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
@@ -1574,28 +1486,6 @@ export default function CanonPage() {
                         {isTimeline && <span style={{ background: "rgba(59,130,246,0.2)", color: "#93c5fd", fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "9999px", flexShrink: 0 }}>VERBATIM</span>}
                       </div>
                       <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0, alignItems: "center" }}>
-                        {/* Import to Vault button — now queue-based, survives navigation */}
-                        {!isTimeline && hasGeminiKey() && (() => {
-                          const queueItem = canonImportQueue.find(q => q.id === entry.id);
-                          const isActive = queueItem && (queueItem.status === "running" || queueItem.status === "queued" || queueItem.status === "paused");
-                          return (
-                            <button onClick={async () => {
-                              if (isActive) return;
-                              let fullContent = entry.content;
-                              if (entry.content === IDB_PLACEHOLDER) {
-                                const idbContent = await loadCanonContentFromIDB(entry.id);
-                                if (idbContent) fullContent = idbContent;
-                                else { flash("✗ Could not load file content"); return; }
-                              }
-                              addToCanonImportQueue(entry.id, fullContent, entry.filename);
-                              flash("✨ Added to import queue — tracked in floating panel");
-                            }}
-                              disabled={isActive}
-                              style={{ background: queueItem?.status === "done" ? "#4ade80" : isActive ? "var(--va-border)" : "#7c3aed", color: "white", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.625rem", cursor: isActive ? "default" : "pointer", fontSize: "0.72rem", fontWeight: "600", whiteSpace: "nowrap", opacity: isActive ? 0.6 : 1 }}>
-                              {queueItem?.status === "running" ? "⏳ Importing..." : queueItem?.status === "paused" ? "⏸ Paused" : queueItem?.status === "done" ? "✓ Imported" : "⚡ Import to Vault"}
-                            </button>
-                          );
-                        })()}
                         <button onClick={async () => {
                           if (expandedEntry === entry.id) { setExpandedEntry(null); return; }
                           if (entry.content === IDB_PLACEHOLDER && !resolvedContent[entry.id]) {
