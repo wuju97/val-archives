@@ -308,6 +308,7 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
     function handleKeydown(e: KeyboardEvent) {
       if (e.key.length !== 1) return;
       typed = (typed + e.key.toLowerCase()).slice(-target.length);
+      console.log("[marauder debug] typed buffer:", JSON.stringify(typed)); // TEMPORARY — remove once confirmed working
       if (typed === target) {
         setMarauderActive(true);
         let count = 0;
