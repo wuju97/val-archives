@@ -374,6 +374,24 @@ Based on exactly where we stopped:
 - What threats or opportunities are active?
 - What does my character need to do first?
 
+## 11. VAULT EXTRACTION HINTS
+List any information from this session that should be added to long-term memory.
+Include:
+- Character development
+- New relationships
+- Relationship changes
+- New powers
+- New items
+- New locations
+- New organizations
+- New lore
+- New mysteries
+- New world changes
+- New goals
+- New enemies
+- New allies
+Focus only on information that should persist beyond this session.
+
 ---
 
 Please answer every section. Do not skip or abbreviate. This information will be used to reconstruct the session in full detail.`;
