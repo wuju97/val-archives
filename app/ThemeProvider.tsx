@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
 const FONT_SIZE_PX: Record<string, string> = { small: "14px", medium: "16px", large: "18px", xlarge: "20px" };
@@ -20,6 +20,14 @@ const HP_HOUSES: Record<string, { primary: string; secondary: string }> = {
   hufflepuff: { primary: "#ecb939", secondary: "#372e29" },
 };
 const HOUSE_ORDER = ["gryffindor", "slytherin", "ravenclaw", "hufflepuff"];
+
+const HOGWARTS_PALETTES: Record<string, { gold: string; black: string; parchment: string; burgundy: string; bronze: string; magicBlue: string }> = {
+  classic: { gold: "#D4AF37", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#5C1A1B", bronze: "#8B6B3F", magicBlue: "#5DADE2" },
+  gryffindor: { gold: "#D3A625", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#740001", bronze: "#AE0001", magicBlue: "#5DADE2" },
+  ravenclaw: { gold: "#946B2D", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#0E1A40", bronze: "#222F5B", magicBlue: "#5DADE2" },
+  slytherin: { gold: "#AAAAAA", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#1A472A", bronze: "#2A623D", magicBlue: "#5DADE2" },
+  hufflepuff: { gold: "#FFDB00", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#372E29", bronze: "#726255", magicBlue: "#5DADE2" },
+};
 
 function lerpColor(h1: string, h2: string, t: number): string {
   function hex(h: string): [number, number, number] { return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
@@ -168,8 +176,81 @@ export function applyStoredTheme() {
     for (const key of NAV_TAB_KEYS) {
       r.style.setProperty(`--va-navcolor-${key}`, navTabColors[key] || a);
     }
+
+    // ── Hogwarts Archive Mode — full immersive palette override ──
+    if (t.hogwartsMode) {
+      const palette = HOGWARTS_PALETTES[t.hogwartsPalette] || HOGWARTS_PALETTES.classic;
+      r.style.setProperty("--hp-gold", palette.gold);
+      r.style.setProperty("--hp-black", palette.black);
+      r.style.setProperty("--hp-parchment", palette.parchment);
+      r.style.setProperty("--hp-burgundy", palette.burgundy);
+      r.style.setProperty("--hp-bronze", palette.bronze);
+      r.style.setProperty("--hp-magic-blue", palette.magicBlue);
+      r.style.setProperty("--va-bg", `radial-gradient(circle at center, #1a1a1a 0%, ${palette.black} 40%, #050505 100%)`);
+      r.style.setProperty("--va-surface", palette.parchment);
+      r.style.setProperty("--va-border", palette.bronze);
+      r.style.setProperty("--va-card-border", palette.gold);
+      r.style.setProperty("--va-text", "#2B2B2B");
+      r.style.setProperty("--va-text-muted", palette.bronze);
+      if (animatedAccent === "none") r.style.setProperty("--va-accent", palette.gold);
+      r.style.setProperty("--hp-dust-enabled", t.hogwartsDust !== false ? "1" : "0");
+      r.style.setProperty("--hp-glow-enabled", t.hogwartsGlow !== false ? "1" : "0");
+      r.style.setProperty("--hp-scroll-enabled", t.hogwartsScrollReveal !== false ? "1" : "0");
+      r.setAttribute("data-hogwarts", "true");
+    } else {
+      r.removeAttribute("data-hogwarts");
+    }
   } catch {}
 }
+
+// Global keyframes + Hogwarts-specific element styling — injected once, always present.
+// Scoped under [data-hogwarts="true"] so it has zero effect unless Hogwarts Mode is on.
+const HOGWARTS_GLOBAL_CSS = `
+@keyframes va-floating-dust {
+  0% { transform: translateY(0px); opacity: .2; }
+  50% { transform: translateY(-14px); opacity: .55; }
+  100% { transform: translateY(0px); opacity: .2; }
+}
+@keyframes va-pensieve-ripple {
+  0% { transform: scale(.8); opacity: 0; }
+  60% { opacity: .9; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@keyframes va-reveal-scroll {
+  from { transform: rotateX(-18deg) translateY(6px); opacity: 0; }
+  to { transform: rotateX(0deg) translateY(0); opacity: 1; }
+}
+@keyframes va-marauder-fade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes va-footstep-fade {
+  0% { opacity: 0; transform: scale(0.6); }
+  20% { opacity: .8; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+[data-hogwarts="true"] {
+  --va-glow-color: var(--hp-magic-blue, #5DADE2);
+}
+[data-hogwarts="true"] button:hover,
+[data-hogwarts="true"] a:hover {
+  box-shadow: ${"0 0 10px var(--va-glow-color), 0 0 20px var(--va-glow-color)"};
+  transition: box-shadow 0.25s ease, transform 0.15s ease;
+}
+[data-hogwarts="true"] .va-hogwarts-dust-particle {
+  position: fixed;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--hp-gold, #D4AF37) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 1;
+  animation: va-floating-dust ease-in-out infinite;
+}
+`;
+
+const FOOTSTEP_GLYPHS = ["👣"];
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -195,5 +276,104 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
     };
   }, []);
 
-  return <>{children}</>;
+  // Floating dust particles — only rendered while Hogwarts Mode + dust are both on.
+  // Re-checks on every route change since theme can change between page visits.
+  const [hogwartsActive, setHogwartsActive] = useState(false);
+  const [dustOn, setDustOn] = useState(false);
+  useEffect(() => {
+    function checkHogwarts() {
+      try {
+        const t = JSON.parse(localStorage.getItem("valArchivesTheme") || "{}");
+        setHogwartsActive(!!t.hogwartsMode);
+        setDustOn(t.hogwartsDust !== false);
+      } catch { setHogwartsActive(false); }
+    }
+    checkHogwarts();
+    window.addEventListener("va-theme-update", checkHogwarts);
+    window.addEventListener("storage", checkHogwarts);
+    return () => {
+      window.removeEventListener("va-theme-update", checkHogwarts);
+      window.removeEventListener("storage", checkHogwarts);
+    };
+  }, [pathname]);
+
+  // Marauder's Map easter egg — typing "Mischief Managed" anywhere triggers a brief
+  // map-mode overlay with fading footprints, regardless of which page you're on.
+  const [marauderActive, setMarauderActive] = useState(false);
+  const [footsteps, setFootsteps] = useState<Array<{ id: number; x: number; y: number }>>([]);
+  useEffect(() => {
+    let typed = "";
+    const target = "mischief managed";
+    function handleKeydown(e: KeyboardEvent) {
+      if (e.key.length !== 1) return;
+      typed = (typed + e.key.toLowerCase()).slice(-target.length);
+      if (typed === target) {
+        setMarauderActive(true);
+        let count = 0;
+        const stepInterval = setInterval(() => {
+          count++;
+          setFootsteps(prev => [...prev, {
+            id: Date.now() + count,
+            x: 10 + Math.random() * 80,
+            y: 10 + Math.random() * 80,
+          }].slice(-12));
+          if (count >= 10) clearInterval(stepInterval);
+        }, 280);
+        setTimeout(() => { setMarauderActive(false); setFootsteps([]); }, 4500);
+      }
+    }
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, []);
+
+  const dustParticles = (hogwartsActive && dustOn)
+    ? Array.from({ length: 18 }, (_, i) => ({
+        id: i,
+        left: `${(i * 5.7) % 100}%`,
+        top: `${(i * 13.3) % 100}%`,
+        size: 2 + (i % 4),
+        duration: 4 + (i % 5),
+        delay: (i % 7) * 0.6,
+      }))
+    : [];
+
+  return (
+    <>
+      <style>{HOGWARTS_GLOBAL_CSS}</style>
+
+      {dustParticles.map(p => (
+        <div key={p.id} className="va-hogwarts-dust-particle" style={{
+          left: p.left, top: p.top, width: `${p.size}px`, height: `${p.size}px`,
+          animationDuration: `${p.duration}s`, animationDelay: `${p.delay}s`,
+        }} />
+      ))}
+
+      {marauderActive && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999, pointerEvents: "none",
+          background: "radial-gradient(circle at center, rgba(139,111,63,0.15) 0%, rgba(15,15,18,0.55) 100%)",
+          animation: "va-marauder-fade 4.5s ease-in-out forwards",
+        }}>
+          <p style={{
+            position: "absolute", top: "8%", left: "50%", transform: "translateX(-50%)",
+            fontFamily: "'IM Fell English', serif", fontSize: "1.4rem", color: "#D4AF37",
+            letterSpacing: "0.15em", textShadow: "0 0 12px rgba(212,175,55,0.6)",
+          }}>
+            ✦ Mischief Managed ✦
+          </p>
+          {footsteps.map(f => (
+            <span key={f.id} style={{
+              position: "absolute", left: `${f.x}%`, top: `${f.y}%`,
+              fontSize: "1.1rem", animation: "va-footstep-fade 2s ease-out forwards",
+              filter: "sepia(1) opacity(0.7)",
+            }}>
+              {FOOTSTEP_GLYPHS[0]}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {children}
+    </>
+  );
 }

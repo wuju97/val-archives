@@ -317,12 +317,12 @@ function CategoryPageInner() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-              {entries.map((entry) => {
+              {entries.map((entry, idx) => {
                 const effectiveSub = getEffectiveSubTag(entry.text);
                 const hasExplicitTag = !!getSubTag(entry.text);
                 const displayText = getDisplayText(entry.text);
                 return (
-                  <div key={entry.id} style={{ ...S.surface, padding: "1rem" }}>
+                  <div key={entry.id} style={{ ...S.surface, padding: "1rem", animation: "va-reveal-scroll 0.4s ease-out backwards", animationDelay: `${Math.min(idx * 0.03, 0.5)}s`, transformStyle: "preserve-3d" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                         {effectiveSub && effectiveSub !== "General" && (

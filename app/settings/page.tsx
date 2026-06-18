@@ -55,6 +55,7 @@ type ShadowIntensity = "none" | "subtle" | "strong";
 type AnimSpeed = "off" | "fast" | "normal" | "slow";
 type AnimatedAccentMode = "none" | "rainbow" | "hp-house-single" | "hp-house-cycle" | "golden-snitch" | "patronus" | "marauders-map" | "felix-felicis" | "dementor";
 type HPHouse = "gryffindor" | "slytherin" | "ravenclaw" | "hufflepuff";
+type HogwartsPalette = "classic" | "gryffindor" | "ravenclaw" | "slytherin" | "hufflepuff";
 
 type NavTabColors = {
   home?: string; pensieve?: string; rulebook?: string; story?: string;
@@ -75,6 +76,14 @@ type ThemeSettings = {
   linkColor: string; successColor: string; errorColor: string; warningColor: string; cardBorderColor: string;
   animatedAccent: AnimatedAccentMode;
   hpHouse: HPHouse;
+  // Hogwarts Archive Mode — full immersive theme, separate from the lighter animated-accent system
+  hogwartsMode: boolean;
+  hogwartsPalette: HogwartsPalette;
+  hogwartsDust: boolean;
+  hogwartsGlow: boolean;
+  hogwartsScrollReveal: boolean;
+  hogwartsSounds: boolean;
+  marauderModeActive: boolean;
   // Per-tab nav colors
   navTabColors: NavTabColors;
 };
@@ -88,6 +97,7 @@ const DEFAULT_THEME: ThemeSettings = {
   cornerStyle: "soft", shadowIntensity: "subtle", animSpeed: "normal", glowEffects: true,
   linkColor: "#3b82f6", successColor: "#22c55e", errorColor: "#ef4444", warningColor: "#f59e0b", cardBorderColor: "#1f2937",
   animatedAccent: "none", hpHouse: "gryffindor",
+  hogwartsMode: false, hogwartsPalette: "classic", hogwartsDust: true, hogwartsGlow: true, hogwartsScrollReveal: true, hogwartsSounds: false, marauderModeActive: false,
   navTabColors: {},
 };
 
@@ -139,6 +149,15 @@ const HP_HOUSES: Record<HPHouse, { name: string; primary: string; secondary: str
   slytherin: { name: "Slytherin", primary: "#1a472a", secondary: "#aaaaaa", icon: "🐍" },
   ravenclaw: { name: "Ravenclaw", primary: "#0e1a40", secondary: "#946b2d", icon: "🦅" },
   hufflepuff: { name: "Hufflepuff", primary: "#ecb939", secondary: "#372e29", icon: "🦡" },
+};
+
+// ── Hogwarts Archive Mode — full immersive palette per house, "classic" is the base spec ──
+const HOGWARTS_PALETTES: Record<HogwartsPalette, { name: string; gold: string; black: string; parchment: string; burgundy: string; bronze: string; magicBlue: string }> = {
+  classic: { name: "Hogwarts Archive", gold: "#D4AF37", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#5C1A1B", bronze: "#8B6B3F", magicBlue: "#5DADE2" },
+  gryffindor: { name: "Gryffindor Archive", gold: "#D3A625", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#740001", bronze: "#AE0001", magicBlue: "#5DADE2" },
+  ravenclaw: { name: "Ravenclaw Archive", gold: "#946B2D", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#0E1A40", bronze: "#222F5B", magicBlue: "#5DADE2" },
+  slytherin: { name: "Slytherin Archive", gold: "#AAAAAA", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#1A472A", bronze: "#2A623D", magicBlue: "#5DADE2" },
+  hufflepuff: { name: "Hufflepuff Archive", gold: "#FFDB00", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#372E29", bronze: "#726255", magicBlue: "#5DADE2" },
 };
 
 const ANIMATED_ACCENT_OPTIONS: Array<{ id: AnimatedAccentMode; label: string; desc: string }> = [
@@ -212,6 +231,30 @@ function applyTheme(theme: ThemeSettings) {
   // Per-tab nav colors — exposed as individual variables, falls back to accent if unset
   for (const { key } of NAV_TAB_KEYS) {
     root.style.setProperty(`--va-navcolor-${key}`, theme.navTabColors[key] || theme.accentColor);
+  }
+
+  // ── Hogwarts Archive Mode ──
+  if (theme.hogwartsMode) {
+    const p = HOGWARTS_PALETTES[theme.hogwartsPalette];
+    root.style.setProperty("--hp-gold", p.gold);
+    root.style.setProperty("--hp-black", p.black);
+    root.style.setProperty("--hp-parchment", p.parchment);
+    root.style.setProperty("--hp-burgundy", p.burgundy);
+    root.style.setProperty("--hp-bronze", p.bronze);
+    root.style.setProperty("--hp-magic-blue", p.magicBlue);
+    root.style.setProperty("--va-bg", `radial-gradient(circle at center, #1a1a1a 0%, ${p.black} 40%, #050505 100%)`);
+    root.style.setProperty("--va-surface", p.parchment);
+    root.style.setProperty("--va-border", p.bronze);
+    root.style.setProperty("--va-card-border", p.gold);
+    root.style.setProperty("--va-text", "#2B2B2B");
+    root.style.setProperty("--va-text-muted", p.bronze);
+    root.style.setProperty("--va-accent", p.gold);
+    root.style.setProperty("--hp-dust-enabled", theme.hogwartsDust ? "1" : "0");
+    root.style.setProperty("--hp-glow-enabled", theme.hogwartsGlow ? "1" : "0");
+    root.style.setProperty("--hp-scroll-enabled", theme.hogwartsScrollReveal ? "1" : "0");
+    root.setAttribute("data-hogwarts", "true");
+  } else {
+    root.removeAttribute("data-hogwarts");
   }
 
   // Body-level font application (covers text not wrapped in a styled element)
@@ -637,6 +680,62 @@ export default function SettingsPage() {
                     Active everywhere — speed follows your Animation Speed setting above.
                   </p>
                 )}
+
+                {/* ── Hogwarts Archive Mode — the full immersive theme ── */}
+                <div style={{ borderTop: "1px solid var(--va-border)", marginTop: "1.25rem", paddingTop: "1.25rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.875rem" }}>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontSize: "0.92rem", fontWeight: "700" }}>🏰 Hogwarts Archive Mode</p>
+                      <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)" }}>Full immersive theme — parchment cards, magical glow, scroll reveal</p>
+                    </div>
+                    <button onClick={() => updateTheme({ hogwartsMode: !theme.hogwartsMode })}
+                      style={{ width: "44px", height: "24px", borderRadius: "9999px", border: "none", cursor: "pointer", background: theme.hogwartsMode ? "#D4AF37" : "var(--va-border)", position: "relative", flexShrink: 0 }}>
+                      <div style={{ position: "absolute", top: "2px", left: theme.hogwartsMode ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", background: "white", transition: "left 0.2s" }} />
+                    </button>
+                  </div>
+
+                  {theme.hogwartsMode && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}>
+                      <div>
+                        <p style={{ fontSize: "0.75rem", fontWeight: "600", marginBottom: "0.5rem" }}>House Palette</p>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.375rem" }}>
+                          {(Object.keys(HOGWARTS_PALETTES) as HogwartsPalette[]).map(p => (
+                            <button key={p} onClick={() => updateTheme({ hogwartsPalette: p })}
+                              style={{ padding: "0.45rem", borderRadius: "0.4rem", border: `2px solid ${theme.hogwartsPalette === p ? HOGWARTS_PALETTES[p].gold : "var(--va-border)"}`, background: `linear-gradient(135deg, ${HOGWARTS_PALETTES[p].burgundy}33, ${HOGWARTS_PALETTES[p].gold}22)`, cursor: "pointer", textAlign: "center" }}>
+                              <p style={{ fontSize: "0.65rem", color: "var(--va-text)", fontWeight: theme.hogwartsPalette === p ? "700" : "400" }}>{HOGWARTS_PALETTES[p].name}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                        {([
+                          ["hogwartsDust", "✨ Floating Dust", "Subtle glowing particles drifting upward"],
+                          ["hogwartsGlow", "🪄 Spell Glow", "Buttons glow like a charging wand on hover"],
+                          ["hogwartsScrollReveal", "📜 Scroll Reveal", "Entries unfurl like ancient documents when opened"],
+                          ["hogwartsSounds", "🔔 Subtle Sounds", "Tiny paper rustle / chime on hover (experimental)"],
+                        ] as Array<[keyof ThemeSettings, string, string]>).map(([key, label, desc]) => (
+                          <div key={key} style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                            <button onClick={() => updateTheme({ [key]: !theme[key] } as Partial<ThemeSettings>)}
+                              style={{ width: "36px", height: "20px", borderRadius: "9999px", border: "none", cursor: "pointer", background: theme[key] ? "#D4AF37" : "var(--va-border)", position: "relative", flexShrink: 0 }}>
+                              <div style={{ position: "absolute", top: "2px", left: theme[key] ? "18px" : "2px", width: "16px", height: "16px", borderRadius: "50%", background: "white", transition: "left 0.2s" }} />
+                            </button>
+                            <div>
+                              <p style={{ fontSize: "0.75rem", fontWeight: "600" }}>{label}</p>
+                              <p style={{ fontSize: "0.63rem", color: "var(--va-text-muted)" }}>{desc}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ background: "rgba(212,175,55,0.1)", border: "1px solid #D4AF37", borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
+                        <p style={{ fontSize: "0.7rem", color: "var(--va-text)", lineHeight: "1.5" }}>
+                          🪶 <strong>Secret:</strong> type <code style={{ background: "rgba(0,0,0,0.3)", padding: "0.1rem 0.3rem", borderRadius: "0.2rem" }}>Mischief Managed</code> anywhere in the app to briefly reveal a Marauder's Map mode.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

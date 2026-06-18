@@ -164,7 +164,7 @@ export default function PensievePage() {
   };
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, filter: aiMode ? "hue-rotate(10deg) brightness(1.05)" : "none", transition: "filter 0.6s ease" }}>
       <Link href="/dashboard" style={{ ...S.muted, fontSize: "0.875rem", display: "block", marginBottom: "1.5rem" }}>← Home</Link>
       <h1 style={{ fontSize: "3rem", fontWeight: "bold", marginBottom: "0.5rem" }}>🌀 Pensieve</h1>
       <p style={{ ...S.muted, marginBottom: "1rem" }}>{archive.entries.length + (archive.playerEntries ?? []).length} total memories — {archive.entries.length} canon · {(archive.playerEntries ?? []).length} player</p>
@@ -182,6 +182,14 @@ export default function PensievePage() {
       {/* ── Pensieve AI Search ─────────────────────────────────────────────── */}
       <div style={{ marginBottom: "1.5rem" }}>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <div style={{ position: "relative" }}>
+          {aiSearching && (
+            <div style={{
+              position: "absolute", inset: 0, borderRadius: "0.5rem", pointerEvents: "none",
+              border: "2px solid var(--hp-magic-blue, transparent)",
+              animation: "va-pensieve-ripple 1.4s ease-out infinite",
+            }} />
+          )}
           <input value={aiQuery}
             onChange={e => { setAiQuery(e.target.value); if (!e.target.value.trim()) { setAiResults(null); setAiAnswer(null); setAiMode(false); } }}
             onKeyDown={e => { if (e.key === "Enter") runPensieveSearch(); }}
@@ -197,6 +205,7 @@ export default function PensievePage() {
               Clear
             </button>
           )}
+        </div>
         </div>
 
         {/* Stage indicator */}
