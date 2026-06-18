@@ -2581,3 +2581,29 @@ export async function geminiExtractCanonToVault(
   if (onProgress) onProgress("Complete — " + allEntries.length + " facts extracted!");
   return allEntries;
 }
+
+// ─── AI Merge for Contradiction Resolution (Key 3 — general) ──────────────────
+// Takes two conflicting/overlapping vault entries about the same subject and asks
+// Gemini to combine them into one clear, accurate entry. Used by the "Merge" action
+// in the Check Contradictions feature, on a per-pair basis (only spent when the user
+// actually chooses to merge a specific pair, not during the free local scan).
+export async function geminiMergeContradiction(
+  textA: string,
+  textB: string,
+  subject: string
+): Promise<string> {
+  if (!hasGeminiQualityKey()) throw new Error("NO_GEMINI_KEY");
+
+  const prompt = "You are merging two vault entries about the same subject (\"" + subject + "\") into one clear, accurate entry.\n\n"
+    + "ENTRY A: " + textA + "\n"
+    + "ENTRY B: " + textB + "\n\n"
+    + "RULES:\n"
+    + "- If both facts are true and compatible, combine them into one well-written sentence or two that captures both.\n"
+    + "- If they genuinely conflict (e.g. one is outdated, one is more accurate or more recent), prefer the more specific/complete one, but do not silently discard meaningfully different information — if truly uncertain which is correct, keep both as a single entry noting the discrepancy.\n"
+    + "- Do not add new information that wasn't in either entry.\n"
+    + "- Keep it concise — this becomes a single vault entry, not a paragraph.\n\n"
+    + "Return ONLY the merged entry text, nothing else — no quotes, no explanation, no markdown.";
+
+  const result = await geminiQualityCallFor("general", prompt);
+  return result.trim().replace(/^["']|["']$/g, "");
+}

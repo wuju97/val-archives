@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { hasGeminiKey, geminiVerifyCategories } from "../../lib/geminiEngine";
+import { hasGeminiKey, geminiVerifyCategories, geminiMergeContradiction } from "../../lib/geminiEngine";
 import {
   loadArchive, loadArchiveAsync, saveArchive, regenerateMasterPrompt,
   CATEGORY_LABELS, CATEGORY_ICONS, MASTER_PROMPT_ORDER,
   StoryCategory, getPriorityLevel, setPriority, ArchiveData, ImportedSource,
   deleteCanonSource, deletePlayerSource,
+  findContradictionCandidates, ContradictionCandidate,
+  resolveContradictionKeep, resolveContradictionReplace, resolveContradictionMerge,
 } from "@/lib/archiveEngine";
 
 type SubTab = "canon" | "player";
@@ -27,6 +29,14 @@ export default function StoryStudioPage() {
     suggestedCategory: string; reason: string; accepted: boolean; subtab: SubTab;
   }>>([]);
   const [showVerify, setShowVerify] = useState(false);
+
+  // ── Check Contradictions — per-subtab, local scan + manual resolution ────────
+  const [showContradictions, setShowContradictions] = useState(false);
+  const [contradictionCandidates, setContradictionCandidates] = useState<ContradictionCandidate[]>([]);
+  const [contradictionIndex, setContradictionIndex] = useState(0);
+  const [applyToAll, setApplyToAll] = useState(false);
+  const [mergingContradiction, setMergingContradiction] = useState(false);
+  const [resolvedCount, setResolvedCount] = useState(0);
 
   useEffect(() => {
     const sync = loadArchive();
@@ -117,6 +127,78 @@ export default function StoryStudioPage() {
     setVerifyResults([]);
   }
 
+  // ── Check Contradictions handlers ───────────────────────────────────────────
+  function handleCheckContradictions() {
+    const a = loadArchive();
+    const entries = activeSubTab === "canon" ? a.entries : (a.playerEntries ?? []);
+    const candidates = findContradictionCandidates(entries);
+    setContradictionCandidates(candidates);
+    setContradictionIndex(0);
+    setApplyToAll(false);
+    setResolvedCount(0);
+    setShowContradictions(true);
+  }
+
+  async function handleResolve(action: "keep" | "replace" | "merge", keepId?: string) {
+    const current = contradictionCandidates[contradictionIndex];
+    if (!current) return;
+
+    let a = loadArchive();
+
+    if (action === "keep") {
+      a = resolveContradictionKeep(a);
+    } else if (action === "replace") {
+      const finalKeepId = keepId ?? current.entryB.id;
+      const removeId = finalKeepId === current.entryA.id ? current.entryB.id : current.entryA.id;
+      a = resolveContradictionReplace(a, activeSubTab, finalKeepId, removeId);
+    } else if (action === "merge") {
+      setMergingContradiction(true);
+      try {
+        const mergedText = await geminiMergeContradiction(current.entryA.text, current.entryB.text, current.subject);
+        a = resolveContradictionMerge(a, activeSubTab, current.entryA.id, current.entryB.id, mergedText);
+      } catch {
+        setMergingContradiction(false);
+        alert("✗ Merge failed — check your Gemini key in Settings → AI");
+        return;
+      }
+      setMergingContradiction(false);
+    }
+
+    const refreshed = regenerateMasterPrompt(a);
+    saveArchive(refreshed);
+    setArchive(refreshed);
+    updateCounts(refreshed);
+    setResolvedCount(prev => prev + 1);
+
+    if (applyToAll) {
+      // Apply the same action to all remaining candidates automatically.
+      // For "replace", default to keeping entryB (the second/typically-later entry)
+      // for every remaining pair, since there's no per-pair prompt once automated.
+      const remaining = contradictionCandidates.slice(contradictionIndex + 1);
+      let workingArchive = refreshed;
+      for (const candidate of remaining) {
+        if (action === "merge") {
+          try {
+            const mergedText = await geminiMergeContradiction(candidate.entryA.text, candidate.entryB.text, candidate.subject);
+            workingArchive = resolveContradictionMerge(workingArchive, activeSubTab, candidate.entryA.id, candidate.entryB.id, mergedText);
+          } catch { continue; }
+        } else if (action === "replace") {
+          workingArchive = resolveContradictionReplace(workingArchive, activeSubTab, candidate.entryB.id, candidate.entryA.id);
+        }
+        // "keep" applied to all remaining is a no-op, nothing to do per candidate
+      }
+      const finalArchive = regenerateMasterPrompt(workingArchive);
+      saveArchive(finalArchive);
+      setArchive(finalArchive);
+      updateCounts(finalArchive);
+      setResolvedCount(contradictionCandidates.length);
+      setContradictionIndex(contradictionCandidates.length);
+      return;
+    }
+
+    setContradictionIndex(prev => prev + 1);
+  }
+
   const S = {
     subTabBtn: (active: boolean, color: string) => ({
       padding: "0.5rem 1.5rem",
@@ -138,12 +220,18 @@ export default function StoryStudioPage() {
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
         <h1 style={{ fontSize: "3rem", fontWeight: "bold" }}>📖 Story Studio</h1>
-        {hasGeminiKey() && (totalCanon > 0 || totalPlayer > 0) && (
-          <button onClick={handleVerify} disabled={verifying}
-            style={{ background: "#7c3aed", color: "white", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: verifying ? 0.6 : 1 }}>
-            {verifying ? "✨ Checking..." : "✨ AI Verify Categories"}
+        <div style={{ display: "flex", gap: "0.625rem" }}>
+          <button onClick={handleCheckContradictions} disabled={total === 0}
+            style={{ background: "rgba(245,158,11,0.15)", border: "1px solid #f59e0b", color: "#fbbf24", padding: "0.5rem 1rem", borderRadius: "0.5rem", cursor: total === 0 ? "default" : "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: total === 0 ? 0.5 : 1 }}>
+            🔍 Check Contradictions
           </button>
-        )}
+          {hasGeminiKey() && (totalCanon > 0 || totalPlayer > 0) && (
+            <button onClick={handleVerify} disabled={verifying}
+              style={{ background: "#7c3aed", color: "white", padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: verifying ? 0.6 : 1 }}>
+              {verifying ? "✨ Checking..." : "✨ AI Verify Categories"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Subtab toggle */}
@@ -259,6 +347,91 @@ export default function StoryStudioPage() {
           ))}
         </div>
       )}
+
+      {/* Check Contradictions modal */}
+      {showContradictions && (() => {
+        const current = contradictionCandidates[contradictionIndex];
+        const done = contradictionIndex >= contradictionCandidates.length;
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 1001, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+            <div style={{ background: "var(--va-surface)", border: "1px solid #f59e0b", borderRadius: "0.75rem", width: "min(640px, 95vw)", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
+              <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <h3 style={{ fontWeight: "bold", fontSize: "1.1rem", color: "#fbbf24", marginBottom: "0.2rem" }}>🔍 Check Contradictions — {activeSubTab === "canon" ? "Canon Story" : "Player Story"}</h3>
+                  <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)" }}>
+                    {contradictionCandidates.length === 0
+                      ? "No potential contradictions found in this subtab."
+                      : done ? `Resolved ${resolvedCount} of ${contradictionCandidates.length} pairs.` : `Pair ${contradictionIndex + 1} of ${contradictionCandidates.length}`}
+                  </p>
+                </div>
+                <button onClick={() => setShowContradictions(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
+              </div>
+
+              <div style={{ padding: "1.25rem 1.5rem", overflowY: "auto", flex: 1 }}>
+                {contradictionCandidates.length === 0 ? (
+                  <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem", textAlign: "center", padding: "2rem 0" }}>
+                    Nothing to review — this subtab's entries look consistent. This scan runs locally and costs nothing, so feel free to re-check anytime after new imports.
+                  </p>
+                ) : done ? (
+                  <div style={{ textAlign: "center", padding: "2rem 0" }}>
+                    <p style={{ fontSize: "2rem", marginBottom: "0.75rem" }}>✓</p>
+                    <p style={{ color: "var(--va-text)", fontSize: "0.95rem", fontWeight: "600", marginBottom: "0.5rem" }}>All pairs reviewed</p>
+                    <button onClick={() => setShowContradictions(false)}
+                      style={{ background: "var(--va-accent)", color: "white", padding: "0.5rem 1.25rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", marginTop: "0.5rem" }}>
+                      Close
+                    </button>
+                  </div>
+                ) : current ? (
+                  <div>
+                    <p style={{ fontSize: "0.72rem", color: "#fbbf24", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.75rem" }}>
+                      Shared subject: {current.subject}
+                    </p>
+
+                    <div style={{ background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.875rem", marginBottom: "0.625rem" }}>
+                      <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", fontWeight: "600", marginBottom: "0.375rem" }}>ENTRY A</p>
+                      <p style={{ fontSize: "0.875rem", color: "var(--va-text)", lineHeight: "1.5" }}>{current.entryA.text}</p>
+                    </div>
+                    <div style={{ background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.875rem", marginBottom: "1rem" }}>
+                      <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)", fontWeight: "600", marginBottom: "0.375rem" }}>ENTRY B</p>
+                      <p style={{ fontSize: "0.875rem", color: "var(--va-text)", lineHeight: "1.5" }}>{current.entryB.text}</p>
+                    </div>
+
+                    <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.875rem", flexWrap: "wrap" }}>
+                      <button onClick={() => handleResolve("keep")} disabled={mergingContradiction}
+                        style={{ flex: 1, background: "var(--va-border)", color: "var(--va-text)", padding: "0.55rem 0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.82rem", minWidth: "120px" }}>
+                        Keep Both
+                      </button>
+                      <button onClick={() => handleResolve("replace", current.entryA.id)} disabled={mergingContradiction}
+                        style={{ flex: 1, background: "rgba(59,130,246,0.15)", border: "1px solid #3b82f6", color: "#93c5fd", padding: "0.55rem 0.75rem", borderRadius: "0.5rem", cursor: "pointer", fontWeight: "600", fontSize: "0.82rem", minWidth: "120px" }}>
+                        Keep A, Remove B
+                      </button>
+                      <button onClick={() => handleResolve("replace", current.entryB.id)} disabled={mergingContradiction}
+                        style={{ flex: 1, background: "rgba(59,130,246,0.15)", border: "1px solid #3b82f6", color: "#93c5fd", padding: "0.55rem 0.75rem", borderRadius: "0.5rem", cursor: "pointer", fontWeight: "600", fontSize: "0.82rem", minWidth: "120px" }}>
+                        Keep B, Remove A
+                      </button>
+                      <button onClick={() => handleResolve("merge")} disabled={mergingContradiction}
+                        style={{ flex: 1, background: "#7c3aed", color: "white", padding: "0.55rem 0.75rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.82rem", minWidth: "120px", opacity: mergingContradiction ? 0.6 : 1 }}>
+                        {mergingContradiction ? "✨ Merging..." : "✨ Merge (AI)"}
+                      </button>
+                    </div>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontSize: "0.8rem", color: "var(--va-text-muted)" }}>
+                      <input type="checkbox" checked={applyToAll} onChange={e => setApplyToAll(e.target.checked)}
+                        style={{ width: "16px", height: "16px", cursor: "pointer" }} />
+                      Apply this same action to all remaining pairs ({contradictionCandidates.length - contradictionIndex - 1} left after this one)
+                    </label>
+                    {applyToAll && (
+                      <p style={{ fontSize: "0.72rem", color: "#fbbf24", marginTop: "0.5rem" }}>
+                        ⚠ For "Keep A/B, Remove" on remaining pairs, Entry B will be kept automatically (no per-pair choice once applied to all).
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <p style={{ color: "var(--va-text-muted)", marginBottom: "2rem", fontSize: "0.875rem" }}>
         {loaded ? `${total} ${total === 1 ? "entry" : "entries"} in ${activeSubTab === "canon" ? "Canon Story" : "Player Story"}` : "Loading..."}

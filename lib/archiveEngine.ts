@@ -563,10 +563,6 @@ export function compileSavePrompt(archive: ArchiveData): string {
   if (style) lines.push(`## Tone & Style\n${style}`);
 
   lines.push(
-    `## Vault Extraction Hints\nAt the end of this session, list any information that should be added to long-term memory.\nInclude:\n- Character development\n- New relationships\n- Relationship changes\n- New powers\n- New items\n- New locations\n- New organizations\n- New lore\n- New mysteries\n- New world changes\n- New goals\n- New enemies\n- New allies\nFocus only on information that should persist beyond this session.`
-  );
-
-  lines.push(
     `## Your Task\nPlease confirm you have read and understood all of the above. Then ask me: "Where would you like to continue from?" — and wait for my response before doing anything else.`
   );
 
@@ -1013,6 +1009,47 @@ export function updateEntry(
 
 export function deleteEntry(archive: ArchiveData, entryId: string): ArchiveData {
   return { ...archive, entries: archive.entries.filter((e) => e.id !== entryId) };
+}
+
+// ─── Contradiction resolution — works on either subtab via the `subtab` param ──
+export function resolveContradictionKeep(archive: ArchiveData): ArchiveData {
+  // "Keep Both" — no data change, just here for symmetry/clarity at call sites
+  return archive;
+}
+
+export function resolveContradictionReplace(
+  archive: ArchiveData,
+  subtab: "canon" | "player",
+  keepId: string,
+  removeId: string
+): ArchiveData {
+  if (subtab === "canon") {
+    return { ...archive, entries: archive.entries.filter(e => e.id !== removeId) };
+  }
+  return { ...archive, playerEntries: (archive.playerEntries ?? []).filter(e => e.id !== removeId) };
+}
+
+export function resolveContradictionMerge(
+  archive: ArchiveData,
+  subtab: "canon" | "player",
+  idA: string,
+  idB: string,
+  mergedText: string
+): ArchiveData {
+  const now = new Date().toISOString();
+  if (subtab === "canon") {
+    const entryA = archive.entries.find(e => e.id === idA);
+    const filtered = archive.entries.filter(e => e.id !== idA && e.id !== idB);
+    if (!entryA) return archive;
+    const mergedEntry: VaultEntry = { ...entryA, id: crypto.randomUUID(), text: mergedText, updatedAt: now };
+    return { ...archive, entries: [...filtered, mergedEntry] };
+  }
+  const existing = archive.playerEntries ?? [];
+  const entryA = existing.find(e => e.id === idA);
+  const filtered = existing.filter(e => e.id !== idA && e.id !== idB);
+  if (!entryA) return archive;
+  const mergedEntry: VaultEntry = { ...entryA, id: crypto.randomUUID(), text: mergedText, updatedAt: now };
+  return { ...archive, playerEntries: [...filtered, mergedEntry] };
 }
 
 export function addCustomTab(archive: ArchiveData, tabName: string): ArchiveData {
@@ -1790,4 +1827,70 @@ export async function testGistConnection(): Promise<{ ok: boolean; message: stri
   } catch {
     return { ok: false, message: "Network error" };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTRADICTION CANDIDATE FINDER — fast local text-matching, no AI cost
+// ═══════════════════════════════════════════════════════════════════════════════
+// Finds pairs of entries within the SAME subtab that appear to be about the same
+// subject (entity, or fallback to first significant word) but have differing text.
+// This is intentionally local/free — AI is only spent later if the user chooses
+// "Merge" on a specific pair they've reviewed.
+
+export interface ContradictionCandidate {
+  id: string; // stable id for this candidate pair
+  entryA: VaultEntry;
+  entryB: VaultEntry;
+  subject: string; // the shared entity/subject that linked these two
+}
+
+const STOPWORDS = new Set(["the", "a", "an", "is", "was", "are", "were", "has", "have", "had", "to", "of", "in", "on", "at", "and", "or", "but"]);
+
+function extractSubject(entry: VaultEntry): string {
+  if (entry.entity && entry.entity.trim()) return entry.entity.trim().toLowerCase();
+  const words = entry.text.trim().toLowerCase().split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+  return words[0] ?? "";
+}
+
+function textSimilarity(a: string, b: string): number {
+  // Simple word-overlap ratio — cheap, no AI, good enough to flag "worth reviewing" pairs
+  const wordsA = new Set(a.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  const wordsB = new Set(b.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  let shared = 0;
+  for (const w of wordsA) if (wordsB.has(w)) shared++;
+  return shared / Math.max(wordsA.size, wordsB.size);
+}
+
+export function findContradictionCandidates(entries: VaultEntry[]): ContradictionCandidate[] {
+  // Group entries by subject so we only compare entries that share a subject —
+  // avoids an O(n^2) full scan being wasted on totally unrelated pairs.
+  const bySubject = new Map<string, VaultEntry[]>();
+  for (const entry of entries) {
+    const subject = extractSubject(entry);
+    if (!subject) continue;
+    const list = bySubject.get(subject) ?? [];
+    list.push(entry);
+    bySubject.set(subject, list);
+  }
+
+  const candidates: ContradictionCandidate[] = [];
+  for (const [subject, group] of bySubject) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i];
+        const b = group[j];
+        if (a.text.trim().toLowerCase() === b.text.trim().toLowerCase()) continue; // exact dup, not a contradiction
+        const sim = textSimilarity(a.text, b.text);
+        // Worth reviewing: same subject, somewhat related wording, but not identical —
+        // this range tends to catch "evolved" or "conflicting" facts about the same thing
+        // without flagging totally unrelated facts that happen to share a common word.
+        if (sim >= 0.15 && sim < 0.92) {
+          candidates.push({ id: a.id + "::" + b.id, entryA: a, entryB: b, subject });
+        }
+      }
+    }
+  }
+  return candidates;
 }
