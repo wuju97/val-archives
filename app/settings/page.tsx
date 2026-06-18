@@ -233,7 +233,9 @@ function applyTheme(theme: ThemeSettings) {
     root.style.setProperty(`--va-navcolor-${key}`, theme.navTabColors[key] || theme.accentColor);
   }
 
-  // ── Hogwarts Archive Mode ──
+  // ── Hogwarts Archive Mode — own dedicated variables only, never overwrites the
+  // universal --va-* variables that every UI control (including this Settings page's
+  // own buttons/pickers) relies on for readability. ──
   if (theme.hogwartsMode) {
     const p = HOGWARTS_PALETTES[theme.hogwartsPalette];
     root.style.setProperty("--hp-gold", p.gold);
@@ -242,13 +244,6 @@ function applyTheme(theme: ThemeSettings) {
     root.style.setProperty("--hp-burgundy", p.burgundy);
     root.style.setProperty("--hp-bronze", p.bronze);
     root.style.setProperty("--hp-magic-blue", p.magicBlue);
-    root.style.setProperty("--va-bg", `radial-gradient(circle at center, #1a1a1a 0%, ${p.black} 40%, #050505 100%)`);
-    root.style.setProperty("--va-surface", p.parchment);
-    root.style.setProperty("--va-border", p.bronze);
-    root.style.setProperty("--va-card-border", p.gold);
-    root.style.setProperty("--va-text", "#2B2B2B");
-    root.style.setProperty("--va-text-muted", p.bronze);
-    root.style.setProperty("--va-accent", p.gold);
     root.style.setProperty("--hp-dust-enabled", theme.hogwartsDust ? "1" : "0");
     root.style.setProperty("--hp-glow-enabled", theme.hogwartsGlow ? "1" : "0");
     root.style.setProperty("--hp-scroll-enabled", theme.hogwartsScrollReveal ? "1" : "0");

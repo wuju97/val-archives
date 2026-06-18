@@ -177,7 +177,12 @@ export function applyStoredTheme() {
       r.style.setProperty(`--va-navcolor-${key}`, navTabColors[key] || a);
     }
 
-    // ── Hogwarts Archive Mode — full immersive palette override ──
+    // ── Hogwarts Archive Mode — sets its own dedicated variables only.
+    // Deliberately does NOT touch --va-bg/--va-surface/--va-text/--va-border, since those
+    // are used by every UI control on every page (including Settings' own buttons and
+    // pickers) — overwriting them globally made the whole app's controls unreadable.
+    // Pages that want the parchment look apply var(--hp-parchment) etc. themselves,
+    // typically scoped to actual vault/archive content rather than UI chrome.
     if (t.hogwartsMode) {
       const palette = HOGWARTS_PALETTES[t.hogwartsPalette] || HOGWARTS_PALETTES.classic;
       r.style.setProperty("--hp-gold", palette.gold);
@@ -186,13 +191,6 @@ export function applyStoredTheme() {
       r.style.setProperty("--hp-burgundy", palette.burgundy);
       r.style.setProperty("--hp-bronze", palette.bronze);
       r.style.setProperty("--hp-magic-blue", palette.magicBlue);
-      r.style.setProperty("--va-bg", `radial-gradient(circle at center, #1a1a1a 0%, ${palette.black} 40%, #050505 100%)`);
-      r.style.setProperty("--va-surface", palette.parchment);
-      r.style.setProperty("--va-border", palette.bronze);
-      r.style.setProperty("--va-card-border", palette.gold);
-      r.style.setProperty("--va-text", "#2B2B2B");
-      r.style.setProperty("--va-text-muted", palette.bronze);
-      if (animatedAccent === "none") r.style.setProperty("--va-accent", palette.gold);
       r.style.setProperty("--hp-dust-enabled", t.hogwartsDust !== false ? "1" : "0");
       r.style.setProperty("--hp-glow-enabled", t.hogwartsGlow !== false ? "1" : "0");
       r.style.setProperty("--hp-scroll-enabled", t.hogwartsScrollReveal !== false ? "1" : "0");
@@ -235,9 +233,12 @@ const HOGWARTS_GLOBAL_CSS = `
 [data-hogwarts="true"] {
   --va-glow-color: var(--hp-magic-blue, #5DADE2);
 }
-[data-hogwarts="true"] button:hover,
-[data-hogwarts="true"] a:hover {
-  box-shadow: ${"0 0 10px var(--va-glow-color), 0 0 20px var(--va-glow-color)"};
+/* Opt-in glow class — apply this explicitly to elements that should get the spell-cast
+   hover effect (e.g. primary action buttons). Deliberately NOT a blanket button/a selector,
+   since that would glow every single interactive element on every page, including tiny
+   icon buttons and close buttons where it looks like a mistake rather than a feature. */
+[data-hogwarts="true"] .va-hogwarts-glow:hover {
+  box-shadow: 0 0 10px var(--va-glow-color), 0 0 20px var(--va-glow-color);
   transition: box-shadow 0.25s ease, transform 0.15s ease;
 }
 [data-hogwarts="true"] .va-hogwarts-dust-particle {
