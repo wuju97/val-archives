@@ -1147,6 +1147,357 @@ async function waitForKeyReset(
 // Uses Gemini to read an entire source file and produce a structured canon
 // reference document. Much better than direct extraction because Gemini reads
 // the full text at once with complete context.
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHUNKED DISTILL CANON — chapter-aware chunking + per-chunk distillation + Key 3 merge
+// ═══════════════════════════════════════════════════════════════════════════════
+// Books are 400k-1,500k+ characters — far too large for one Gemini call to handle
+// thoroughly (single large calls compress/summarize rather than capturing everything).
+// Strategy: split by chapter markers (form-feed + "CHAPTER <WORD>"), sub-split any
+// chapter over 100k chars, distill each chunk separately with the full canon prompt
+// (Key 1 — canon routing), then merge all chunk outputs into one document via a
+// separate Key 3 (general) pass that combines identical entries and keeps differing
+// ones separate, exactly as instructed.
+
+interface CanonChunk {
+  index: number;
+  label: string; // e.g. "Chapter 3" or "Chapter 3 (part 2)"
+  text: string;
+}
+
+function splitBookIntoChunks(sourceText: string, maxChunkSize: number = 100000): CanonChunk[] {
+  // Detect chapter markers: form-feed character followed by "CHAPTER <WORD>"
+  const chapterPattern = /\x0c?CHAPTER\s+[A-Z]+/gi;
+  const matches: Array<{ index: number; text: string }> = [];
+  let match;
+  while ((match = chapterPattern.exec(sourceText)) !== null) {
+    matches.push({ index: match.index, text: match[0] });
+  }
+
+  let rawChapters: Array<{ label: string; text: string }> = [];
+
+  if (matches.length >= 2) {
+    // Chapter markers found — split on them.
+    // Content before the first marker is Chapter 1 (since the marker for ch.1 is often missing).
+    if (matches[0].index > 200) {
+      rawChapters.push({ label: "Chapter 1", text: sourceText.slice(0, matches[0].index) });
+    }
+    for (let i = 0; i < matches.length; i++) {
+      const start = matches[i].index;
+      const end = i + 1 < matches.length ? matches[i + 1].index : sourceText.length;
+      const chunkText = sourceText.slice(start, end);
+      // Skip suspiciously short "chapters" near the very end (often back-matter, not real chapters)
+      if (chunkText.length < 500 && i === matches.length - 1) continue;
+      rawChapters.push({ label: "Chapter " + (i + 2), text: chunkText });
+    }
+  } else {
+    // No reliable chapter markers — fall back to flat splitting
+    rawChapters.push({ label: "Full text", text: sourceText });
+  }
+
+  // Sub-split any chapter that exceeds maxChunkSize
+  const finalChunks: CanonChunk[] = [];
+  let idx = 0;
+  for (const chapter of rawChapters) {
+    if (chapter.text.length <= maxChunkSize) {
+      finalChunks.push({ index: idx++, label: chapter.label, text: chapter.text });
+    } else {
+      const numParts = Math.ceil(chapter.text.length / maxChunkSize);
+      for (let p = 0; p < numParts; p++) {
+        const partText = chapter.text.slice(p * maxChunkSize, (p + 1) * maxChunkSize);
+        finalChunks.push({ index: idx++, label: chapter.label + " (part " + (p + 1) + " of " + numParts + ")", text: partText });
+      }
+    }
+  }
+
+  return finalChunks;
+}
+
+const CANON_EXTRACTION_PROMPT_HEADER = `You are an expert Canon Archivist, Lore Analyst, Continuity Editor, and RPG Game Master Assistant.
+
+Your task is to transform the provided source material into a complete canon reference document.
+
+## CRITICAL RULES
+
+1. Treat the source material as absolute canon.
+2. Do not invent, infer, speculate, simplify, or fill gaps.
+3. Record information exactly as supported by the text.
+4. Missing information is worse than excessive information.
+5. Preserve chronology, context, motivations, consequences, and relationships.
+6. Include both major and minor details whenever they could matter to a Game Master.
+7. Assume future story decisions may depend on seemingly insignificant details.
+8. If a fact appears only once, include it.
+9. If a character appears only briefly, include them.
+10. If an event causes later consequences, note both the event and the consequence.
+11. Never compress multiple events into one event if they occur separately.
+12. Preserve story logic and cause-and-effect chains.
+13. Do not replace multiple events with a summary if the original text presents them separately.
+14. When in doubt, record more detail rather than less.
+15. Preserve important conversations, explanations, revelations, motivations, and consequences, not just outcomes.
+16. Track both what happened and why it happened.
+17. Track both what characters believe and what is actually true.
+18. Record information even if it appears unimportant; it may become relevant later.
+
+---
+
+## EXTRACTION PRIORITY
+
+Extract everything that could matter for:
+
+* Story continuity
+* Character behavior
+* Worldbuilding
+* Future plot developments
+* Relationships
+* Rules of the setting
+* Mysteries
+* Secrets
+* Organizations
+* Political structures
+* Historical events
+* Magical systems
+* Technology systems
+* Combat systems
+* Social structures
+
+---
+
+## CHARACTERS
+
+For EVERY named character:
+
+* Full name
+* Aliases
+* Titles
+* Physical description
+* Personality traits
+* Abilities
+* Occupation/role
+* Goals
+* Motivations
+* Fears
+* Relationships
+* History
+* Secrets
+* Important possessions
+* Notable dialogue patterns
+* Important actions
+* Character development
+* Current status
+
+Include:
+
+* Major characters
+* Minor characters
+* One-scene characters
+* Mentioned characters
+* Historical characters
+* Deceased characters
+
+---
+
+## CHARACTER ARCS
+
+For every major character:
+
+* Starting state
+* Initial beliefs
+* Major experiences
+* Important decisions
+* Internal changes
+* Relationship changes
+* Key successes
+* Key failures
+* Ending state
+
+Preserve how each character evolves throughout the story.
+
+---
+
+## LOCATIONS
+
+For EVERY location:
+
+* Description
+* Physical appearance
+* Purpose
+* Significance
+* Residents
+* Factions present
+* Events occurring there
+* Secrets
+* History
+* Important objects found there
+
+---
+
+## RELATIONSHIPS
+
+For EVERY meaningful relationship:
+
+* Participants
+* Relationship type
+* History
+* Dynamic
+* Conflicts
+* Trust level
+* Loyalty level
+* Evolution over time
+
+---
+
+## POWERS / MAGIC / RULES
+
+Extract:
+
+* Spells
+* Powers
+* Techniques
+* Systems
+* Rules
+* Limitations
+* Costs
+* Weaknesses
+* Training methods
+* Supernatural mechanics
+
+Include exact limitations whenever known.
+
+---
+
+## ITEMS / ARTIFACTS
+
+For EVERY important item:
+
+* Description
+* Function
+* Owner
+* History
+* Powers
+* Restrictions
+* Current status
+
+---
+
+## ORGANIZATIONS
+
+For EVERY group:
+
+* Purpose
+* Membership
+* Hierarchy
+* Goals
+* Influence
+* Resources
+* Rivals
+* History
+
+---
+
+## WORLD LORE
+
+Extract:
+
+* History
+* Myths
+* Legends
+* Religions
+* Politics
+* Geography
+* Culture
+* Economics
+* Laws
+* Education
+* Social customs
+
+---
+
+## SECRETS AND REVEALS
+
+Track separately:
+
+* Hidden identities
+* Mysteries
+* Revelations
+* Plot twists
+* Foreshadowing
+* Deceptions
+* False assumptions
+
+For each entry include:
+
+* What characters believe
+* What is actually true
+* Evidence supporting the belief
+* When the truth is revealed
+* Consequences of the reveal
+
+---
+
+## TIMELINE
+
+Create a chronological timeline.
+
+Do NOT summarize entire arcs into one entry.
+
+Record events individually.
+
+For each event include:
+
+* Approximate date/time
+* Participants
+* What happened
+* Why it happened
+* Immediate consequences
+* Long-term consequences
+
+Preserve chronology and narrative causality.
+
+---
+
+## CAUSE AND EFFECT CHAINS
+
+For every major event:
+
+* What happened?
+* Who caused it?
+* Why did they do it?
+* How was it accomplished?
+* Immediate consequences
+* Long-term consequences
+* Which future events depended on this event?
+
+Show how events connect rather than treating them as isolated facts.
+
+Preserve narrative causality.
+
+---
+
+## CONVERSATIONS AND EXPLANATIONS
+
+Extract all major explanatory scenes.
+
+For each include:
+
+* Participants
+* Information revealed
+* Why the information matters
+* Consequences of learning it
+
+Examples:
+
+* Mentor explanations
+* Villain monologues
+* Mystery solutions
+* Historical revelations
+* Rule explanations
+* End-of-story explanations
+
+Do not reduce important explanations to a single sentence.
+
+---
+
+Output as a structured Game Master Reference Document using ## headers for each section above that has content in this chunk. Skip sections with no relevant content in this specific chunk — do not write "none found" or similar, just omit the section.`;
+
 export async function geminiDistillCanon(
   sourceText: string,
   filename: string,
@@ -1157,80 +1508,152 @@ export async function geminiDistillCanon(
     throw new Error("NO_GEMINI_KEY");
   }
 
-  if (onProgress) onProgress("Sending to Gemini for distillation...");
+  const cappedText = sourceText.slice(0, 1800000); // safety cap for extreme outliers
+  const chunks = splitBookIntoChunks(cappedText, 100000);
 
-  // Gemini 2.5 Flash supports 1M token context — HP1 is ~110k tokens, fits easily
-  // Cap at 900k chars just to be safe
-  const cappedText = sourceText.slice(0, 900000);
+  if (onProgress) onProgress("Split into " + chunks.length + " chunk(s) for distillation...");
 
-  const prompt = "You are a Canon Archivist for a tabletop RPG campaign. "
-    + "Your job is to read this source material and produce a structured CANON REFERENCE DOCUMENT "
-    + "that a Game Master can use as a definitive reference during play.\n\n"
-    + "SOURCE: " + filename + "\n\n"
-    + "---\n" + cappedText + "\n---\n\n"
-    + "Create a comprehensive Canon Reference Document with these sections:\n\n"
-    + "## CHARACTERS\n"
-    + "For every named character: full name, physical description, personality, key traits, "
-    + "abilities/powers, role in the story, key relationships, important history, secrets.\n\n"
-    + "## LOCATIONS\n"
-    + "Every named place: description, significance, who lives/works there, what happens there.\n\n"
-    + "## RELATIONSHIPS\n"
-    + "All meaningful relationships between characters: nature of relationship, history, tensions, dynamics.\n\n"
-    + "## MAGIC & SUPERNATURAL\n"
-    + "Every spell, magical ability, magical object, supernatural rule, and how magic works.\n\n"
-    + "## ORGANIZATIONS & FACTIONS\n"
-    + "Every group, institution, faction: purpose, members, hierarchy, goals.\n\n"
-    + "## KEY EVENTS (Chronological)\n"
-    + "Every significant event in story order: what happened, who was involved, consequences.\n\n"
-    + "## WORLD RULES & LORE\n"
-    + "How this world works: laws, customs, social structures, history, mythology, anything that defines the setting.\n\n"
-    + "## ITEMS & ARTIFACTS\n"
-    + "Every named object, weapon, tool, or artifact of significance.\n\n"
-    + "## CANON FACTS (Important Details)\n"
-    + "Any other facts that are canonically important — things a GM must never get wrong.\n\n"
-    + "Be thorough and specific. Include minor characters and details. "
-    + "Write each entry as a clear factual statement. "
-    + "This document will be used as the sole reference for running this story as an RPG.";
+  const chunkResults: string[] = [];
 
-  // NOTE: This is a single non-chunked Gemini call (whole book read at once).
-  // It can only be cancelled BEFORE the call starts or DURING a retry wait —
-  // not mid-request, since there is no internal loop to check between.
-  if (shouldAbort && shouldAbort()) {
-    if (onProgress) onProgress("⏸ Cancelled before starting");
-    return "";
-  }
+  for (let i = 0; i < chunks.length; i++) {
+    if (shouldAbort && shouldAbort()) {
+      if (onProgress) onProgress("⏸ Paused after " + i + "/" + chunks.length + " chunks");
+      // Return what we have so far, unmerged — caller should treat a paused result as incomplete
+      return chunkResults.join("\n\n---\n\n");
+    }
 
-  // Auto-retry indefinitely on high demand / rate limit errors
-  let attempt = 0;
-  while (true) {
-    attempt++;
-    try {
-      if (attempt > 1 && onProgress) onProgress("Attempt " + attempt + " — sending to Gemini...");
-      const result = await geminiQualityCallFor("canon", prompt);
-      if (onProgress) onProgress("Distillation complete!");
-      return result;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      if (msg.startsWith("ALL_KEYS_LIMITED")) {
-        await waitForKeyReset(msg, onProgress);
-        if (shouldAbort && shouldAbort()) { if (onProgress) onProgress("⏸ Cancelled during wait"); return ""; }
-        continue;
+    const chunk = chunks[i];
+    if (onProgress) onProgress("(" + (i + 1) + "/" + chunks.length + ") Distilling " + chunk.label + "...");
+
+    const continuityNote = chunks.length > 1
+      ? "This is " + chunk.label + " (part " + (i + 1) + " of " + chunks.length + ") from \"" + filename + "\". "
+        + "Only extract what appears in THIS excerpt below — do not invent details from other parts of the book you have not seen. "
+        + "If a character or location is only partially described here, just describe what this excerpt shows.\n\n"
+      : "";
+
+    const prompt = CANON_EXTRACTION_PROMPT_HEADER + "\n\n---\n\n"
+      + continuityNote
+      + "SOURCE EXCERPT:\n---\n" + chunk.text + "\n---\n";
+
+    let attempt = 0;
+    let chunkDone = false;
+    while (!chunkDone) {
+      attempt++;
+      try {
+        if (attempt > 1 && onProgress) onProgress("(" + (i + 1) + "/" + chunks.length + ") Retry " + attempt + " for " + chunk.label + "...");
+        const result = await geminiQualityCallFor("canon", prompt);
+        chunkResults.push("# " + chunk.label.toUpperCase() + "\n\n" + result);
+        chunkDone = true;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        if (msg.startsWith("ALL_KEYS_LIMITED")) {
+          await waitForKeyReset(msg, onProgress);
+          if (shouldAbort && shouldAbort()) { if (onProgress) onProgress("⏸ Paused during wait"); return chunkResults.join("\n\n---\n\n"); }
+          continue;
+        }
+        const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
+                             msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                             msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                             msg.includes("timeout") || msg.includes("TIMEOUT") || msg.includes("AbortError");
+        if (isOverloaded) {
+          const waitSec = Math.min(30 + attempt * 5, 120);
+          if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry...");
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+          if (shouldAbort && shouldAbort()) { if (onProgress) onProgress("⏸ Paused during wait"); return chunkResults.join("\n\n---\n\n"); }
+          continue;
+        }
+        throw new Error(msg);
       }
-      const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
-                           msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
-                           msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
-                           msg.includes("timeout") || msg.includes("TIMEOUT") || msg.includes("AbortError");
-      if (isOverloaded) {
-        const waitSec = Math.min(30 + attempt * 5, 120);
-        if (onProgress) onProgress("Gemini busy — waiting " + waitSec + "s before retry " + (attempt + 1) + "...");
-        await new Promise(r => setTimeout(r, waitSec * 1000));
-        if (shouldAbort && shouldAbort()) { if (onProgress) onProgress("⏸ Cancelled during wait"); return ""; }
-        continue;
-      }
-      throw new Error(msg);
     }
   }
+
+  // If only one chunk, no merge needed
+  if (chunks.length === 1) {
+    if (onProgress) onProgress("Distillation complete!");
+    return chunkResults[0];
+  }
+
+  // ── Merge pass — Key 3 (general) combines all chunk outputs into one document ──
+  if (onProgress) onProgress("Merging " + chunks.length + " chunk results into final Canon Reference...");
+
+  const merged = await mergeCanonChunks(chunkResults, filename, onProgress, shouldAbort);
+  if (onProgress) onProgress("Distillation complete! Merged " + chunks.length + " chunks.");
+  return merged;
 }
+
+// ── Merge pass: combine chunk-level canon documents into one, deduping identical entries ──
+async function mergeCanonChunks(
+  chunkResults: string[],
+  filename: string,
+  onProgress?: (msg: string) => void,
+  shouldAbort?: () => boolean
+): Promise<string> {
+  // Merge pass works on batches if there are many chunks, to avoid exceeding prompt limits.
+  // Each merge batch combines up to 6 chunk outputs at a time; repeated passes fold the
+  // combined results down until only one document remains.
+  const BATCH_SIZE = 6;
+  let currentLevel = chunkResults;
+
+  while (currentLevel.length > 1) {
+    const nextLevel: string[] = [];
+    for (let b = 0; b < currentLevel.length; b += BATCH_SIZE) {
+      if (shouldAbort && shouldAbort()) {
+        if (onProgress) onProgress("⏸ Paused during merge");
+        return currentLevel.join("\n\n---\n\n");
+      }
+      const batch = currentLevel.slice(b, b + BATCH_SIZE);
+      if (batch.length === 1) { nextLevel.push(batch[0]); continue; }
+
+      if (onProgress) onProgress("Merging batch " + (Math.floor(b / BATCH_SIZE) + 1) + " of " + Math.ceil(currentLevel.length / BATCH_SIZE) + "...");
+
+      const mergePrompt = "You are merging multiple sections of a Canon Reference Document for \"" + filename + "\" into one combined section.\n\n"
+        + "Each document below covers a different part of the same book, in order. Your job:\n"
+        + "- Combine them into ONE document, preserving the original ## section headers (CHARACTERS, LOCATIONS, RELATIONSHIPS, etc).\n"
+        + "- If the SAME character/location/item/organization appears in multiple documents with IDENTICAL or near-identical descriptions, merge them into a single entry — do not repeat the same fact twice.\n"
+        + "- If the SAME character/location/item appears in multiple documents but with DIFFERENT details (e.g. new information revealed later, or the character changed), KEEP BOTH descriptions as separate entries under that character/location's name — do not discard either, do not collapse them into a vague summary.\n"
+        + "- Timeline entries must stay in chronological order and must NOT be merged together even if about the same character — every individual event stays separate.\n"
+        + "- Do not summarize, compress, or shorten any content. This is a reorganization and dedup pass only, not a summarization pass.\n\n"
+        + batch.map((doc, i) => "=== DOCUMENT " + (i + 1) + " ===\n" + doc).join("\n\n")
+        + "\n\nReturn the single merged document now, using ## headers.";
+
+      let attempt = 0;
+      let mergedBatch = "";
+      let done = false;
+      while (!done) {
+        attempt++;
+        try {
+          mergedBatch = await geminiQualityCallFor("general", mergePrompt);
+          done = true;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Unknown error";
+          if (msg.startsWith("ALL_KEYS_LIMITED")) {
+            await waitForKeyReset(msg, onProgress);
+            if (shouldAbort && shouldAbort()) { if (onProgress) onProgress("⏸ Paused during merge wait"); return currentLevel.join("\n\n---\n\n"); }
+            continue;
+          }
+          const isOverloaded = msg.includes("high demand") || msg.includes("RATE_LIMIT") ||
+                               msg.includes("429") || msg.includes("503") || msg.includes("overloaded") ||
+                               msg.includes("unavailable") || msg.includes("fetch") || msg.includes("network") ||
+                               msg.includes("timeout") || msg.includes("TIMEOUT");
+          if (isOverloaded && attempt < 5) {
+            const waitSec = Math.min(20 + attempt * 5, 90);
+            if (onProgress) onProgress("Gemini busy during merge — waiting " + waitSec + "s...");
+            await new Promise(r => setTimeout(r, waitSec * 1000));
+            continue;
+          }
+          // If merge fails repeatedly, fall back to simple concatenation for this batch rather than losing data
+          mergedBatch = batch.join("\n\n---\n\n");
+          done = true;
+        }
+      }
+      nextLevel.push(mergedBatch);
+    }
+    currentLevel = nextLevel;
+  }
+
+  return currentLevel[0] ?? "";
+}
+
 
 // Refine the distilled document with AI
 export async function geminiRefineDistilledCanon(
