@@ -45,7 +45,26 @@ export default function MasterPromptPage() {
           <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>Auto-generated · updates when you import</p>
         </div>
         <div style={{ display: "flex", gap: "0.75rem" }}>
-          <button onClick={copyPrompt} disabled={!prompt} style={{ background: "var(--va-accent)", color: "white", padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", opacity: !prompt ? 0.3 : 1 }}>{copied ? "✓ Copied!" : "📋 Copy"}</button>
+          {/* The Master Prompt's Copy button is the single most important action in the
+              whole archive — under Hogwarts Archive Mode, it gets the full "artifact"
+              treatment (gold-to-bronze gradient, hover scale, gold glow). Falls back to
+              the plain accent button when Hogwarts Mode is off, since --hp-gold/--hp-bronze
+              are only ever set while that mode is active. */}
+          <button onClick={copyPrompt} disabled={!prompt}
+            className="va-master-prompt-btn"
+            style={{
+              background: "var(--hp-gold, var(--va-accent))",
+              backgroundImage: "linear-gradient(135deg, var(--hp-gold, var(--va-accent)), var(--hp-bronze, var(--va-accent)))",
+              color: "white", padding: "0.5rem 1.25rem", borderRadius: "0.375rem", border: "none",
+              cursor: "pointer", opacity: !prompt ? 0.3 : 1, fontWeight: "700",
+              boxShadow: "0 0 0 rgba(212,175,55,0)",
+              transition: "transform 0.2s ease, box-shadow 0.2s ease",
+            }}
+            onMouseEnter={e => { if (prompt) { e.currentTarget.style.transform = "scale(1.03)"; e.currentTarget.style.boxShadow = "0 0 25px rgba(212,175,55,0.6)"; } }}
+            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "0 0 0 rgba(212,175,55,0)"; }}
+          >
+            {copied ? "✓ Copied!" : "📋 Copy"}
+          </button>
           <button onClick={exportPrompt} disabled={!prompt} style={{ background: "#16a34a", color: "white", padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", opacity: !prompt ? 0.3 : 1 }}>📄 Export TXT</button>
           {hasGeminiKey() && (
             <button onClick={async () => { if (!prompt) return; setRefining(true); const refined = await geminiRefineMasterPrompt(prompt); setPrompt(refined); setRefining(false); }} disabled={!prompt || refining}
