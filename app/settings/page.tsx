@@ -14,7 +14,7 @@ import {
   getGroqKey, setGroqKey, clearGroqKey, testGroqConnection, hasGroqKey,
   getGeminiQualityKey2, setGeminiQualityKey2, clearGeminiQualityKey2, hasGeminiQualityKey2,
   getGeminiQualityKey3, setGeminiQualityKey3, clearGeminiQualityKey3, hasGeminiQualityKey3,
-  geminiChat, geminiErrorMessage, geminiTargetedDelete,
+  geminiTargetedDelete,
 } from "../../lib/geminiEngine";
 
 const ACCENT_COLORS = [
@@ -138,10 +138,6 @@ export default function SettingsPage() {
   const [gistAutoSave, setGistAutoSaveState] = useState(false);
   const [gistTokenVisible, setGistTokenVisible] = useState(false);
   const [aiViewMode, setAiViewMode] = useState<"simple" | "advanced">("simple");
-  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState("");
   const [deleteQuery, setDeleteQuery] = useState("");
   const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; text: string; category: string; reason: string; selected: boolean }>>([]);
   const [deletingTargets, setDeletingTargets] = useState(false);
@@ -200,20 +196,6 @@ export default function SettingsPage() {
     { id: "cloud", label: "☁️ Cloud Backup" },
     { id: "music", label: "🎵 Music / BGM" }, { id: "danger", label: "🚨 Alert Zone" },
   ] as const;
-
-  async function handleSendChat() {
-    if (!chatInput.trim() || chatLoading) return;
-    const msg = chatInput.trim(); setChatInput(""); setChatError("");
-    const userMsg = { role: "user" as const, text: msg };
-    setChatMessages(prev => [...prev, userMsg]); setChatLoading(true);
-    try {
-      const archive = loadArchive(); const withPrompt = regenerateMasterPrompt(archive);
-      const history = chatMessages.map(m => ({ role: m.role, text: m.text }));
-      const response = await geminiChat(msg, withPrompt.masterPrompt, history);
-      setChatMessages(prev => [...prev, { role: "model", text: response }]);
-    } catch (err) { setChatError(geminiErrorMessage(err)); setChatMessages(prev => prev.slice(0, -1)); }
-    finally { setChatLoading(false); }
-  }
 
   const S = {
     card: { background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" },
@@ -507,30 +489,6 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* Chat */}
-              <div style={S.card}>
-                <h3 style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>💬 Chat with Your Archive</h3>
-                <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", marginBottom: "0.875rem" }}>AI has full context of your archive. Ask anything.</p>
-                <div style={{ height: "320px", overflowY: "auto", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.875rem", marginBottom: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                  {chatMessages.length === 0 ? (
-                    <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", textAlign: "center", marginTop: "4rem" }}>
-                      {hasGeminiKey() ? "Ask anything about your archive..." : "Add your Cerebras key above to start chatting."}
-                    </p>
-                  ) : chatMessages.map((msg, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-                      <div style={{ maxWidth: "80%", padding: "0.625rem 0.875rem", borderRadius: "0.75rem", background: msg.role === "user" ? "var(--va-accent)" : "var(--va-border)", color: "var(--va-text)", fontSize: "0.875rem", lineHeight: "1.5", whiteSpace: "pre-wrap" }}>{msg.text}</div>
-                    </div>
-                  ))}
-                  {chatLoading && <div style={{ display: "flex", justifyContent: "flex-start" }}><div style={{ background: "var(--va-border)", padding: "0.625rem 0.875rem", borderRadius: "0.75rem", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>✨ Thinking...</div></div>}
-                </div>
-                {chatError && <p style={{ color: "#f87171", fontSize: "0.8rem", marginBottom: "0.5rem" }}>{chatError}</p>}
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }} placeholder="Ask anything... (Enter to send)" disabled={chatLoading}
-                    style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem" }} />
-                  <button onClick={handleSendChat} disabled={!chatInput.trim() || chatLoading} style={{ ...S.btn("var(--va-accent)"), opacity: (!chatInput.trim() || chatLoading) ? 0.4 : 1 }}>Send</button>
-                  <button onClick={() => setChatMessages([])} style={S.btn("var(--va-border)", "var(--va-text-muted)")}>Clear</button>
-                </div>
-              </div>
             </div>
           )}
 
@@ -803,4 +761,4 @@ export default function SettingsPage() {
       </div>
     </div>
   );
-} 
+}

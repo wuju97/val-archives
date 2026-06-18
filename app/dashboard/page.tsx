@@ -8,13 +8,11 @@ import {
   getActiveVaultId, saveVaultById, pushHistory,
   undoArchive, redoArchive,
 } from "@/lib/archiveEngine";
-import { hasGeminiKey, geminiCall } from "../../lib/geminiEngine";
+import { hasGeminiKey, geminiCall, geminiChat, geminiErrorMessage } from "../../lib/geminiEngine";
 
 const QUICK_EMOJIS = ["📖","🌌","⚔️","🔮","🧙","🏰","🗺️","📜","🌙","☀️","🔥","❄️","⚡","🌊","🌿","💀","👁️","🎭","🎲","🏛️","🐉","⚗️","🗡️","🛡️","📿","🔑","🌺","🦅","🐺","💎"];
 
 const ACCENT_COLORS = ["#3b82f6","#7c3aed","#10b981","#f43f5e","#f59e0b"];
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface CharacterCard {
   id: string;
@@ -24,8 +22,6 @@ interface CharacterCard {
   overrideGoals?: string[];
   overrideAchievements?: string[];
 }
-
-// ─── Arc Gauge ────────────────────────────────────────────────────────────────
 
 function ArcGauge({ value, label, color, size = 90 }: { value: number; label: string; color: string; size?: number }) {
   const r = size * 0.37;
@@ -59,8 +55,6 @@ function ArcGauge({ value, label, color, size = 90 }: { value: number; label: st
   );
 }
 
-// ─── Extract character data ───────────────────────────────────────────────────
-
 function extractForCharacter(archive: ArchiveData, name: string) {
   const lower = name.toLowerCase();
   const relevant = archive.entries.filter(e => e.text.toLowerCase().includes(lower));
@@ -85,8 +79,6 @@ function extractForCharacter(archive: ArchiveData, name: string) {
   return { traits, goals, achievements, allyCount, enemyCount, questProgress, archiveScore, entryCount: relevant.length };
 }
 
-// ─── Priority Dot ─────────────────────────────────────────────────────────────
-
 function PriorityDot({ id, archive, onUpdate }: { id: string; archive: ArchiveData; onUpdate: (a: ArchiveData) => void }) {
   const level = getPriorityLevel(archive, id);
   function handleClick(e: React.MouseEvent) {
@@ -103,8 +95,6 @@ function PriorityDot({ id, archive, onUpdate }: { id: string; archive: ArchiveDa
       style={{ width: "18px", height: "18px", borderRadius: "50%", background: level !== "none" ? color : "transparent", border: `2px solid ${color}`, cursor: "pointer", flexShrink: 0, padding: 0, transition: "all 0.15s" }} />
   );
 }
-
-// ─── Character Panel ──────────────────────────────────────────────────────────
 
 function CharacterPanel({ card, archive, onRemove, onUpdate }: {
   card: CharacterCard;
@@ -138,11 +128,7 @@ function CharacterPanel({ card, archive, onRemove, onUpdate }: {
 
   return (
     <div style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%)", border: `1px solid ${accent}44`, borderRadius: "1rem", padding: "0.875rem 1.1rem", position: "relative", overflow: "hidden" }}>
-
-      {/* Accent glow */}
       <div style={{ position: "absolute", top: 0, right: 0, width: "100px", height: "100px", background: `radial-gradient(circle, ${accent}20 0%, transparent 70%)`, borderRadius: "50%", transform: "translate(30%, -30%)", pointerEvents: "none" }} />
-
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: "0.25rem" }}>Character</p>
@@ -166,8 +152,6 @@ function CharacterPanel({ card, archive, onRemove, onUpdate }: {
           <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.2)", fontSize: "1rem", padding: "0.125rem 0.25rem" }}>×</button>
         </div>
       </div>
-
-      {/* Traits */}
       <div style={{ marginBottom: "0.5rem" }}>
         <p style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: "0.375rem" }}>Traits</p>
         {traits.length > 0 ? (
@@ -178,14 +162,10 @@ function CharacterPanel({ card, archive, onRemove, onUpdate }: {
           </div>
         ) : <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.18)" }}>No traits detected yet</p>}
       </div>
-
-      {/* Gauges */}
       <div style={{ display: "flex", justifyContent: "space-around", marginBottom: "0.5rem" }}>
         <ArcGauge value={data.questProgress} label="QUESTS" color={accent} size={65} />
         <ArcGauge value={data.archiveScore} label="ARCHIVE" color="#22c55e" size={65} />
       </div>
-
-      {/* Stats row */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.375rem", marginBottom: "0.5rem" }}>
         {[
           { label: "Allies", value: data.allyCount },
@@ -197,8 +177,6 @@ function CharacterPanel({ card, archive, onRemove, onUpdate }: {
           </div>
         ))}
       </div>
-
-      {/* Goals */}
       {goals.length > 0 && (
         <div style={{ marginBottom: "0.375rem" }}>
           <p style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: "0.375rem" }}>Goals</p>
@@ -210,8 +188,6 @@ function CharacterPanel({ card, archive, onRemove, onUpdate }: {
           ))}
         </div>
       )}
-
-      {/* Achievements */}
       {achievements.length > 0 && (
         <div>
           <p style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: "0.375rem" }}>Achievements</p>
@@ -223,7 +199,6 @@ function CharacterPanel({ card, archive, onRemove, onUpdate }: {
           ))}
         </div>
       )}
-
       {data.entryCount === 0 && (
         <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.2)", textAlign: "center", padding: "0.5rem 0" }}>
           No entries found for "{card.name}" — add info via Inbox or Story
@@ -232,10 +207,6 @@ function CharacterPanel({ card, archive, onRemove, onUpdate }: {
     </div>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MAIN DASHBOARD
-// ═══════════════════════════════════════════════════════════════════════════════
 
 const CARDS_KEY = "valArchivesDashboardCards";
 
@@ -253,7 +224,27 @@ export default function DashboardPage() {
   const [vaultFont, setVaultFont] = useState("inherit");
   const [showFontPicker, setShowFontPicker] = useState(false);
 
-  // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
+  // ── Chat with Your Archive — moved here from Settings AI tab, replaces old Refresh button ──
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
+
+  async function handleSendChat() {
+    if (!chatInput.trim() || chatLoading) return;
+    const msg = chatInput.trim(); setChatInput(""); setChatError("");
+    const userMsg = { role: "user" as const, text: msg };
+    setChatMessages(prev => [...prev, userMsg]); setChatLoading(true);
+    try {
+      const currentArchive = loadArchive(); const withPrompt = regenerateMasterPrompt(currentArchive);
+      const history = chatMessages.map(m => ({ role: m.role, text: m.text }));
+      const response = await geminiChat(msg, withPrompt.masterPrompt, history);
+      setChatMessages(prev => [...prev, { role: "model", text: response }]);
+    } catch (err) { setChatError(geminiErrorMessage(err)); setChatMessages(prev => prev.slice(0, -1)); }
+    finally { setChatLoading(false); }
+  }
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
@@ -319,15 +310,6 @@ export default function DashboardPage() {
     alert("🌌 Archive Saved");
   }
 
-  function handleRefresh() {
-    const loaded = loadArchive();
-    const refreshed = regenerateMasterPrompt(loaded);
-    saveArchive(refreshed); setArchive(refreshed);
-    setArchiveName(refreshed.archiveName);
-    setLastSave(new Date().toLocaleString());
-    alert("🔄 Refreshed");
-  }
-
   function handleAddTab() {
     if (!archive || !newTabName.trim()) return;
     const tabLabel = `${newTabEmoji} ${newTabName.trim()}`;
@@ -350,7 +332,6 @@ export default function DashboardPage() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", background: "var(--va-bg)", color: "var(--va-text)" }}>
 
-      {/* LEFT SIDEBAR */}
       <aside style={{ width: "13rem", padding: "1rem", borderRight: "1px solid var(--va-border)", background: "var(--va-surface)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <p style={{ fontSize: "0.65rem", color: "var(--va-text-muted)", textTransform: "uppercase", letterSpacing: "0.1em", padding: "0.25rem 0.75rem 0.5rem" }}>Navigation</p>
 
@@ -412,14 +393,10 @@ export default function DashboardPage() {
         ) : (
           <button onClick={() => setShowAddTab(true)} style={{ padding: "0.5rem 0.75rem", borderRadius: "0.375rem", color: "var(--va-text-muted)", fontSize: "0.875rem", background: "none", border: "none", cursor: "pointer", textAlign: "left", width: "100%" }}>➕ Add Tab</button>
         )}
-
-
       </aside>
 
-      {/* CENTER */}
       <main style={{ flex: 1, padding: "1.5rem 1.5rem", overflow: "auto" }}>
 
-        {/* Top bar */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
           <div>
             <input value={archiveName} onChange={e => setArchiveName(e.target.value)}
@@ -486,7 +463,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Add character form */}
         {showAddCard && (
           <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-accent)", borderRadius: "0.75rem", padding: "1rem", marginBottom: "1.25rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
             <input value={newCardName} onChange={e => setNewCardName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddCard()}
@@ -503,7 +479,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Character grid */}
         {cards.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: "1rem" }}>
             {cards.map(card => (
@@ -523,7 +498,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* PC Download */}
         <div style={{ marginTop: "2.5rem", paddingTop: "1.5rem", borderTop: "1px solid var(--va-border)", textAlign: "center" }}>
           <a
             href="https://drive.google.com/file/d/1IJGKK07ZjWLiuqiPb8vAbG1LvfMVadgA/view?usp=sharing"
@@ -540,7 +514,6 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* RIGHT SIDEBAR */}
       <aside style={{ width: "13rem", padding: "1rem", borderLeft: "1px solid var(--va-border)", background: "var(--va-surface)", display: "flex", flexDirection: "column", gap: "0.125rem", flexShrink: 0 }}>
         <p style={{ fontSize: "0.65rem", color: "var(--va-text-muted)", textTransform: "uppercase", letterSpacing: "0.1em", padding: "0.25rem 0.75rem 0.5rem" }}>Tools</p>
         {[
@@ -557,11 +530,46 @@ export default function DashboardPage() {
         ))}
         <div style={{ marginTop: "auto", paddingTop: "1rem", borderTop: "1px solid var(--va-border)", display: "flex", flexDirection: "column", gap: "0.125rem" }}>
           <button onClick={handleSave} style={{ padding: "0.5rem 0.75rem", borderRadius: "0.375rem", color: "var(--va-text)", fontSize: "0.875rem", background: "none", border: "none", cursor: "pointer", textAlign: "left", width: "100%" }}>💾 Save</button>
-          <button onClick={handleRefresh} style={{ padding: "0.5rem 0.75rem", borderRadius: "0.375rem", color: "var(--va-text)", fontSize: "0.875rem", background: "none", border: "none", cursor: "pointer", textAlign: "left", width: "100%" }}>🔄 Refresh</button>
+          <button onClick={() => setShowChat(true)} style={{ padding: "0.5rem 0.75rem", borderRadius: "0.375rem", color: "var(--va-text)", fontSize: "0.875rem", background: "none", border: "none", cursor: "pointer", textAlign: "left", width: "100%" }}>💬 Chat with Archive</button>
           <Link href="/vaults" style={{ padding: "0.5rem 0.75rem", borderRadius: "0.375rem", color: "var(--va-text-muted)", fontSize: "0.875rem", textDecoration: "none", display: "block" }}>🗄️ Switch Vault</Link>
           <Link href="/settings" style={{ padding: "0.5rem 0.75rem", borderRadius: "0.375rem", color: "var(--va-text-muted)", fontSize: "0.875rem", textDecoration: "none", display: "block" }}>⚙ Settings</Link>
         </div>
       </aside>
+
+      {showChat && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+          <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", width: "min(560px, 95vw)", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
+            <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h3 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>💬 Chat with Your Archive</h3>
+                <p style={{ fontSize: "0.8rem", color: "var(--va-text-muted)" }}>AI has full context of your archive. Ask anything.</p>
+              </div>
+              <button onClick={() => setShowChat(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
+            </div>
+            <div style={{ padding: "1.25rem 1.5rem", flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+              <div style={{ height: "320px", overflowY: "auto", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.875rem", marginBottom: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                {chatMessages.length === 0 ? (
+                  <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", textAlign: "center", marginTop: "4rem" }}>
+                    {hasGeminiKey() ? "Ask anything about your archive..." : "Add your Gemini key in Settings → AI to start chatting."}
+                  </p>
+                ) : chatMessages.map((msg, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                    <div style={{ maxWidth: "80%", padding: "0.625rem 0.875rem", borderRadius: "0.75rem", background: msg.role === "user" ? "var(--va-accent)" : "var(--va-border)", color: "var(--va-text)", fontSize: "0.875rem", lineHeight: "1.5", whiteSpace: "pre-wrap" }}>{msg.text}</div>
+                  </div>
+                ))}
+                {chatLoading && <div style={{ display: "flex", justifyContent: "flex-start" }}><div style={{ background: "var(--va-border)", padding: "0.625rem 0.875rem", borderRadius: "0.75rem", color: "var(--va-text-muted)", fontSize: "0.875rem" }}>✨ Thinking...</div></div>}
+              </div>
+              {chatError && <p style={{ color: "#f87171", fontSize: "0.8rem", marginBottom: "0.5rem" }}>{chatError}</p>}
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }} placeholder="Ask anything... (Enter to send)" disabled={chatLoading}
+                  style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem" }} />
+                <button onClick={handleSendChat} disabled={!chatInput.trim() || chatLoading} style={{ background: "var(--va-accent)", color: "white", padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem", opacity: (!chatInput.trim() || chatLoading) ? 0.4 : 1 }}>Send</button>
+                <button onClick={() => setChatMessages([])} style={{ background: "var(--va-border)", color: "var(--va-text-muted)", padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>Clear</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
