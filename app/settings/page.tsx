@@ -329,8 +329,15 @@ export default function SettingsPage() {
   }, []);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
-    const updated = { ...theme, ...updates }; setTheme(updated); applyTheme(updated);
+    const updated = { ...theme, ...updates };
+    setTheme(updated);
+    // CRITICAL ORDER: write to localStorage BEFORE calling applyTheme, since applyTheme
+    // dispatches the "va-theme-update" event synchronously as its first action — any
+    // listener elsewhere in the app (e.g. ThemeProvider's dust-particle detection) reads
+    // localStorage in response to that event, and would otherwise read the stale,
+    // pre-update value because the write hadn't happened yet.
     localStorage.setItem("valArchivesTheme", JSON.stringify(updated));
+    applyTheme(updated);
   }
   function applyBgPreset(preset: typeof BG_PRESETS[0]) {
     updateTheme({ bgPreset: preset.name, bgColor: preset.bg, surfaceColor: preset.surface, borderColor: preset.border, textColor: preset.text, mutedColor: preset.muted, brightness: 0 });
@@ -696,10 +703,29 @@ export default function SettingsPage() {
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.375rem" }}>
                           {(Object.keys(HOGWARTS_PALETTES) as HogwartsPalette[]).map(p => (
                             <button key={p} onClick={() => updateTheme({ hogwartsPalette: p })}
+                              className="va-hogwarts-glow"
                               style={{ padding: "0.45rem", borderRadius: "0.4rem", border: `2px solid ${theme.hogwartsPalette === p ? HOGWARTS_PALETTES[p].gold : "var(--va-border)"}`, background: `linear-gradient(135deg, ${HOGWARTS_PALETTES[p].burgundy}33, ${HOGWARTS_PALETTES[p].gold}22)`, cursor: "pointer", textAlign: "center" }}>
                               <p style={{ fontSize: "0.65rem", color: "var(--va-text)", fontWeight: theme.hogwartsPalette === p ? "700" : "400" }}>{HOGWARTS_PALETTES[p].name}</p>
                             </button>
                           ))}
+                        </div>
+                      </div>
+
+                      {/* Live preview — shows the actual selected palette applied to a mock
+                          archive entry, since the palette colors are otherwise only used on
+                          actual vault content elsewhere, not on Settings' own UI chrome. */}
+                      <div style={{
+                        background: `radial-gradient(circle at center, #1a1a1a 0%, ${HOGWARTS_PALETTES[theme.hogwartsPalette].black} 60%, #050505 100%)`,
+                        borderRadius: "0.5rem", padding: "0.875rem",
+                      }}>
+                        <p style={{ fontSize: "0.62rem", color: HOGWARTS_PALETTES[theme.hogwartsPalette].gold, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.5rem" }}>Preview</p>
+                        <div style={{
+                          background: HOGWARTS_PALETTES[theme.hogwartsPalette].parchment,
+                          borderLeft: `4px solid ${HOGWARTS_PALETTES[theme.hogwartsPalette].gold}`,
+                          borderRadius: "0.5rem", padding: "0.625rem 0.75rem",
+                        }}>
+                          <p style={{ fontSize: "0.7rem", color: "#2B2B2B", fontWeight: "600", marginBottom: "0.2rem" }}>Archive Entry</p>
+                          <p style={{ fontSize: "0.65rem", color: HOGWARTS_PALETTES[theme.hogwartsPalette].bronze }}>Aged parchment · gold border · {HOGWARTS_PALETTES[theme.hogwartsPalette].name}</p>
                         </div>
                       </div>
 
