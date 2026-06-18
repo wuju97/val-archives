@@ -46,20 +46,122 @@ const TAB_EMOJIS = [
   "🐉","⚗️","🗡️","🛡️","📿","🔑","🌺","🦅","🐺","💎",
 ];
 
+type FontSize = "small" | "medium" | "large" | "xlarge";
+type LineSpacing = "compact" | "normal" | "relaxed";
+type HeadingWeight = "normal" | "bold" | "xbold";
+type Density = "compact" | "comfortable" | "spacious";
+type CornerStyle = "sharp" | "soft" | "rounded" | "pill";
+type ShadowIntensity = "none" | "subtle" | "strong";
+type AnimSpeed = "off" | "fast" | "normal" | "slow";
+type AnimatedAccentMode = "none" | "rainbow" | "hp-house-single" | "hp-house-cycle" | "golden-snitch" | "patronus" | "marauders-map" | "felix-felicis" | "dementor";
+type HPHouse = "gryffindor" | "slytherin" | "ravenclaw" | "hufflepuff";
+
+type NavTabColors = {
+  home?: string; pensieve?: string; rulebook?: string; story?: string;
+  canon?: string; timeline?: string; inbox?: string;
+};
+
 type ThemeSettings = {
   brightness: number; accentColor: string; bgPreset: string;
   bgColor: string; surfaceColor: string; borderColor: string;
   textColor: string; mutedColor: string; tabColor: string; tabEmoji: string;
+  // Typography
+  fontFamily: string; fontSize: FontSize; lineSpacing: LineSpacing; headingWeight: HeadingWeight;
+  // Layout density
+  density: Density;
+  // UI effects
+  cornerStyle: CornerStyle; shadowIntensity: ShadowIntensity; animSpeed: AnimSpeed; glowEffects: boolean;
+  // Extra colors
+  linkColor: string; successColor: string; errorColor: string; warningColor: string; cardBorderColor: string;
+  animatedAccent: AnimatedAccentMode;
+  hpHouse: HPHouse;
+  // Per-tab nav colors
+  navTabColors: NavTabColors;
 };
 
 const DEFAULT_THEME: ThemeSettings = {
   brightness: 0, accentColor: "#3b82f6", bgPreset: "Void Black",
   bgColor: "#080808", surfaceColor: "#111827", borderColor: "#1f2937",
   textColor: "#f9fafb", mutedColor: "#6b7280", tabColor: "#1f2937", tabEmoji: "📖",
+  fontFamily: "inherit", fontSize: "medium", lineSpacing: "normal", headingWeight: "bold",
+  density: "comfortable",
+  cornerStyle: "soft", shadowIntensity: "subtle", animSpeed: "normal", glowEffects: true,
+  linkColor: "#3b82f6", successColor: "#22c55e", errorColor: "#ef4444", warningColor: "#f59e0b", cardBorderColor: "#1f2937",
+  animatedAccent: "none", hpHouse: "gryffindor",
+  navTabColors: {},
 };
 
+const FONT_OPTIONS = [
+  { name: "Default", value: "inherit" },
+  { name: "Serif", value: "Georgia, serif" },
+  { name: "Mono", value: "monospace" },
+  { name: "Cinzel", value: "'Cinzel', serif" },
+  { name: "Playfair", value: "'Playfair Display', serif" },
+  { name: "Cormorant", value: "'Cormorant Garamond', serif" },
+  { name: "IM Fell", value: "'IM Fell English', serif" },
+  { name: "Uncial", value: "'Uncial Antiqua', cursive" },
+  { name: "Pirata", value: "'Pirata One', cursive" },
+  { name: "Almendra", value: "'Almendra', serif" },
+  { name: "Crimson", value: "'Crimson Text', serif" },
+  { name: "Merriweather", value: "'Merriweather', serif" },
+  { name: "Libre Bask", value: "'Libre Baskerville', serif" },
+  { name: "Spectral", value: "'Spectral', serif" },
+  { name: "Lora", value: "'Lora', serif" },
+  { name: "Philosopher", value: "'Philosopher', serif" },
+  { name: "Caudex", value: "'Caudex', serif" },
+  { name: "Raleway", value: "'Raleway', sans-serif" },
+  { name: "Josefin", value: "'Josefin Sans', sans-serif" },
+  { name: "Oswald", value: "'Oswald', sans-serif" },
+  { name: "Righteous", value: "'Righteous', sans-serif" },
+  { name: "Poiret One", value: "'Poiret One', cursive" },
+  { name: "Bebas", value: "'Bebas Neue', sans-serif" },
+  { name: "Orbitron", value: "'Orbitron', sans-serif" },
+  { name: "Exo 2", value: "'Exo 2', sans-serif" },
+  { name: "Press Start", value: "'Press Start 2P', cursive" },
+  { name: "Abril", value: "'Abril Fatface', cursive" },
+  { name: "Dancing", value: "'Dancing Script', cursive" },
+  { name: "Pacifico", value: "'Pacifico', cursive" },
+  { name: "Caveat", value: "'Caveat', cursive" },
+  { name: "Satisfy", value: "'Satisfy', cursive" },
+  { name: "Marker", value: "'Permanent Marker', cursive" },
+];
+
+const FONT_SIZE_PX: Record<FontSize, string> = { small: "14px", medium: "16px", large: "18px", xlarge: "20px" };
+const LINE_SPACING_VAL: Record<LineSpacing, string> = { compact: "1.3", normal: "1.6", relaxed: "1.9" };
+const HEADING_WEIGHT_VAL: Record<HeadingWeight, string> = { normal: "600", bold: "700", xbold: "800" };
+const DENSITY_SCALE: Record<Density, string> = { compact: "0.7", comfortable: "1", spacious: "1.4" };
+const CORNER_RADIUS: Record<CornerStyle, string> = { sharp: "0px", soft: "0.5rem", rounded: "1rem", pill: "9999px" };
+const SHADOW_VAL: Record<ShadowIntensity, string> = { none: "none", subtle: "0 2px 12px rgba(0,0,0,0.25)", strong: "0 8px 32px rgba(0,0,0,0.55)" };
+const ANIM_DURATION: Record<AnimSpeed, string> = { off: "0s", fast: "0.1s", normal: "0.2s", slow: "0.4s" };
+
+const HP_HOUSES: Record<HPHouse, { name: string; primary: string; secondary: string; icon: string }> = {
+  gryffindor: { name: "Gryffindor", primary: "#ae0001", secondary: "#eeba30", icon: "🦁" },
+  slytherin: { name: "Slytherin", primary: "#1a472a", secondary: "#aaaaaa", icon: "🐍" },
+  ravenclaw: { name: "Ravenclaw", primary: "#0e1a40", secondary: "#946b2d", icon: "🦅" },
+  hufflepuff: { name: "Hufflepuff", primary: "#ecb939", secondary: "#372e29", icon: "🦡" },
+};
+
+const ANIMATED_ACCENT_OPTIONS: Array<{ id: AnimatedAccentMode; label: string; desc: string }> = [
+  { id: "none", label: "Off", desc: "Static accent color" },
+  { id: "rainbow", label: "🌈 Rainbow", desc: "Cycles through the full spectrum" },
+  { id: "hp-house-single", label: "🏠 Single House", desc: "Locks to one house's colors" },
+  { id: "hp-house-cycle", label: "🏰 House Cycle", desc: "Slowly cycles through all four houses" },
+  { id: "golden-snitch", label: "⚡ Golden Snitch", desc: "Shimmering gold with a glinting pulse" },
+  { id: "patronus", label: "🦌 Patronus", desc: "Soft silvery-blue breathing glow" },
+  { id: "marauders-map", label: "🗺️ Marauder's Map", desc: "Warm parchment sepia with an ink-fade pulse" },
+  { id: "felix-felicis", label: "🧪 Felix Felicis", desc: "Shifting liquid-gold shimmer" },
+  { id: "dementor", label: "👻 Dementor", desc: "Desaturated grey-blue, slowly darkening pulse" },
+];
+
+const NAV_TAB_KEYS: Array<{ key: keyof NavTabColors; label: string }> = [
+  { key: "home", label: "🏠 Home" }, { key: "story", label: "📖 Story" },
+  { key: "canon", label: "🏛 Canon Archives" }, { key: "timeline", label: "⏳ Timeline Save" },
+  { key: "pensieve", label: "🌀 Pensieve" }, { key: "rulebook", label: "📋 Rule Book" },
+  { key: "inbox", label: "📥 Inbox" },
+];
+
 function loadTheme(): ThemeSettings {
-  try { const saved = localStorage.getItem("valArchivesTheme"); if (saved) return { ...DEFAULT_THEME, ...JSON.parse(saved) }; } catch {}
+  try { const saved = localStorage.getItem("valArchivesTheme"); if (saved) return { ...DEFAULT_THEME, ...JSON.parse(saved), navTabColors: { ...DEFAULT_THEME.navTabColors, ...(JSON.parse(saved).navTabColors ?? {}) } }; } catch {}
   return { ...DEFAULT_THEME };
 }
 
@@ -84,6 +186,38 @@ function applyTheme(theme: ThemeSettings) {
     root.style.setProperty("--va-text-muted", theme.mutedColor);
   }
   root.style.setProperty("--va-accent", theme.accentColor);
+
+  // Typography
+  root.style.setProperty("--va-font-family", theme.fontFamily);
+  root.style.setProperty("--va-font-size-base", FONT_SIZE_PX[theme.fontSize]);
+  root.style.setProperty("--va-line-height", LINE_SPACING_VAL[theme.lineSpacing]);
+  root.style.setProperty("--va-heading-weight", HEADING_WEIGHT_VAL[theme.headingWeight]);
+
+  // Density
+  root.style.setProperty("--va-density-scale", DENSITY_SCALE[theme.density]);
+
+  // Effects
+  root.style.setProperty("--va-radius", CORNER_RADIUS[theme.cornerStyle]);
+  root.style.setProperty("--va-shadow", SHADOW_VAL[theme.shadowIntensity]);
+  root.style.setProperty("--va-anim-duration", ANIM_DURATION[theme.animSpeed]);
+  root.style.setProperty("--va-glow-opacity", theme.glowEffects ? "1" : "0");
+
+  // Extra colors
+  root.style.setProperty("--va-link", theme.linkColor);
+  root.style.setProperty("--va-success", theme.successColor);
+  root.style.setProperty("--va-error", theme.errorColor);
+  root.style.setProperty("--va-warning", theme.warningColor);
+  root.style.setProperty("--va-card-border", theme.cardBorderColor);
+
+  // Per-tab nav colors — exposed as individual variables, falls back to accent if unset
+  for (const { key } of NAV_TAB_KEYS) {
+    root.style.setProperty(`--va-navcolor-${key}`, theme.navTabColors[key] || theme.accentColor);
+  }
+
+  // Body-level font application (covers text not wrapped in a styled element)
+  document.body.style.fontFamily = theme.fontFamily;
+  document.body.style.fontSize = FONT_SIZE_PX[theme.fontSize];
+  document.body.style.lineHeight = LINE_SPACING_VAL[theme.lineSpacing];
 }
 
 const INSTRUCTIONS = [
@@ -198,9 +332,9 @@ export default function SettingsPage() {
   ] as const;
 
   const S = {
-    card: { background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", padding: "1.25rem" },
-    input: { background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.375rem", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", fontFamily: "monospace" },
-    btn: (bg: string, color = "white") => ({ background: bg, color, padding: "0.5rem 1rem", borderRadius: "0.375rem", border: "none", cursor: "pointer", fontWeight: "600" as const, fontSize: "0.875rem" }),
+    card: { background: "var(--va-surface)", border: "1px solid var(--va-card-border)", borderRadius: "var(--va-radius)", padding: "1.25rem", boxShadow: "var(--va-shadow)" },
+    input: { background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "var(--va-radius)", padding: "0.625rem 0.875rem", outline: "none", color: "var(--va-text)", fontSize: "0.875rem", fontFamily: "monospace" },
+    btn: (bg: string, color = "white") => ({ background: bg, color, padding: "0.5rem 1rem", borderRadius: "var(--va-radius)", border: "none", cursor: "pointer", fontWeight: "600" as const, fontSize: "0.875rem", transition: "all var(--va-anim-duration) ease" }),
   };
 
   return (
@@ -227,7 +361,7 @@ export default function SettingsPage() {
           </nav>
         </aside>
 
-        <main style={{ flex: 1, padding: "2rem", maxWidth: (activeSection === "instructions" || activeSection === "danger") ? "100%" : "42rem" }}>
+        <main style={{ flex: 1, padding: "2rem", maxWidth: (activeSection === "instructions" || activeSection === "danger" || activeSection === "personalisation") ? "100%" : "42rem" }}>
 
           {/* ── DISPLAY ── */}
           {activeSection === "display" && (
@@ -247,7 +381,8 @@ export default function SettingsPage() {
 
           {/* ── PERSONALISATION ── */}
           {activeSection === "personalisation" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+            <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "2rem", flex: 1, minWidth: 0 }}>
               <div><h2 style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.25rem" }}>Personalisation</h2><p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Customize appearance.</p></div>
               <div>
                 <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.75rem" }}>Website Theme</label>
@@ -312,7 +447,199 @@ export default function SettingsPage() {
                   <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => updateTheme({ tabEmoji: ev.target?.result as string }); reader.readAsDataURL(file); }} />
                 </label>
               </div>
+
+              {/* ── Typography ── */}
+              <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1.5rem" }}>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: "bold", marginBottom: "0.25rem" }}>🔤 Typography</h3>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginBottom: "1rem" }}>Font, size, and spacing for body text across the app.</p>
+
+                <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.625rem" }}>Font Family</label>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.375rem", maxHeight: "220px", overflowY: "auto", marginBottom: "1.25rem", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.5rem" }}>
+                  {FONT_OPTIONS.map(font => (
+                    <button key={font.value} onClick={() => updateTheme({ fontFamily: font.value })}
+                      style={{ background: theme.fontFamily === font.value ? "var(--va-accent)" : "var(--va-surface)", color: theme.fontFamily === font.value ? "white" : "var(--va-text)", border: "none", borderRadius: "0.375rem", padding: "0.4rem 0.5rem", cursor: "pointer", fontFamily: font.value, fontSize: "0.85rem", textAlign: "left" }}>
+                      {font.name}
+                    </button>
+                  ))}
+                </div>
+
+                <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.625rem" }}>Base Font Size</label>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}>
+                  {(["small", "medium", "large", "xlarge"] as FontSize[]).map(size => (
+                    <button key={size} onClick={() => updateTheme({ fontSize: size })}
+                      style={{ flex: 1, padding: "0.5rem", borderRadius: "0.5rem", border: `2px solid ${theme.fontSize === size ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.fontSize === size ? "rgba(59,130,246,0.1)" : "transparent", color: theme.fontSize === size ? "var(--va-accent)" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.8rem", fontWeight: theme.fontSize === size ? "700" : "400", textTransform: "capitalize" }}>
+                      {size}
+                    </button>
+                  ))}
+                </div>
+
+                <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.625rem" }}>Line Spacing</label>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}>
+                  {(["compact", "normal", "relaxed"] as LineSpacing[]).map(spacing => (
+                    <button key={spacing} onClick={() => updateTheme({ lineSpacing: spacing })}
+                      style={{ flex: 1, padding: "0.5rem", borderRadius: "0.5rem", border: `2px solid ${theme.lineSpacing === spacing ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.lineSpacing === spacing ? "rgba(59,130,246,0.1)" : "transparent", color: theme.lineSpacing === spacing ? "var(--va-accent)" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.8rem", fontWeight: theme.lineSpacing === spacing ? "700" : "400", textTransform: "capitalize" }}>
+                      {spacing}
+                    </button>
+                  ))}
+                </div>
+
+                <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.625rem" }}>Heading Weight</label>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  {([["normal", "Normal"], ["bold", "Bold"], ["xbold", "Extra Bold"]] as Array<[HeadingWeight, string]>).map(([weight, label]) => (
+                    <button key={weight} onClick={() => updateTheme({ headingWeight: weight })}
+                      style={{ flex: 1, padding: "0.5rem", borderRadius: "0.5rem", border: `2px solid ${theme.headingWeight === weight ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.headingWeight === weight ? "rgba(59,130,246,0.1)" : "transparent", color: theme.headingWeight === weight ? "var(--va-accent)" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.8rem", fontWeight: HEADING_WEIGHT_VAL[weight] }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Layout Density ── */}
+              <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1.5rem" }}>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: "bold", marginBottom: "0.25rem" }}>📐 Layout Density</h3>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginBottom: "1rem" }}>Controls overall spacing — how tight or roomy cards, lists, and buttons feel.</p>
+                <div style={{ display: "flex", gap: "0.625rem" }}>
+                  {([["compact", "Compact", "Tighter spacing, more on screen"], ["comfortable", "Comfortable", "Balanced — default"], ["spacious", "Spacious", "Roomier, easier to scan"]] as Array<[Density, string, string]>).map(([d, label, desc]) => (
+                    <button key={d} onClick={() => updateTheme({ density: d })}
+                      style={{ flex: 1, padding: "0.75rem", borderRadius: "0.5rem", border: `2px solid ${theme.density === d ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.density === d ? "rgba(59,130,246,0.1)" : "var(--va-bg)", cursor: "pointer", textAlign: "left" }}>
+                      <p style={{ fontSize: "0.85rem", fontWeight: "700", color: theme.density === d ? "var(--va-accent)" : "var(--va-text)", marginBottom: "0.2rem" }}>{label}</p>
+                      <p style={{ fontSize: "0.7rem", color: "var(--va-text-muted)" }}>{desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── UI Effects ── */}
+              <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1.5rem" }}>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: "bold", marginBottom: "0.25rem" }}>✨ UI Effects</h3>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginBottom: "1rem" }}>Corners, shadows, animation speed, and glow.</p>
+
+                <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.625rem" }}>Corner Style</label>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}>
+                  {([["sharp", "Sharp"], ["soft", "Soft"], ["rounded", "Rounded"], ["pill", "Pill"]] as Array<[CornerStyle, string]>).map(([style, label]) => (
+                    <button key={style} onClick={() => updateTheme({ cornerStyle: style })}
+                      style={{ flex: 1, padding: "0.625rem", borderRadius: CORNER_RADIUS[style], border: `2px solid ${theme.cornerStyle === style ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.cornerStyle === style ? "rgba(59,130,246,0.1)" : "var(--va-bg)", color: theme.cornerStyle === style ? "var(--va-accent)" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.78rem", fontWeight: theme.cornerStyle === style ? "700" : "400" }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.625rem" }}>Shadow Intensity</label>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}>
+                  {(["none", "subtle", "strong"] as ShadowIntensity[]).map(s => (
+                    <button key={s} onClick={() => updateTheme({ shadowIntensity: s })}
+                      style={{ flex: 1, padding: "0.5rem", borderRadius: "0.5rem", border: `2px solid ${theme.shadowIntensity === s ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.shadowIntensity === s ? "rgba(59,130,246,0.1)" : "transparent", color: theme.shadowIntensity === s ? "var(--va-accent)" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.8rem", fontWeight: theme.shadowIntensity === s ? "700" : "400", textTransform: "capitalize" }}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+
+                <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.625rem" }}>Animation Speed</label>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}>
+                  {(["off", "fast", "normal", "slow"] as AnimSpeed[]).map(a => (
+                    <button key={a} onClick={() => updateTheme({ animSpeed: a })}
+                      style={{ flex: 1, padding: "0.5rem", borderRadius: "0.5rem", border: `2px solid ${theme.animSpeed === a ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.animSpeed === a ? "rgba(59,130,246,0.1)" : "transparent", color: theme.animSpeed === a ? "var(--va-accent)" : "var(--va-text-muted)", cursor: "pointer", fontSize: "0.8rem", fontWeight: theme.animSpeed === a ? "700" : "400", textTransform: "capitalize" }}>
+                      {a}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.625rem 0.875rem", background: "var(--va-bg)", borderRadius: "0.5rem" }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: "0.875rem", fontWeight: "600" }}>Glow Effects</p>
+                    <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>Soft accent-colored glow on highlighted/active elements</p>
+                  </div>
+                  <button onClick={() => updateTheme({ glowEffects: !theme.glowEffects })}
+                    style={{ width: "44px", height: "24px", borderRadius: "9999px", border: "none", cursor: "pointer", background: theme.glowEffects ? "#22c55e" : "var(--va-border)", position: "relative", flexShrink: 0 }}>
+                    <div style={{ position: "absolute", top: "2px", left: theme.glowEffects ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", background: "white", transition: "left 0.2s" }} />
+                  </button>
+                </div>
+              </div>
+
+              {/* ── More Colors ── */}
+              <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1.5rem" }}>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: "bold", marginBottom: "0.25rem" }}>🎨 More Colors</h3>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginBottom: "1rem" }}>Fine-tune individual colors beyond the main accent.</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
+                  {([
+                    ["linkColor", "🔗 Links", theme.linkColor],
+                    ["successColor", "✓ Success", theme.successColor],
+                    ["errorColor", "✗ Error", theme.errorColor],
+                    ["warningColor", "⚠ Warning", theme.warningColor],
+                    ["cardBorderColor", "▢ Card Border", theme.cardBorderColor],
+                  ] as Array<[keyof ThemeSettings, string, string]>).map(([key, label, value]) => (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: "0.625rem", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.5rem 0.75rem" }}>
+                      <input type="color" value={value} onChange={e => updateTheme({ [key]: e.target.value } as Partial<ThemeSettings>)}
+                        style={{ width: "2rem", height: "2rem", borderRadius: "0.25rem", border: "1px solid var(--va-border)", background: "transparent", cursor: "pointer", flexShrink: 0 }} />
+                      <span style={{ fontSize: "0.8rem", color: "var(--va-text)" }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.625rem 0.875rem", background: "var(--va-bg)", borderRadius: "0.5rem" }}>
+                  <p style={{ fontSize: "0.78rem", color: "var(--va-text-muted)" }}>Looking for Rainbow Mode or animated accents? Check the <strong style={{ color: "var(--va-accent)" }}>⚡ Harry Potter Themes</strong> panel →</p>
+                </div>
+              </div>
+
+              {/* ── Per-Tab Nav Colors ── */}
+              <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1.5rem" }}>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: "bold", marginBottom: "0.25rem" }}>🧭 Per-Tab Nav Colors</h3>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.8rem", marginBottom: "1rem" }}>Give each sidebar link its own color instead of sharing the accent. Leave unset to use the accent color.</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {NAV_TAB_KEYS.map(({ key, label }) => (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: "0.625rem", background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.5rem 0.75rem" }}>
+                      <span style={{ flex: 1, fontSize: "0.85rem", color: "var(--va-text)" }}>{label}</span>
+                      <input type="color" value={theme.navTabColors[key] || theme.accentColor}
+                        onChange={e => updateTheme({ navTabColors: { ...theme.navTabColors, [key]: e.target.value } })}
+                        style={{ width: "2rem", height: "2rem", borderRadius: "0.25rem", border: "1px solid var(--va-border)", background: "transparent", cursor: "pointer" }} />
+                      {theme.navTabColors[key] && (
+                        <button onClick={() => { const updated = { ...theme.navTabColors }; delete updated[key]; updateTheme({ navTabColors: updated }); }}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.7rem" }}>Reset</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
+
+            {/* ── HARRY POTTER THEMES — separate side column ── */}
+            <div style={{ width: "16rem", flexShrink: 0 }}>
+              <div style={{ position: "sticky", top: "2rem", background: "linear-gradient(160deg, rgba(174,0,1,0.08), rgba(14,26,64,0.08))", border: "1px solid var(--va-accent)", borderRadius: "0.75rem", padding: "1.25rem" }}>
+                <h3 style={{ fontSize: "1.05rem", fontWeight: "bold", marginBottom: "0.25rem" }}>⚡ Harry Potter Themes</h3>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.78rem", marginBottom: "1.125rem" }}>Animated accent colors inspired by the wizarding world. Pick one to replace the static accent app-wide.</p>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1.25rem" }}>
+                  {ANIMATED_ACCENT_OPTIONS.map(opt => (
+                    <button key={opt.id} onClick={() => updateTheme({ animatedAccent: opt.id })}
+                      style={{ textAlign: "left", padding: "0.55rem 0.75rem", borderRadius: "0.5rem", border: `1.5px solid ${theme.animatedAccent === opt.id ? "var(--va-accent)" : "var(--va-border)"}`, background: theme.animatedAccent === opt.id ? "rgba(255,255,255,0.06)" : "transparent", cursor: "pointer" }}>
+                      <p style={{ fontSize: "0.82rem", fontWeight: theme.animatedAccent === opt.id ? "700" : "600", color: theme.animatedAccent === opt.id ? "var(--va-accent)" : "var(--va-text)", marginBottom: "0.1rem" }}>{opt.label}</p>
+                      <p style={{ fontSize: "0.68rem", color: "var(--va-text-muted)" }}>{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {(theme.animatedAccent === "hp-house-single") && (
+                  <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1rem" }}>
+                    <p style={{ fontSize: "0.78rem", fontWeight: "600", marginBottom: "0.625rem" }}>Choose your house</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                      {(Object.keys(HP_HOUSES) as HPHouse[]).map(h => (
+                        <button key={h} onClick={() => updateTheme({ hpHouse: h })}
+                          style={{ padding: "0.5rem", borderRadius: "0.5rem", border: `2px solid ${theme.hpHouse === h ? HP_HOUSES[h].primary : "var(--va-border)"}`, background: `linear-gradient(135deg, ${HP_HOUSES[h].primary}22, ${HP_HOUSES[h].secondary}22)`, cursor: "pointer", textAlign: "center" }}>
+                          <p style={{ fontSize: "1.1rem", marginBottom: "0.15rem" }}>{HP_HOUSES[h].icon}</p>
+                          <p style={{ fontSize: "0.68rem", color: "var(--va-text)", fontWeight: theme.hpHouse === h ? "700" : "400" }}>{HP_HOUSES[h].name}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {theme.animatedAccent !== "none" && (
+                  <p style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", marginTop: "1rem", paddingTop: "0.875rem", borderTop: "1px solid var(--va-border)" }}>
+                    Active everywhere — speed follows your Animation Speed setting above.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
           )}
 
           {/* ── INSTRUCTIONS ── */}
