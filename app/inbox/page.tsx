@@ -15,6 +15,292 @@ import {
   saveInboxFileToIDB, loadInboxFileFromIDB, deleteInboxFileFromIDB, listInboxFilesFromIDB,
 } from "@/lib/archiveEngine";
 
+// ─── Full Player Story Distillation Engine Prompt — for use with the user's own AI chat ──
+const PLAYER_STORY_DISTILLATION_PROMPT = `# PLAYER STORY DISTILLATION ENGINE
+
+You are an expert RPG Campaign Historian, Continuity Editor, Character Arc Analyst, and Story Archivist.
+
+Your task is to transform the provided story or session material into a Player Story Reference Document.
+
+The purpose of this document is to preserve everything related to the player character's journey, actions, choices, consequences, relationships, growth, achievements, failures, and influence on the world.
+
+This document will be stored separately from Canon Reference Documents.
+
+Focus on the player story, not general world lore.
+
+---
+
+## CRITICAL RULES
+
+1. Record only information explicitly supported by the source material.
+2. Preserve chronology.
+3. Preserve consequences.
+4. Preserve cause-and-effect relationships.
+5. Preserve player agency.
+6. Preserve character growth.
+7. Preserve important conversations.
+8. Preserve beliefs, assumptions, and misunderstandings.
+9. Record both successes and failures.
+10. Record both intended and unintended consequences.
+11. Missing information is worse than excessive information.
+12. Do not summarize multiple events into a single event if they occurred separately.
+13. Preserve emotional and relationship development.
+14. Preserve world changes caused by the player.
+
+---
+
+## PLAYER CHARACTER PROFILE
+
+For the player character:
+
+* Name
+* Aliases
+* Titles
+* Occupation
+* Role
+* Goals
+* Motivations
+* Fears
+* Personality traits
+* Beliefs
+* Strengths
+* Weaknesses
+* Current status
+
+Track how these change throughout the story.
+
+---
+
+## PLAYER ACTIONS
+
+Record every significant player action.
+
+For each action include:
+
+* What happened
+* Why the player chose it
+* Who was involved
+* Immediate consequences
+* Long-term consequences
+
+---
+
+## PLAYER DECISIONS
+
+Track all important decisions.
+
+For each decision include:
+
+* Situation
+* Options available
+* Choice made
+* Reason for the choice (if known)
+* Consequences
+
+---
+
+## PLAYER RELATIONSHIPS
+
+Track all meaningful relationships involving the player.
+
+For each relationship include:
+
+* Participants
+* Relationship type
+* Starting state
+* Important moments
+* Changes over time
+* Current state
+
+Examples:
+
+* Friendships
+* Rivalries
+* Romance
+* Mentorships
+* Alliances
+* Enmities
+
+---
+
+## PLAYER KNOWLEDGE
+
+Track what the player character knows.
+
+Include:
+
+* Discoveries
+* Secrets learned
+* Mysteries investigated
+* False assumptions
+* Misunderstandings
+* Hidden information not yet discovered
+
+Separate:
+
+* What the player believes
+* What is actually true
+
+---
+
+## PLAYER INVENTORY & REWARDS
+
+Track:
+
+* Important items gained
+* Important items lost
+* Artifacts acquired
+* Rewards
+* Wealth changes
+* Titles earned
+
+Include how and when they were obtained.
+
+---
+
+## PLAYER ABILITIES & GROWTH
+
+Track:
+
+* Skills learned
+* Powers gained
+* Training completed
+* Milestones reached
+* Character development
+* Major growth moments
+
+---
+
+## PLAYER ACHIEVEMENTS
+
+Track:
+
+* Victories
+* Accomplishments
+* Goals completed
+* Challenges overcome
+* Important contributions
+
+---
+
+## PLAYER FAILURES
+
+Track:
+
+* Mistakes
+* Failed plans
+* Defeats
+* Consequences
+* Lost opportunities
+
+---
+
+## PLAYER IMPACT ON THE WORLD
+
+Track changes caused directly or indirectly by the player.
+
+For each include:
+
+* What changed
+* How the player caused it
+* Who was affected
+* Immediate consequences
+* Long-term consequences
+
+---
+
+## PLAYER TIMELINE
+
+Create a chronological timeline.
+
+Do NOT summarize arcs.
+
+Record events individually.
+
+For each event include:
+
+* Approximate date/time
+* Participants
+* What happened
+* Why it happened
+* Consequences
+
+Preserve cause-and-effect relationships.
+
+---
+
+## PLAYER CHARACTER ARC
+
+Track the evolution of the player character.
+
+Include:
+
+* Starting state
+* Early goals
+* Important experiences
+* Major decisions
+* Internal changes
+* Relationship changes
+* Turning points
+* Current state
+
+---
+
+## STORY DIVERGENCES
+
+Track all ways the player's actions altered events.
+
+For each divergence include:
+
+* Original expected outcome (if known)
+* What the player did
+* What changed
+* Consequences
+
+---
+
+## OPEN THREADS
+
+Track unresolved story elements.
+
+Include:
+
+* Active quests
+* Unanswered questions
+* Unresolved relationships
+* Pending consequences
+* Future opportunities
+
+---
+
+## CONTINUITY CHECK
+
+Before finishing:
+
+1. Verify all major player actions are recorded.
+2. Verify all major decisions are recorded.
+3. Verify all meaningful relationships are recorded.
+4. Verify all major consequences are recorded.
+5. Verify all major rewards and losses are recorded.
+6. Verify chronology remains intact.
+7. Verify all major story divergences are recorded.
+8. Verify no significant player-related information has been omitted.
+
+---
+
+## SECOND-PASS AUDIT
+
+After completing the document:
+
+* Estimate confidence that no significant player-story information was omitted.
+* Identify potentially missed actions.
+* Identify potentially missed consequences.
+* Identify potentially missed relationships.
+* Identify potentially missed character growth moments.
+* Identify potentially missed divergences.
+
+Output as a structured Player Story Reference Document.`;
+
 type Suggestion = { text: string; category: StoryCategory };
 type ContradictionState = {
   existingEntry: VaultEntry; newText: string; category: StoryCategory;
@@ -112,10 +398,14 @@ export default function InboxPage() {
   const {
     distillQueue, addToDistillQueue: addToSharedDistillQueue, removeFromDistillQueue,
     pauseDistillItem, resumeDistillItem, cancelDistillItem, restartDistillItem,
-    distillImportQueue, importDistillItem, pauseDistillImportItem, resumeDistillImportItem,
+    distillImportQueue, importDistillItem, queueStoryReferenceForImport, pauseDistillImportItem, resumeDistillImportItem,
     cancelDistillImportItem, restartDistillImportItem,
   } = useDistill();
   const [showDistillPanel, setShowDistillPanel] = useState(false);
+  const [showDistillPromptModal, setShowDistillPromptModal] = useState(false);
+  const [storyPromptCopied, setStoryPromptCopied] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importSourceId, setImportSourceId] = useState<string>("");
   const [distillSourceId, setDistillSourceId] = useState<"paste" | string>("paste");
   const [viewingDistillResult, setViewingDistillResult] = useState("");
   const [viewingDistillTitle, setViewingDistillTitle] = useState("");
@@ -366,12 +656,150 @@ export default function InboxPage() {
       )}
 
 
+      {/* ── Distill Story Prompt Modal — for use with user's own AI chat ────────── */}
+      {showDistillPromptModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1002, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+          <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", width: "min(700px, 95vw)", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
+            <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.25rem" }}>✨ Distill Story Prompt</h2>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.78rem" }}>
+                  Use this with your own AI chat to distill session notes into a Player Story Reference — avoids API rate limits entirely.
+                </p>
+              </div>
+              <button onClick={() => setShowDistillPromptModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
+            </div>
+
+            <div style={{ padding: "1.25rem 1.5rem", overflowY: "auto", flex: 1 }}>
+              <div style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.25)", borderRadius: "0.5rem", padding: "1rem 1.125rem", marginBottom: "1.25rem" }}>
+                <p style={{ fontWeight: "700", fontSize: "0.875rem", marginBottom: "0.625rem", color: "var(--va-text)" }}>📋 How to use this:</p>
+                <ol style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", lineHeight: "1.8", paddingLeft: "1.25rem", margin: 0 }}>
+                  <li>Copy the prompt below.</li>
+                  <li>Open your own AI chat (ChatGPT, Claude.ai, Gemini app, etc.).</li>
+                  <li>Paste the prompt, then paste or upload your session notes / story content in the same message.</li>
+                  <li>This focuses entirely on what YOUR character did, decided, learned, and changed — not general world lore (that's what Canon Distill is for).</li>
+                  <li>Copy the AI's response (the full Player Story Reference).</li>
+                  <li>Come back here, paste it into the input box or upload it as a file, then distill or directly save it as a Story Reference.</li>
+                  <li>Click <strong style={{ color: "#c4b5fd" }}>⚡ Import to Vault</strong> to split it into individual facts and send them to 🎮 Player Story.</li>
+                </ol>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                <p style={{ fontWeight: "600", fontSize: "0.8rem", color: "var(--va-text-muted)" }}>The prompt ({PLAYER_STORY_DISTILLATION_PROMPT.length.toLocaleString()} characters):</p>
+                <button onClick={() => {
+                  navigator.clipboard.writeText(PLAYER_STORY_DISTILLATION_PROMPT);
+                  setStoryPromptCopied(true);
+                  setTimeout(() => setStoryPromptCopied(false), 2500);
+                }} style={{ background: storyPromptCopied ? "#22c55e" : "#7c3aed", color: "white", border: "none", borderRadius: "0.375rem", padding: "0.4rem 0.875rem", cursor: "pointer", fontSize: "0.8rem", fontWeight: "600" }}>
+                  {storyPromptCopied ? "✓ Copied!" : "📋 Copy Prompt"}
+                </button>
+              </div>
+              <div style={{ background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "1rem", maxHeight: "320px", overflowY: "auto" }}>
+                <pre style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", whiteSpace: "pre-wrap", fontFamily: "monospace", margin: 0, lineHeight: "1.6" }}>
+                  {PLAYER_STORY_DISTILLATION_PROMPT}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Import to Vault Modal — queue-based, picks from Saved Story References ── */}
+      {showImportModal && (() => {
+        const archive = loadArchive();
+        const storyRefCat = (archive.inboxDistillCategories ?? []).find(c => c.name === "Story References");
+        const refs = storyRefCat?.entries ?? [];
+        return (
+          <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1000, width: "min(480px, 95vw)", background: "var(--va-surface)", borderLeft: "1px solid var(--va-border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.3)" }}>
+            <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>⚡ Import to Vault</h2>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                  Splits a Story Reference into individual facts — sent to 🎮 Player Story.
+                </p>
+              </div>
+              <button onClick={() => setShowImportModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem", padding: "0.25rem" }}>×</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
+              {refs.length === 0 ? (
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.85rem", textAlign: "center", padding: "1.5rem 0" }}>
+                  No Saved Story References yet. Distill something first — either in-app or by pasting a result from your own AI chat using the Distill Story Prompt.
+                </p>
+              ) : (
+                <>
+                  <p style={{ fontWeight: "600", fontSize: "0.875rem", marginBottom: "0.75rem" }}>Pick a Story Reference to import:</p>
+                  <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.875rem" }}>
+                    <select
+                      value={importSourceId || refs[0]?.id || ""}
+                      onChange={e => setImportSourceId(e.target.value)}
+                      style={{ flex: 1, background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "0.6rem 0.75rem", color: "var(--va-text)", fontSize: "0.875rem", outline: "none" }}
+                    >
+                      {refs.map(r => (
+                        <option key={r.id} value={r.id}>{r.filename}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => {
+                      const id = importSourceId || refs[0]?.id;
+                      const ref = refs.find(r => r.id === id);
+                      if (!ref) return;
+                      queueStoryReferenceForImport(ref.id, ref.content, ref.filename);
+                      alert(`✓ "${ref.filename}" added to import queue`);
+                    }} style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.5rem", padding: "0.6rem 1rem", cursor: "pointer", fontWeight: "700", fontSize: "0.875rem", whiteSpace: "nowrap" }}>
+                      ✨ Add
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {distillImportQueue.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginTop: "0.5rem" }}>
+                  <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>
+                    Import Queue ({distillImportQueue.length}) · also tracked in floating panel
+                  </p>
+                  {distillImportQueue.map(item => (
+                    <div key={item.id} style={{ background: "var(--va-bg)", border: `1px solid ${item.status === "running" ? "#7c3aed" : item.status === "paused" ? "#fbbf24" : item.status === "done" ? "#22c55e" : item.status === "error" ? "#ef4444" : item.status === "cancelled" ? "var(--va-text-muted)" : "var(--va-border)"}`, borderRadius: "0.5rem", padding: "0.625rem 0.75rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+                        <span style={{ fontSize: "0.78rem", fontWeight: "600", color: "var(--va-text)" }}>
+                          {item.status === "running" ? "⏳" : item.status === "paused" ? "⏸" : item.status === "done" ? "✓" : item.status === "error" ? "✗" : item.status === "cancelled" ? "⊘" : "🕐"} {item.filename.replace(/\.[^/.]+$/, "")}
+                        </span>
+                        <div style={{ display: "flex", gap: "0.375rem" }}>
+                          {item.status === "running" && (
+                            <button onClick={() => pauseDistillImportItem(item.id)}
+                              style={{ background: "none", border: "1px solid #fbbf24", borderRadius: "0.25rem", color: "#fbbf24", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Pause</button>
+                          )}
+                          {item.status === "paused" && (
+                            <button onClick={() => resumeDistillImportItem(item.id)}
+                              style={{ background: "none", border: "1px solid #22c55e", borderRadius: "0.25rem", color: "#22c55e", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Resume</button>
+                          )}
+                          {(item.status === "running" || item.status === "queued" || item.status === "paused") && (
+                            <button onClick={() => cancelDistillImportItem(item.id)}
+                              style={{ background: "none", border: "1px solid #ef4444", borderRadius: "0.25rem", color: "#ef4444", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Cancel</button>
+                          )}
+                          {(item.status === "error" || item.status === "cancelled") && (
+                            <button onClick={() => restartDistillImportItem(item.id)}
+                              style={{ background: "none", border: "1px solid #3b82f6", borderRadius: "0.25rem", color: "#93c5fd", fontSize: "0.68rem", padding: "0.15rem 0.4rem", cursor: "pointer" }}>Restart</button>
+                          )}
+                        </div>
+                      </div>
+                      <p style={{ fontSize: "0.68rem", color: item.status === "error" ? "#f87171" : item.status === "done" ? "#4ade80" : item.status === "paused" ? "#fbbf24" : "#c4b5fd", margin: 0 }}>
+                        {item.status === "done" ? "✓ " + item.importedCount + " entries imported to Player Story" : item.progress}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Distill Story Side Panel ─────────────────────────────────────────── */}
       {showDistillPanel && (
         <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1001, width: "min(600px, 95vw)", background: "var(--va-surface)", borderLeft: "1px solid var(--va-border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.3)" }}>
           <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>✨ Distill Story</h2>
+              <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.2rem" }}>✨ Distill Story (in-app)</h2>
               <p style={{ color: "var(--va-text-muted)", fontSize: "0.75rem" }}>Gemini reads your content and creates a structured Story Reference → imports to 🎮 Player Story subtab</p>
             </div>
             <button onClick={() => setShowDistillPanel(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
@@ -552,10 +980,20 @@ export default function InboxPage() {
           <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem" }}>Paste session notes, upload files, or distill into structured Player Story entries.</p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
+          <button onClick={() => setShowDistillPromptModal(true)}
+            style={{ background: "#7c3aed", color: "white", padding: "0.625rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
+            ✨ Distill Story Prompt
+          </button>
           {hasGeminiQualityKey() && (
             <button onClick={() => setShowDistillPanel(true)}
-              style={{ background: "#7c3aed", color: "white", padding: "0.625rem 1rem", borderRadius: "0.5rem", border: "none", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
-              ✨ Distill Story
+              style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.4)", color: "#c4b5fd", padding: "0.625rem 1rem", borderRadius: "0.5rem", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
+              ✨ Distill Story (in-app)
+            </button>
+          )}
+          {hasGeminiKey() && (
+            <button onClick={() => setShowImportModal(true)}
+              style={{ background: "rgba(124,58,237,0.15)", border: "1px solid #7c3aed", color: "#c4b5fd", padding: "0.625rem 1rem", borderRadius: "0.5rem", cursor: "pointer", fontWeight: "600", fontSize: "0.875rem" }}>
+              ⚡ Import to Vault
             </button>
           )}
           <button onClick={() => setShowSavePrompt(true)}
@@ -646,7 +1084,7 @@ export default function InboxPage() {
                     {hasGeminiQualityKey() && (
                       <button onClick={() => { setDistillSourceId(file.id); setShowDistillPanel(true); }}
                         style={{ background: "#7c3aed", color: "white", border: "none", borderRadius: "0.375rem", padding: "0.25rem 0.625rem", cursor: "pointer", fontSize: "0.75rem", fontWeight: "600" }}>
-                        ✨ Distill
+                        ✨ Distill (in-app)
                       </button>
                     )}
                     <button onClick={async () => {

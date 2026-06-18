@@ -81,6 +81,7 @@ interface ExtractionContextType {
   // Inbox Import (separate manual step, triggered after reviewing distilled result)
   distillImportQueue: Array<{ id: string; filename: string; storyContent: string; status: QueueStatus; progress: string; importedCount: number }>;
   importDistillItem: (distillItemId: string) => void;
+  queueStoryReferenceForImport: (refId: string, content: string, filename: string) => void;
   pauseDistillImportItem: (id: string) => void;
   resumeDistillImportItem: (id: string) => void;
   cancelDistillImportItem: (id: string) => void;
@@ -116,7 +117,7 @@ const ExtractionContext = createContext<ExtractionContextType>({
   pauseDistillItem: () => {}, resumeDistillItem: () => {}, cancelDistillItem: () => {}, restartDistillItem: () => {},
   isDistillRunning: false,
 
-  distillImportQueue: [], importDistillItem: () => {},
+  distillImportQueue: [], importDistillItem: () => {}, queueStoryReferenceForImport: () => {},
   pauseDistillImportItem: () => {}, resumeDistillImportItem: () => {}, cancelDistillImportItem: () => {}, restartDistillImportItem: () => {},
   isDistillImportRunning: false,
 
@@ -348,6 +349,14 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
     if (!item || !item.result) return;
     if (distillImportQueue.find(i => i.id === distillItemId && (i.status === "running" || i.status === "queued" || i.status === "paused"))) return;
     setDistillImportQueue(prev => [...prev, { id: distillItemId, filename: item.filename, storyContent: item.result, status: "queued" as QueueStatus, progress: "Queued", importedCount: 0 }]);
+  }
+  // General-purpose version — queues any raw Story Reference content directly,
+  // regardless of whether it came from the in-app distiller or was pasted in from
+  // the user's own AI chat (via the Distill Story Prompt flow).
+  function queueStoryReferenceForImport(refId: string, content: string, filename: string) {
+    if (!content) return;
+    if (distillImportQueue.find(i => i.id === refId && (i.status === "running" || i.status === "queued" || i.status === "paused"))) return;
+    setDistillImportQueue(prev => [...prev, { id: refId, filename, storyContent: content, status: "queued" as QueueStatus, progress: "Queued", importedCount: 0 }]);
   }
   function pauseDistillImportItem(id: string) {
     distillImportAbortFlags.current[id] = "pause";
@@ -678,7 +687,7 @@ export function ExtractionProvider({ children }: { children: ReactNode }) {
     <ExtractionContext.Provider value={{
       queue, addToQueue, removeFromQueue, saveItemResults, clearCompleted, isRunning, retryItem, stopExtraction,
       distillQueue, addToDistillQueue, removeFromDistillQueue, pauseDistillItem, resumeDistillItem, cancelDistillItem, restartDistillItem, isDistillRunning,
-      distillImportQueue, importDistillItem, pauseDistillImportItem, resumeDistillImportItem, cancelDistillImportItem, restartDistillImportItem, isDistillImportRunning,
+      distillImportQueue, importDistillItem, queueStoryReferenceForImport, pauseDistillImportItem, resumeDistillImportItem, cancelDistillImportItem, restartDistillImportItem, isDistillImportRunning,
       canonDistillQueue, addToCanonDistillQueue, removeFromCanonDistillQueue, pauseCanonDistillItem, resumeCanonDistillItem, cancelCanonDistillItem, restartCanonDistillItem, isCanonDistillRunning,
       canonImportQueue, addToCanonImportQueue, removeFromCanonImportQueue, pauseCanonImportItem, resumeCanonImportItem, cancelCanonImportItem, restartCanonImportItem, isCanonImportRunning,
     }}>
@@ -760,6 +769,7 @@ export function useDistill() {
     // Separate manual import step — call after reviewing the distilled Story Reference
     distillImportQueue: ctx.distillImportQueue,
     importDistillItem: ctx.importDistillItem,
+    queueStoryReferenceForImport: ctx.queueStoryReferenceForImport,
     pauseDistillImportItem: ctx.pauseDistillImportItem,
     resumeDistillImportItem: ctx.resumeDistillImportItem,
     cancelDistillImportItem: ctx.cancelDistillImportItem,
