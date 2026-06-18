@@ -563,6 +563,10 @@ export function compileSavePrompt(archive: ArchiveData): string {
   if (style) lines.push(`## Tone & Style\n${style}`);
 
   lines.push(
+    `## Vault Extraction Hints\nAt the end of this session, list any information that should be added to long-term memory.\nInclude:\n- Character development\n- New relationships\n- Relationship changes\n- New powers\n- New items\n- New locations\n- New organizations\n- New lore\n- New mysteries\n- New world changes\n- New goals\n- New enemies\n- New allies\nFocus only on information that should persist beyond this session.`
+  );
+
+  lines.push(
     `## Your Task\nPlease confirm you have read and understood all of the above. Then ask me: "Where would you like to continue from?" — and wait for my response before doing anything else.`
   );
 
