@@ -58,6 +58,398 @@ async function deleteCanonContentFromIDB(entryId: string): Promise<void> {
 const LARGE_CONTENT_THRESHOLD = 5000; // chars — above this goes to IDB
 const IDB_PLACEHOLDER = "[CONTENT_IN_IDB]"; // marker in localStorage version
 
+// ─── Full Canon Extraction Prompt — for use with the user's own AI chat ────────
+const CANON_EXTRACTION_PROMPT = `# CANON EXTRACTION ENGINE
+
+You are an expert Canon Archivist, Lore Analyst, Continuity Editor, and RPG Game Master Assistant.
+
+Your task is to transform the provided source material into a complete canon reference document.
+
+## CRITICAL RULES
+
+1. Treat the source material as absolute canon.
+2. Do not invent, infer, speculate, simplify, or fill gaps.
+3. Record information exactly as supported by the text.
+4. Missing information is worse than excessive information.
+5. Preserve chronology, context, motivations, consequences, and relationships.
+6. Include both major and minor details whenever they could matter to a Game Master.
+7. Assume future story decisions may depend on seemingly insignificant details.
+8. If a fact appears only once, include it.
+9. If a character appears only briefly, include them.
+10. If an event causes later consequences, note both the event and the consequence.
+11. Never compress multiple events into one event if they occur separately.
+12. Preserve story logic and cause-and-effect chains.
+13. Do not replace multiple events with a summary if the original text presents them separately.
+14. When in doubt, record more detail rather than less.
+15. Preserve important conversations, explanations, revelations, motivations, and consequences, not just outcomes.
+16. Track both what happened and why it happened.
+17. Track both what characters believe and what is actually true.
+18. Record information even if it appears unimportant; it may become relevant later.
+
+---
+
+## EXTRACTION PRIORITY
+
+Extract everything that could matter for:
+
+* Story continuity
+* Character behavior
+* Worldbuilding
+* Future plot developments
+* Relationships
+* Rules of the setting
+* Mysteries
+* Secrets
+* Organizations
+* Political structures
+* Historical events
+* Magical systems
+* Technology systems
+* Combat systems
+* Social structures
+
+---
+
+## CHARACTERS
+
+For EVERY named character:
+
+* Full name
+* Aliases
+* Titles
+* Physical description
+* Personality traits
+* Abilities
+* Occupation/role
+* Goals
+* Motivations
+* Fears
+* Relationships
+* History
+* Secrets
+* Important possessions
+* Notable dialogue patterns
+* Important actions
+* Character development
+* Current status
+
+Include:
+
+* Major characters
+* Minor characters
+* One-scene characters
+* Mentioned characters
+* Historical characters
+* Deceased characters
+
+---
+
+## CHARACTER ARCS
+
+For every major character:
+
+* Starting state
+* Initial beliefs
+* Major experiences
+* Important decisions
+* Internal changes
+* Relationship changes
+* Key successes
+* Key failures
+* Ending state
+
+Preserve how each character evolves throughout the story.
+
+---
+
+## LOCATIONS
+
+For EVERY location:
+
+* Description
+* Physical appearance
+* Purpose
+* Significance
+* Residents
+* Factions present
+* Events occurring there
+* Secrets
+* History
+* Important objects found there
+
+---
+
+## RELATIONSHIPS
+
+For EVERY meaningful relationship:
+
+* Participants
+* Relationship type
+* History
+* Dynamic
+* Conflicts
+* Trust level
+* Loyalty level
+* Evolution over time
+
+---
+
+## POWERS / MAGIC / RULES
+
+Extract:
+
+* Spells
+* Powers
+* Techniques
+* Systems
+* Rules
+* Limitations
+* Costs
+* Weaknesses
+* Training methods
+* Supernatural mechanics
+
+Include exact limitations whenever known.
+
+---
+
+## ITEMS / ARTIFACTS
+
+For EVERY important item:
+
+* Description
+* Function
+* Owner
+* History
+* Powers
+* Restrictions
+* Current status
+
+---
+
+## ORGANIZATIONS
+
+For EVERY group:
+
+* Purpose
+* Membership
+* Hierarchy
+* Goals
+* Influence
+* Resources
+* Rivals
+* History
+
+---
+
+## WORLD LORE
+
+Extract:
+
+* History
+* Myths
+* Legends
+* Religions
+* Politics
+* Geography
+* Culture
+* Economics
+* Laws
+* Education
+* Social customs
+
+---
+
+## SECRETS AND REVEALS
+
+Track separately:
+
+* Hidden identities
+* Mysteries
+* Revelations
+* Plot twists
+* Foreshadowing
+* Deceptions
+* False assumptions
+
+For each entry include:
+
+* What characters believe
+* What is actually true
+* Evidence supporting the belief
+* When the truth is revealed
+* Consequences of the reveal
+
+---
+
+## TIMELINE
+
+Create a chronological timeline.
+
+Do NOT summarize entire arcs into one entry.
+
+Record events individually.
+
+For each event include:
+
+* Approximate date/time
+* Participants
+* What happened
+* Why it happened
+* Immediate consequences
+* Long-term consequences
+
+Preserve chronology and narrative causality.
+
+---
+
+## CAUSE AND EFFECT CHAINS
+
+For every major event:
+
+* What happened?
+* Who caused it?
+* Why did they do it?
+* How was it accomplished?
+* Immediate consequences
+* Long-term consequences
+* Which future events depended on this event?
+
+Show how events connect rather than treating them as isolated facts.
+
+Preserve narrative causality.
+
+---
+
+## STORY STRUCTURE
+
+Create a complete narrative breakdown.
+
+### BEGINNING
+
+* Initial world state
+* Main characters introduced
+* Inciting incident
+* Initial goals
+* Initial conflicts
+
+### RISING ACTION
+
+* Major discoveries
+* Investigations
+* Obstacles
+* Character growth
+* Escalating conflicts
+* Important decisions
+
+### TURNING POINTS
+
+* Major reveals
+* Plot twists
+* New information
+* Reversals
+* Decision points
+
+### CLIMAX
+
+For the final confrontation include:
+
+* Participants
+* Objectives
+* Sequence of events
+* Key decisions
+* Reveals
+* Outcome
+* Why the outcome occurred
+
+### RESOLUTION
+
+* Immediate aftermath
+* Character outcomes
+* World changes
+* Explanations given
+* Problems solved
+* Remaining consequences
+
+### ENDING STATE
+
+For every major character include:
+
+* Final status
+* Current relationships
+* Goals moving forward
+
+Also include:
+
+* Unresolved mysteries
+* Future story hooks
+* Setup for sequels
+
+Preserve story flow from beginning to end.
+
+---
+
+## CONVERSATIONS AND EXPLANATIONS
+
+Extract all major explanatory scenes.
+
+For each include:
+
+* Participants
+* Information revealed
+* Why the information matters
+* Consequences of learning it
+
+Examples:
+
+* Mentor explanations
+* Villain monologues
+* Mystery solutions
+* Historical revelations
+* Rule explanations
+* End-of-story explanations
+
+Do not reduce important explanations to a single sentence.
+
+---
+
+## CANON SAFETY CHECK
+
+Before finishing:
+
+1. Verify all named characters are listed.
+2. Verify all named locations are listed.
+3. Verify all organizations are listed.
+4. Verify all magical systems/rules are listed.
+5. Verify all major plot events appear in the timeline.
+6. Verify all major revelations appear in Secrets and Reveals.
+7. Verify chronology remains intact.
+8. Verify no significant information from the source material has been omitted.
+
+---
+
+## SECOND-PASS AUDIT
+
+After completing the document:
+
+1. Estimate confidence that no significant canon information was omitted.
+2. Perform a second-pass review.
+3. Identify anything that may have been missed.
+4. Identify sections that may need expansion.
+5. List potentially overlooked minor characters.
+6. List potentially overlooked locations.
+7. List potentially overlooked events.
+8. List potentially overlooked lore.
+9. List potentially overlooked relationships.
+10. List potentially overlooked explanations or conversations.
+
+Output the audit separately from the main document.
+
+---
+
+Output as a structured Game Master Reference Document.`;
+
+
 // ─── Built-in Canon Categories ────────────────────────────────────────────────
 const BUILTIN_CATEGORIES = [
   { id: "pdf-files",      name: "PDF Files",       icon: "📄", desc: "Upload PDF documents" },
@@ -81,6 +473,7 @@ export default function CanonPage() {
   const [importDone, setImportDone] = useState(false);
   const [msg, setMsg] = useState("");
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
+  const [resolvedContent, setResolvedContent] = useState<Record<string, string>>({});
   const [placementResult, setPlacementResult] = useState<{ placement: string; context: string; suggestion: string } | null>(null);
   const [checkingPlacement, setCheckingPlacement] = useState(false);
   const [lastAddedContent, setLastAddedContent] = useState("");
@@ -96,6 +489,8 @@ export default function CanonPage() {
   const [extractDone, setExtractDone] = useState(false);
   // Distill state
   const [showDistillPanel, setShowDistillPanel] = useState(false);
+  const [showDistillPromptModal, setShowDistillPromptModal] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
   const [distillSourceId, setDistillSourceId] = useState("");
   const [distillProgress, setDistillProgress] = useState("");
   const [distilling, setDistilling] = useState(false);
@@ -568,6 +963,54 @@ export default function CanonPage() {
       )}
 
 
+      {/* ── Distill Canon Prompt Modal — for use with user's own AI chat ───────── */}
+      {showDistillPromptModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1002, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1.5rem" }}>
+          <div style={{ background: "var(--va-surface)", border: "1px solid var(--va-border)", borderRadius: "0.75rem", width: "min(700px, 95vw)", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
+            <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--va-border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h2 style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "0.25rem" }}>✨ Distill Canon Prompt</h2>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.78rem" }}>
+                  Use this with your own AI chat (ChatGPT, Claude, Gemini app, etc.) to avoid API rate limits entirely.
+                </p>
+              </div>
+              <button onClick={() => setShowDistillPromptModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "1.25rem" }}>×</button>
+            </div>
+
+            <div style={{ padding: "1.25rem 1.5rem", overflowY: "auto", flex: 1 }}>
+              <div style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.25)", borderRadius: "0.5rem", padding: "1rem 1.125rem", marginBottom: "1.25rem" }}>
+                <p style={{ fontWeight: "700", fontSize: "0.875rem", marginBottom: "0.625rem", color: "var(--va-text)" }}>📋 How to use this:</p>
+                <ol style={{ fontSize: "0.8rem", color: "var(--va-text-muted)", lineHeight: "1.8", paddingLeft: "1.25rem", margin: 0 }}>
+                  <li>Copy the prompt below using the button.</li>
+                  <li>Open your own AI chat (ChatGPT, Claude.ai, Gemini app — any AI with a large context window works).</li>
+                  <li>Paste the prompt, then upload or paste your book's full text in the same message (or right after, if your AI prefers a separate message).</li>
+                  <li>Let it generate the complete Canon Reference Document. For very long books, you may need to ask it to continue if it stops partway, or split the book into a few parts yourself.</li>
+                  <li>Copy the AI's response (the full Canon Reference).</li>
+                  <li>Come back here, upload it as a new file (or paste it) into Canon Archives.</li>
+                  <li>Click <strong style={{ color: "#c4b5fd" }}>⚡ Import to Vault</strong> on that file — Key 1 will split it into individual facts by category, without changing, summarizing, or adding anything.</li>
+                </ol>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                <p style={{ fontWeight: "600", fontSize: "0.8rem", color: "var(--va-text-muted)" }}>The prompt ({CANON_EXTRACTION_PROMPT.length.toLocaleString()} characters):</p>
+                <button onClick={() => {
+                  navigator.clipboard.writeText(CANON_EXTRACTION_PROMPT);
+                  setPromptCopied(true);
+                  setTimeout(() => setPromptCopied(false), 2500);
+                }} style={{ background: promptCopied ? "#22c55e" : "#7c3aed", color: "white", border: "none", borderRadius: "0.375rem", padding: "0.4rem 0.875rem", cursor: "pointer", fontSize: "0.8rem", fontWeight: "600" }}>
+                  {promptCopied ? "✓ Copied!" : "📋 Copy Prompt"}
+                </button>
+              </div>
+              <div style={{ background: "var(--va-bg)", border: "1px solid var(--va-border)", borderRadius: "0.5rem", padding: "1rem", maxHeight: "320px", overflowY: "auto" }}>
+                <pre style={{ fontSize: "0.7rem", color: "var(--va-text-muted)", whiteSpace: "pre-wrap", fontFamily: "monospace", margin: 0, lineHeight: "1.6" }}>
+                  {CANON_EXTRACTION_PROMPT}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Distill Canon Side Panel ─────────────────────────────────────────── */}
       {showDistillPanel && (
         <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1001, width: "min(600px, 95vw)", background: "var(--va-surface)", borderLeft: "1px solid var(--va-border)", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.3)" }}>
@@ -914,11 +1357,16 @@ export default function CanonPage() {
           </div>
         </div>
         <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-          {/* Distill Canon button */}
+          {/* Distill Canon Prompt button — for use with user's own AI chat, avoids API rate limits */}
+          <button onClick={() => setShowDistillPromptModal(true)}
+            style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid #7c3aed", background: "#7c3aed", color: "white", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
+            ✨ Distill Canon Prompt
+          </button>
+          {/* Distill Canon button (in-app, uses your Gemini key/quota) */}
           {hasGeminiQualityKey() && (
             <button onClick={openDistillPanel}
-              style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid #7c3aed", background: "#7c3aed", color: "white", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
-              ✨ Distill Canon
+              style={{ padding: "0.5rem 1rem", borderRadius: "0.5rem", border: "1px solid rgba(124,58,237,0.4)", background: "rgba(124,58,237,0.15)", color: "#c4b5fd", cursor: "pointer", fontSize: "0.875rem", fontWeight: "600" }}>
+              ✨ Distill Canon (in-app)
             </button>
           )}
           {/* Extract to Vault button */}
@@ -1118,7 +1566,11 @@ export default function CanonPage() {
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flex: 1, minWidth: 0 }}>
                         <span style={{ fontSize: "1rem" }}>{isTimeline ? "🗓️" : "📄"}</span>
                         <span style={{ fontWeight: "600", fontSize: "0.875rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.filename}</span>
-                        <span style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", flexShrink: 0 }}>{entry.content === IDB_PLACEHOLDER ? "Large file (stored)" : entry.content.length.toLocaleString() + " chars"}</span>
+                        <span style={{ color: "var(--va-text-muted)", fontSize: "0.7rem", flexShrink: 0 }}>
+                          {entry.content === IDB_PLACEHOLDER
+                            ? (resolvedContent[entry.id] ? resolvedContent[entry.id].length.toLocaleString() + " chars" : "Large file (stored)")
+                            : entry.content.length.toLocaleString() + " chars"}
+                        </span>
                         {isTimeline && <span style={{ background: "rgba(59,130,246,0.2)", color: "#93c5fd", fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "9999px", flexShrink: 0 }}>VERBATIM</span>}
                       </div>
                       <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0, alignItems: "center" }}>
@@ -1144,8 +1596,15 @@ export default function CanonPage() {
                             </button>
                           );
                         })()}
-                        <button onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
-                          style={{ background: "var(--va-border)", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.5rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
+                        <button onClick={async () => {
+                          if (expandedEntry === entry.id) { setExpandedEntry(null); return; }
+                          if (entry.content === IDB_PLACEHOLDER && !resolvedContent[entry.id]) {
+                            const idb = await loadCanonContentFromIDB(entry.id);
+                            if (idb) setResolvedContent(prev => ({ ...prev, [entry.id]: idb }));
+                            else { flash("✗ Could not load file from storage"); return; }
+                          }
+                          setExpandedEntry(entry.id);
+                        }} style={{ background: "var(--va-border)", border: "none", borderRadius: "0.25rem", padding: "0.25rem 0.5rem", cursor: "pointer", color: "var(--va-text-muted)", fontSize: "0.75rem" }}>
                           {expandedEntry === entry.id ? "▲ Hide" : "▼ View"}
                         </button>
                         <button onClick={async () => {
@@ -1169,7 +1628,7 @@ export default function CanonPage() {
                     {expandedEntry === entry.id && (
                       <div style={{ borderTop: "1px solid var(--va-border)", padding: "0.75rem 1rem", maxHeight: "300px", overflowY: "auto" }}>
                         <pre style={{ fontSize: "0.75rem", color: "var(--va-text-muted)", whiteSpace: "pre-wrap", fontFamily: "monospace", margin: 0, lineHeight: "1.6" }}>
-                          {entry.content}
+                          {entry.content === IDB_PLACEHOLDER ? (resolvedContent[entry.id] ?? "Loading...") : entry.content}
                         </pre>
                       </div>
                     )}
