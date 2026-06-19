@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSoundEffects } from "./SoundEffects";
+import { loadArchive } from "@/lib/archiveEngine";
 
 const FONT_SIZE_PX: Record<string, string> = { small: "14px", medium: "16px", large: "18px", xlarge: "20px" };
 const LINE_SPACING_VAL: Record<string, string> = { compact: "1.3", normal: "1.6", relaxed: "1.9" };
@@ -21,6 +22,71 @@ const HP_HOUSES: Record<string, { primary: string; secondary: string }> = {
   hufflepuff: { primary: "#ecb939", secondary: "#372e29" },
 };
 const HOUSE_ORDER = ["gryffindor", "slytherin", "ravenclaw", "hufflepuff"];
+
+// ── Marauder's Map — simplified castle floor plan ──────────────────────────
+// Each room is a labeled rectangle in percent-of-screen coordinates; corridors
+// are straight-line connections between room centers. Walkers move room-to-room
+// along these connections rather than wandering freely, so it actually reads as
+// someone moving through a castle rather than scattering randomly.
+const CASTLE_ROOMS: Array<{ name: string; x: number; y: number; w: number; h: number }> = [
+  { name: "Great Hall", x: 38, y: 8, w: 24, h: 16 },
+  { name: "Entrance Hall", x: 38, y: 28, w: 24, h: 10 },
+  { name: "Gryffindor Tower", x: 8, y: 8, w: 18, h: 14 },
+  { name: "Slytherin Dungeon", x: 8, y: 60, w: 18, h: 16 },
+  { name: "Ravenclaw Tower", x: 74, y: 8, w: 18, h: 14 },
+  { name: "Hufflepuff Basement", x: 74, y: 60, w: 18, h: 16 },
+  { name: "Library", x: 38, y: 42, w: 24, h: 14 },
+  { name: "Potions Classroom", x: 8, y: 42, w: 18, h: 12 },
+  { name: "Astronomy Tower", x: 74, y: 42, w: 18, h: 12 },
+  { name: "Great Staircase", x: 44, y: 60, w: 12, h: 16 },
+  { name: "Forbidden Corridor", x: 38, y: 80, w: 24, h: 10 },
+  { name: "Hagrid's Hut", x: 8, y: 80, w: 16, h: 10 },
+  { name: "Quidditch Pitch", x: 74, y: 80, w: 18, h: 10 },
+];
+
+// Adjacency — which rooms connect to which, so walkers move along plausible paths
+const CASTLE_CONNECTIONS: Record<string, string[]> = {
+  "Great Hall": ["Entrance Hall", "Library"],
+  "Entrance Hall": ["Great Hall", "Gryffindor Tower", "Slytherin Dungeon", "Great Staircase"],
+  "Gryffindor Tower": ["Entrance Hall", "Potions Classroom"],
+  "Slytherin Dungeon": ["Entrance Hall", "Potions Classroom", "Forbidden Corridor"],
+  "Ravenclaw Tower": ["Library", "Astronomy Tower"],
+  "Hufflepuff Basement": ["Library", "Astronomy Tower", "Forbidden Corridor"],
+  "Library": ["Great Hall", "Ravenclaw Tower", "Hufflepuff Basement", "Great Staircase"],
+  "Potions Classroom": ["Gryffindor Tower", "Slytherin Dungeon", "Hagrid's Hut"],
+  "Astronomy Tower": ["Ravenclaw Tower", "Hufflepuff Basement", "Quidditch Pitch"],
+  "Great Staircase": ["Entrance Hall", "Library", "Forbidden Corridor"],
+  "Forbidden Corridor": ["Slytherin Dungeon", "Hufflepuff Basement", "Great Staircase"],
+  "Hagrid's Hut": ["Potions Classroom"],
+  "Quidditch Pitch": ["Astronomy Tower"],
+};
+
+const GENERIC_WALKER_NAMES = [
+  "Argus Filch", "Peeves", "Minerva McGonagall", "Severus Snape", "Albus Dumbledore",
+  "Rubeus Hagrid", "Pomona Sprout", "Filius Flitwick", "Madam Pince", "Madam Pomfrey",
+  "Nearly Headless Nick", "The Fat Friar", "Cho Chang", "Cedric Diggory", "Luna Lovegood",
+  "Neville Longbottom", "Fred Weasley", "George Weasley", "Oliver Wood", "Marcus Flint",
+];
+
+function getMarauderWalkerNames(count: number): string[] {
+  const names: string[] = [];
+  try {
+    const archive = loadArchive();
+    const vaultNames = new Set<string>();
+    for (const entry of [...(archive.entries || []), ...(archive.playerEntries || [])]) {
+      if (entry.category === "characters" && entry.entity) vaultNames.add(entry.entity);
+    }
+    const shuffledVault = Array.from(vaultNames).sort(() => Math.random() - 0.5);
+    names.push(...shuffledVault.slice(0, count));
+  } catch {}
+  // Fall back to generic names to fill any remaining slots
+  const shuffledGeneric = [...GENERIC_WALKER_NAMES].sort(() => Math.random() - 0.5);
+  for (const n of shuffledGeneric) {
+    if (names.length >= count) break;
+    if (!names.includes(n)) names.push(n);
+  }
+  return names.slice(0, count);
+}
 
 const HOGWARTS_PALETTES: Record<string, { gold: string; black: string; parchment: string; burgundy: string; bronze: string; magicBlue: string }> = {
   classic: { gold: "#D4AF37", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#5C1A1B", bronze: "#8B6B3F", magicBlue: "#5DADE2" },
@@ -216,8 +282,9 @@ const HOGWARTS_GLOBAL_CSS = `
   100% { transform: scale(1.6); opacity: 0; }
 }
 @keyframes va-reveal-scroll {
-  from { transform: rotateX(-18deg) translateY(6px); opacity: 0; }
-  to { transform: rotateX(0deg) translateY(0); opacity: 1; }
+  0% { clip-path: inset(0 0 100% 0); opacity: 0; transform: scaleY(0.85); }
+  40% { opacity: 1; }
+  100% { clip-path: inset(0 0 0% 0); opacity: 1; transform: scaleY(1); }
 }
 @keyframes va-marauder-fade {
   0% { opacity: 0; }
@@ -252,7 +319,6 @@ const HOGWARTS_GLOBAL_CSS = `
 }
 `;
 
-const FOOTSTEP_GLYPHS = ["👣"];
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -334,11 +400,12 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
   }, [pathname]);
 
   // Marauder's Map easter egg — typing "Mischief Managed" anywhere triggers a brief
-  // map-mode overlay with fading footprints, regardless of which page you're on.
-  // Each trigger generates 2–4 distinct "people," each with their own randomized
-  // starting point, walking direction, and speed, so no two activations look the same.
+  // overlay of the castle floor plan with 2–4 named dots walking room-to-room along
+  // real corridor connections. Walker names try the vault's actual characters first,
+  // falling back to generic Hogwarts staff/students; starting rooms and paths are
+  // randomized every trigger so no two activations look the same.
   const [marauderActive, setMarauderActive] = useState(false);
-  const [footsteps, setFootsteps] = useState<Array<{ id: number; x: number; y: number; personId: number; rotation: number }>>([]);
+  const [walkers, setWalkers] = useState<Array<{ id: number; name: string; x: number; y: number; roomName: string }>>([]);
   useEffect(() => {
     let typed = "";
     const target = "mischief managed";
@@ -348,40 +415,44 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
       if (typed === target) {
         setMarauderActive(true);
 
-        // Generate 2–4 unique people, each walking in a random direction at a
-        // random speed from a random starting point on screen.
-        const peopleCount = 2 + Math.floor(Math.random() * 3);
-        const people = Array.from({ length: peopleCount }, (_, i) => ({
-          personId: i,
-          startX: 10 + Math.random() * 80,
-          startY: 10 + Math.random() * 80,
-          angle: Math.random() * Math.PI * 2, // walking direction in radians
-          speed: 2 + Math.random() * 4, // % of screen per step — varies per person
-          stepDelay: 220 + Math.random() * 200, // ms between footprints — varies per person, some walk faster than others
-        }));
+        const walkerCount = 2 + Math.floor(Math.random() * 3);
+        const names = getMarauderWalkerNames(walkerCount);
+        const roomNames = Object.keys(CASTLE_CONNECTIONS);
 
         const timers: ReturnType<typeof setInterval>[] = [];
-        people.forEach(person => {
-          let stepCount = 0;
-          const stepInterval = setInterval(() => {
-            stepCount++;
-            const dx = Math.cos(person.angle) * person.speed * stepCount;
-            const dy = Math.sin(person.angle) * person.speed * stepCount;
-            const x = Math.max(2, Math.min(96, person.startX + dx));
-            const y = Math.max(2, Math.min(96, person.startY + dy));
-            const rotation = (person.angle * 180) / Math.PI;
-            setFootsteps(prev => [...prev, {
-              id: Date.now() + person.personId * 1000 + stepCount,
-              x, y, personId: person.personId, rotation,
-            }].slice(-40)); // allow more total prints on screen since multiple people are walking at once
-            if (stepCount >= 8) clearInterval(stepInterval);
-          }, person.stepDelay);
-          timers.push(stepInterval);
+        names.forEach((name, i) => {
+          let currentRoom = roomNames[Math.floor(Math.random() * roomNames.length)];
+          const walkerId = Date.now() + i;
+
+          function roomCenter(roomName: string) {
+            const room = CASTLE_ROOMS.find(r => r.name === roomName)!;
+            return { x: room.x + room.w / 2, y: room.y + room.h / 2 };
+          }
+
+          function placeAt(roomName: string) {
+            const c = roomCenter(roomName);
+            setWalkers(prev => {
+              const filtered = prev.filter(w => w.id !== walkerId);
+              return [...filtered, { id: walkerId, name, x: c.x, y: c.y, roomName }];
+            });
+          }
+          placeAt(currentRoom);
+
+          // Every 700–1100ms (varies per walker), move to a connected room —
+          // a slightly different pace per person so they don't all march in lockstep.
+          const moveDelay = 700 + Math.random() * 400;
+          const moveInterval = setInterval(() => {
+            const connections = CASTLE_CONNECTIONS[currentRoom] || [];
+            if (connections.length === 0) return;
+            currentRoom = connections[Math.floor(Math.random() * connections.length)];
+            placeAt(currentRoom);
+          }, moveDelay);
+          timers.push(moveInterval);
         });
 
         setTimeout(() => {
           setMarauderActive(false);
-          setFootsteps([]);
+          setWalkers([]);
           timers.forEach(t => clearInterval(t));
         }, 4500);
       }
@@ -415,8 +486,7 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
       {marauderActive && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 9999, pointerEvents: "none",
-          // Aged-parchment texture: layered radial highlights/shadows over a sepia base,
-          // rather than a flat color tint, so it actually reads as a map surface.
+          // Aged-parchment texture as the map surface
           background: `
             radial-gradient(circle at 20% 30%, rgba(212,175,55,0.08) 0%, transparent 35%),
             radial-gradient(circle at 80% 70%, rgba(139,111,63,0.1) 0%, transparent 40%),
@@ -426,23 +496,47 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
           animation: "va-marauder-fade 4.5s ease-in-out forwards",
         }}>
           <p style={{
-            position: "absolute", top: "8%", left: "50%", transform: "translateX(-50%)",
+            position: "absolute", top: "3%", left: "50%", transform: "translateX(-50%)",
             fontFamily: "'IM Fell English', serif", fontSize: "1.4rem", color: "#D4AF37",
-            letterSpacing: "0.15em", textShadow: "0 0 12px rgba(212,175,55,0.6)",
+            letterSpacing: "0.15em", textShadow: "0 0 12px rgba(212,175,55,0.6)", zIndex: 2,
           }}>
             ✦ Mischief Managed ✦
           </p>
-          {footsteps.map(f => (
-            <span key={f.id} style={{
-              position: "absolute", left: `${f.x}%`, top: `${f.y}%`,
-              fontSize: "1.1rem", animation: "va-footstep-fade 2s ease-out forwards",
-              transform: `rotate(${f.rotation}deg)`,
-              // Each person gets a slightly different hue rotation so distinct walkers
-              // are visually distinguishable from one another on the map.
-              filter: `sepia(1) opacity(0.75) hue-rotate(${f.personId * 35}deg)`,
+
+          {/* Castle floor plan — rooms drawn as parchment-outlined rectangles with labels */}
+          {CASTLE_ROOMS.map(room => (
+            <div key={room.name} style={{
+              position: "absolute", left: `${room.x}%`, top: `${room.y}%`, width: `${room.w}%`, height: `${room.h}%`,
+              border: "1px solid rgba(212,175,55,0.35)", borderRadius: "4px",
+              background: "rgba(212,175,55,0.04)",
             }}>
-              {FOOTSTEP_GLYPHS[0]}
-            </span>
+              <span style={{
+                position: "absolute", top: "3px", left: "5px",
+                fontFamily: "'IM Fell English', serif", fontSize: "0.6rem", color: "rgba(212,175,55,0.55)",
+                letterSpacing: "0.04em", whiteSpace: "nowrap",
+              }}>
+                {room.name}
+              </span>
+            </div>
+          ))}
+
+          {/* Named walkers — smoothly glide between room centers via CSS transition
+              on left/top, rather than snapping, so movement reads as actual walking. */}
+          {walkers.map(w => (
+            <div key={w.id} style={{
+              position: "absolute", left: `${w.x}%`, top: `${w.y}%`,
+              transform: "translate(-50%, -50%)",
+              transition: "left 0.7s ease-in-out, top 0.7s ease-in-out",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+            }}>
+              <span style={{ fontSize: "0.9rem", filter: "sepia(1) opacity(0.85)" }}>👣</span>
+              <span style={{
+                fontFamily: "'IM Fell English', serif", fontSize: "0.55rem", color: "#D4AF37",
+                background: "rgba(15,15,18,0.55)", padding: "0 3px", borderRadius: "2px", whiteSpace: "nowrap",
+              }}>
+                {w.name}
+              </span>
+            </div>
           ))}
         </div>
       )}

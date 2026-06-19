@@ -322,7 +322,7 @@ function CategoryPageInner() {
                 const hasExplicitTag = !!getSubTag(entry.text);
                 const displayText = getDisplayText(entry.text);
                 return (
-                  <div key={entry.id} style={{ ...S.surface, padding: "1rem", animation: "va-reveal-scroll 0.4s ease-out backwards", animationDelay: `${Math.min(idx * 0.03, 0.5)}s`, transformStyle: "preserve-3d" }}>
+                  <div key={entry.id} style={{ ...S.surface, padding: "1rem", animation: "va-reveal-scroll 0.5s ease-out backwards", animationDelay: `${Math.min(idx * 0.04, 0.6)}s`, transformOrigin: "top" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                         {effectiveSub && effectiveSub !== "General" && (
