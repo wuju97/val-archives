@@ -5,50 +5,47 @@ import { loadArchive } from "@/lib/archiveEngine";
 import { geminiQualityCallFor, hasGeminiQualityKey3, hasGeminiQualityKey, hasGeminiQualityKey2 } from "@/lib/geminiEngine";
 
 // ════════════════════════════════════════════════════════════════════════
-// PHILOSOPHY SHIFT — the map is a fixed, decorative parchment backdrop,
-// not a navigable architectural floor plan. Characters wander along a
-// handful of fixed decorative paths drawn directly on the parchment.
-// The map itself never regenerates or changes structure; only the
-// characters move. This matches the film's actual mechanic: beautiful
-// static parchment + moving names/footprints, nothing more.
+// LAYOUT — matches the user's hand-drawn Hogwarts grounds sketch:
+// boundary wall ring with a Hogsmeade gate at the top, central lake with
+// the castle just north of it, broom shed + Quidditch ground to the west,
+// Hagrid's Hut/Pumpkin Patch + Whomping Willow + Greenhouses to the east,
+// Forbidden Forest filling the east edge, Hogsmeade Station + railway
+// along the bottom. Each location gets a small icon glyph, not just text.
 // ════════════════════════════════════════════════════════════════════════
 
-// ── Fixed wander paths — decorative routes baked into the parchment.
-// Each is a named "zone" purely for flavor (shown in the click popup),
-// not a real navigable room graph. Paths loop back on themselves so
-// characters can wander indefinitely without needing a room network.
+type IconKind = "castle" | "hut" | "tree" | "hoops" | "shed" | "greenhouse" | "station" | "none";
+
 interface WanderPath {
   zoneName: string;
-  points: Array<{ x: number; y: number }>; // loops: last point connects back near the first
+  icon: IconKind;
+  iconPos: { x: number; y: number };
+  points: Array<{ x: number; y: number }>; // closed loop for wandering
 }
 
 const WANDER_PATHS: WanderPath[] = [
-  { zoneName: "Gryffindor Tower", points: [
-    { x: 12, y: 10 }, { x: 22, y: 8 }, { x: 30, y: 16 }, { x: 24, y: 26 }, { x: 14, y: 24 }, { x: 8, y: 16 }, { x: 12, y: 10 },
+  { zoneName: "Hogwarts", icon: "castle", iconPos: { x: 48, y: 46 }, points: [
+    { x: 38, y: 42 }, { x: 48, y: 38 }, { x: 60, y: 42 }, { x: 58, y: 52 }, { x: 44, y: 54 }, { x: 36, y: 50 }, { x: 38, y: 42 },
   ]},
-  { zoneName: "Great Hall", points: [
-    { x: 40, y: 14 }, { x: 58, y: 12 }, { x: 64, y: 22 }, { x: 56, y: 30 }, { x: 42, y: 28 }, { x: 36, y: 20 }, { x: 40, y: 14 },
+  { zoneName: "Broom Shed", icon: "shed", iconPos: { x: 28, y: 44 }, points: [
+    { x: 22, y: 38 }, { x: 32, y: 38 }, { x: 34, y: 46 }, { x: 26, y: 50 }, { x: 20, y: 46 }, { x: 22, y: 38 },
   ]},
-  { zoneName: "Ravenclaw Tower", points: [
-    { x: 78, y: 10 }, { x: 90, y: 12 }, { x: 92, y: 22 }, { x: 82, y: 26 }, { x: 74, y: 18 }, { x: 78, y: 10 },
+  { zoneName: "Quidditch Ground", icon: "hoops", iconPos: { x: 28, y: 24 }, points: [
+    { x: 16, y: 18 }, { x: 36, y: 16 }, { x: 40, y: 26 }, { x: 30, y: 32 }, { x: 14, y: 28 }, { x: 16, y: 18 },
   ]},
-  { zoneName: "The Library", points: [
-    { x: 10, y: 42 }, { x: 24, y: 38 }, { x: 32, y: 46 }, { x: 26, y: 56 }, { x: 12, y: 54 }, { x: 6, y: 48 }, { x: 10, y: 42 },
+  { zoneName: "Hagrid's Hut", icon: "hut", iconPos: { x: 76, y: 18 }, points: [
+    { x: 68, y: 12 }, { x: 80, y: 10 }, { x: 84, y: 18 }, { x: 76, y: 24 }, { x: 66, y: 20 }, { x: 68, y: 12 },
   ]},
-  { zoneName: "Great Staircase", points: [
-    { x: 42, y: 44 }, { x: 56, y: 40 }, { x: 64, y: 50 }, { x: 58, y: 60 }, { x: 44, y: 58 }, { x: 38, y: 50 }, { x: 42, y: 44 },
+  { zoneName: "Whomping Willow", icon: "tree", iconPos: { x: 70, y: 34 }, points: [
+    { x: 62, y: 28 }, { x: 76, y: 26 }, { x: 80, y: 36 }, { x: 70, y: 42 }, { x: 60, y: 38 }, { x: 62, y: 28 },
   ]},
-  { zoneName: "Forbidden Corridor", points: [
-    { x: 74, y: 44 }, { x: 88, y: 42 }, { x: 92, y: 52 }, { x: 82, y: 58 }, { x: 70, y: 52 }, { x: 74, y: 44 },
+  { zoneName: "Greenhouses", icon: "greenhouse", iconPos: { x: 64, y: 50 }, points: [
+    { x: 58, y: 46 }, { x: 70, y: 44 }, { x: 72, y: 52 }, { x: 62, y: 56 }, { x: 56, y: 52 }, { x: 58, y: 46 },
   ]},
-  { zoneName: "Dungeons", points: [
-    { x: 12, y: 72 }, { x: 26, y: 70 }, { x: 32, y: 80 }, { x: 22, y: 88 }, { x: 10, y: 86 }, { x: 6, y: 78 }, { x: 12, y: 72 },
+  { zoneName: "Forbidden Forest", icon: "tree", iconPos: { x: 90, y: 40 }, points: [
+    { x: 84, y: 16 }, { x: 96, y: 20 }, { x: 96, y: 60 }, { x: 86, y: 64 }, { x: 80, y: 40 }, { x: 84, y: 16 },
   ]},
-  { zoneName: "Hagrid's Hut & Grounds", points: [
-    { x: 44, y: 76 }, { x: 60, y: 72 }, { x: 68, y: 82 }, { x: 58, y: 90 }, { x: 42, y: 88 }, { x: 36, y: 80 }, { x: 44, y: 76 },
-  ]},
-  { zoneName: "Quidditch Pitch", points: [
-    { x: 78, y: 74 }, { x: 92, y: 72 }, { x: 94, y: 84 }, { x: 84, y: 90 }, { x: 72, y: 84 }, { x: 78, y: 74 },
+  { zoneName: "Hogsmeade Station", icon: "station", iconPos: { x: 68, y: 88 }, points: [
+    { x: 58, y: 84 }, { x: 76, y: 82 }, { x: 80, y: 90 }, { x: 70, y: 94 }, { x: 56, y: 92 }, { x: 58, y: 84 },
   ]},
 ];
 
@@ -76,14 +73,124 @@ function pointAtDistance(points: Array<{ x: number; y: number }>, dist: number):
   return { x: last.x, y: last.y, angle: 0 };
 }
 function polylineToPathD(points: Array<{ x: number; y: number }>): string {
-  return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ") + " Z";
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// STATIC PARCHMENT — built once, never regenerates. Dense scribble texture,
-// ink stains, a handful of fixed decorative label fragments, secret-passage
-// style dashed lines for flavor. Original artwork, inspired by the film's
-// aged-parchment aesthetic, not copied from it.
+// TERRAIN — boundary wall (ring with a gate gap at the top), lake, and
+// the Forbidden Forest's dense tree mass, all drawn as actual shapes
+// matching the sketch's composition rather than abstract labels.
+// ════════════════════════════════════════════════════════════════════════
+
+// Boundary wall ring — irregular closed loop with a gap at the top for
+// the Hogsmeade gate, drawn as a coiled/scalloped line like the sketch.
+const WALL_POINTS: Array<{ x: number; y: number }> = [
+  { x: 52, y: 4 }, { x: 30, y: 6 }, { x: 14, y: 14 }, { x: 6, y: 30 }, { x: 5, y: 50 },
+  { x: 8, y: 70 }, { x: 18, y: 84 }, { x: 36, y: 92 }, { x: 56, y: 92 }, { x: 72, y: 84 },
+  { x: 78, y: 68 }, { x: 78, y: 48 }, { x: 76, y: 28 }, { x: 68, y: 10 }, { x: 52, y: 4 },
+];
+// Gate gap location (top of the wall, matching "Hogsmeade / Gate" in the sketch)
+const GATE_POS = { x: 52, y: 4 };
+
+const LAKE_PATH = "M 30 60 Q 22 56 24 48 Q 28 42 38 44 Q 46 40 54 44 Q 62 42 66 50 Q 70 58 62 64 Q 56 70 46 68 Q 36 70 30 60 Z";
+
+// Forbidden Forest dense tree clusters — many small tree glyphs packed
+// into the forest zone, giving the dense-mass look from the sketch's
+// scribbled forest texture rather than a single label.
+function buildForestTrees(): Array<{ x: number; y: number; r: number }> {
+  const trees: Array<{ x: number; y: number; r: number }> = [];
+  let seed = 31;
+  function rand() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+  for (let i = 0; i < 40; i++) {
+    const x = 80 + rand() * 18;
+    const y = 12 + rand() * 56;
+    trees.push({ x, y, r: 0.8 + rand() * 0.7 });
+  }
+  return trees;
+}
+const FOREST_TREES = buildForestTrees();
+
+// ════════════════════════════════════════════════════════════════════════
+// ICON GLYPHS — small figures per location, matching the request for
+// "a hut figure where Hagrid's hut is, a castle figure for the castle"
+// etc, instead of plain text labels.
+// ════════════════════════════════════════════════════════════════════════
+
+function LocationIcon({ kind, x, y }: { kind: IconKind; x: number; y: number }) {
+  const stroke = "#3d2814";
+  const fill = "#5c3a1e";
+  switch (kind) {
+    case "castle":
+      return (
+        <g transform={`translate(${x} ${y})`} opacity="0.7">
+          <rect x="-4" y="-1" width="8" height="4" fill="none" stroke={stroke} strokeWidth="0.25" />
+          <rect x="-4.6" y="-2.6" width="1.6" height="2" fill="none" stroke={stroke} strokeWidth="0.2" />
+          <rect x="3" y="-3.4" width="1.6" height="2.8" fill="none" stroke={stroke} strokeWidth="0.2" />
+          <path d="M -0.8 -1 L -0.8 -3.4 L 0.8 -3.4 L 0.8 -1" fill="none" stroke={stroke} strokeWidth="0.2" />
+          <path d="M -0.8 -3.4 L 0 -4.6 L 0.8 -3.4" fill="none" stroke={stroke} strokeWidth="0.2" />
+        </g>
+      );
+    case "hut":
+      return (
+        <g transform={`translate(${x} ${y})`} opacity="0.7">
+          <rect x="-2.2" y="-0.4" width="4.4" height="2.6" fill="none" stroke={stroke} strokeWidth="0.22" />
+          <path d="M -2.8 -0.4 L 0 -3 L 2.8 -0.4 Z" fill="none" stroke={stroke} strokeWidth="0.22" />
+          <line x1="0.8" x2="0.8" y1="-2.4" y2="-3.6" stroke={stroke} strokeWidth="0.15" />
+        </g>
+      );
+    case "tree":
+      return (
+        <g transform={`translate(${x} ${y})`} opacity="0.7">
+          <circle cx="0" cy="-1.6" r="1.8" fill="none" stroke={stroke} strokeWidth="0.2" />
+          <line x1="0" x2="0" y1="0.2" y2="2.2" stroke={stroke} strokeWidth="0.3" />
+        </g>
+      );
+    case "hoops":
+      return (
+        <g transform={`translate(${x} ${y})`} opacity="0.7">
+          {[-2.4, 0, 2.4].map((dx, i) => (
+            <g key={i} transform={`translate(${dx} 0)`}>
+              <line x1="0" x2="0" y1="-2.6" y2="1" stroke={stroke} strokeWidth="0.15" />
+              <ellipse cx="0" cy="-2.6" rx="0.9" ry="0.5" fill="none" stroke={stroke} strokeWidth="0.18" />
+            </g>
+          ))}
+        </g>
+      );
+    case "shed":
+      return (
+        <g transform={`translate(${x} ${y})`} opacity="0.7">
+          <rect x="-1.6" y="-1.4" width="3.2" height="2.4" fill="none" stroke={stroke} strokeWidth="0.2" />
+          <path d="M -1.9 -1.4 L 0 -2.6 L 1.9 -1.4" fill="none" stroke={stroke} strokeWidth="0.2" />
+        </g>
+      );
+    case "greenhouse":
+      return (
+        <g transform={`translate(${x} ${y})`} opacity="0.7">
+          {[-1.6, 1.6].map((dx, i) => (
+            <g key={i} transform={`translate(${dx} 0)`}>
+              <path d="M -1 1.2 L -1 -0.6 L 0 -1.8 L 1 -0.6 L 1 1.2 Z" fill="none" stroke={stroke} strokeWidth="0.18" />
+            </g>
+          ))}
+        </g>
+      );
+    case "station":
+      return (
+        <g transform={`translate(${x} ${y})`} opacity="0.7">
+          <rect x="-2" y="-1.6" width="4" height="2" fill="none" stroke={stroke} strokeWidth="0.2" />
+          {Array.from({ length: 6 }, (_, i) => (
+            <line key={i} x1={-2.6 + i * 0.9} x2={-2.6 + i * 0.9} y1="1" y2="1.6" stroke={stroke} strokeWidth="0.12" />
+          ))}
+          <line x1="-3" x2="3" y1="1.3" y2="1.3" stroke={stroke} strokeWidth="0.15" />
+        </g>
+      );
+    default:
+      return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// SCRIBBLE TEXTURE — dense ink "writing" filling open ground, unchanged
+// in approach but kept lighter near terrain shapes so they stay legible.
 // ════════════════════════════════════════════════════════════════════════
 
 interface ScribbleZone { x0: number; y0: number; x1: number; y1: number; angle: number }
@@ -91,27 +198,18 @@ const SCRIBBLE_ZONES: ScribbleZone[] = [
   { x0: 0, y0: 0, x1: 100, y1: 8, angle: 5 },
   { x0: 0, y0: 92, x1: 100, y1: 100, angle: -5 },
   { x0: 0, y0: 0, x1: 8, y1: 100, angle: 80 },
-  { x0: 92, y0: 0, x1: 100, y1: 100, angle: -80 },
-  { x0: 32, y0: 0, x1: 68, y1: 10, angle: 0 },
-  { x0: 0, y0: 30, x1: 8, y1: 64, angle: 75 },
-  { x0: 92, y0: 30, x1: 100, y1: 64, angle: -75 },
-  { x0: 32, y0: 32, x1: 42, y1: 42, angle: 20 },
-  { x0: 58, y0: 32, x1: 68, y1: 42, angle: -20 },
-  { x0: 32, y0: 60, x1: 42, y1: 70, angle: 15 },
-  { x0: 58, y0: 60, x1: 68, y1: 70, angle: -15 },
-  { x0: 0, y0: 64, x1: 40, y1: 72, angle: 8 },
-  { x0: 60, y0: 64, x1: 100, y1: 72, angle: -8 },
-  { x0: 32, y0: 90, x1: 70, y1: 100, angle: 0 },
+  { x0: 32, y0: 0, x1: 68, y1: 8, angle: 0 },
+  { x0: 0, y0: 70, x1: 18, y1: 92, angle: 20 },
 ];
 
 function buildScribbleClusters(): Array<{ d: string; size: number }> {
   const clusters: Array<{ d: string; size: number }> = [];
-  let seed = 17;
+  let seed = 19;
   function rand() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
   for (const zone of SCRIBBLE_ZONES) {
     const w = zone.x1 - zone.x0, h = zone.y1 - zone.y0;
     const area = Math.max(w * h, 1);
-    const clusterCount = Math.max(6, Math.floor(area * 0.5));
+    const clusterCount = Math.max(5, Math.floor(area * 0.4));
     const rad = (zone.angle * Math.PI) / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
     for (let i = 0; i < clusterCount; i++) {
@@ -136,33 +234,10 @@ function buildScribbleClusters(): Array<{ d: string; size: number }> {
 }
 const SCRIBBLE_CLUSTERS = buildScribbleClusters();
 
-// Fixed decorative secret-passage style dashed lines — pure flavor, drawn
-// once, never regenerated, crossing between wander-path zones diagonally.
-const SECRET_PASSAGE_LINES: Array<Array<{ x: number; y: number }>> = [
-  [{ x: 18, y: 20 }, { x: 38, y: 38 }, { x: 50, y: 44 }],
-  [{ x: 82, y: 20 }, { x: 62, y: 38 }, { x: 50, y: 44 }],
-  [{ x: 20, y: 56 }, { x: 38, y: 64 }, { x: 50, y: 76 }],
-  [{ x: 80, y: 56 }, { x: 62, y: 64 }, { x: 50, y: 76 }],
-  [{ x: 28, y: 30 }, { x: 50, y: 50 }, { x: 72, y: 30 }],
-];
-
-function CompassRose({ cx, cy }: { cx: number; cy: number }) {
-  return (
-    <g transform={`translate(${cx} ${cy})`} opacity="0.45">
-      <circle r="3.2" fill="none" stroke="#3d2814" strokeWidth="0.1" />
-      <path d="M 0 -3.2 L 0.5 -0.5 L 0 0 L -0.5 -0.5 Z" fill="#3d2814" />
-      <path d="M 0 3.2 L 0.5 0.5 L 0 0 L -0.5 0.5 Z" fill="#3d2814" opacity="0.6" />
-      <path d="M -3.2 0 L -0.5 0.5 L 0 0 L -0.5 -0.5 Z" fill="#3d2814" opacity="0.6" />
-      <path d="M 3.2 0 L 0.5 0.5 L 0 0 L 0.5 -0.5 Z" fill="#3d2814" opacity="0.6" />
-      <text x="0" y="-4" textAnchor="middle" style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.6px", fill: "#3d2814" }}>N</text>
-    </g>
-  );
-}
-
 function TitleBanner() {
   const w = 17;
   return (
-    <g transform="translate(50 5)">
+    <g transform="translate(50 4)">
       <path d={`M ${-w * 0.55} 1.3 Q ${-w * 0.75} 2.3 ${-w * 0.5} 2.7 Q ${-w * 0.3} 3.0 ${-w * 0.5} 2.0 Q ${-w * 0.6} 1.5 ${-w * 0.4} 1.4`}
         fill="none" stroke="#7a3b2e" strokeWidth="0.14" strokeOpacity="0.9" />
       <path d={`M ${-w} -1.1 L ${w * 0.6} -1.2 L ${w} -0.5 L ${w * 0.72} 0 L ${w} 0.5 L ${w * 0.6} 1.2 L ${-w} 1.1 L ${-w * 0.75} 0 Z`}
@@ -245,10 +320,6 @@ async function fetchMaraudersPopulation(): Promise<MapCharacter[]> {
 // ════════════════════════════════════════════════════════════════════════
 
 type MapPhase = "closed" | "opening" | "open" | "closing";
-
-// A single character "unit": position + facing angle, rendered as ONE
-// rigid group (two footprints + nameplate, fixed local offsets) so the
-// name and feet can never visually separate or slide independently.
 interface CharUnit { x: number; y: number; angle: number }
 
 export default function MaraudersMap() {
@@ -309,10 +380,6 @@ export default function MaraudersMap() {
     }, 500);
   }, [clearAllTimers]);
 
-  // ── Movement: each character wanders its zone's fixed loop path forever.
-  // The unit (position + angle) updates every animation frame; trail points
-  // are derived FROM the unit's own path (not a separately-tracked footprint
-  // system), so feet and name can never drift apart — they're one object.
   useEffect(() => {
     if (phase !== "open" || characters.length === 0) return;
     const rafIds: number[] = [];
@@ -320,9 +387,9 @@ export default function MaraudersMap() {
     characters.forEach(char => {
       const path = WANDER_PATHS.find(p => p.zoneName === char.zone);
       if (!path) return;
-      const points = path.points; // re-bind so TS keeps the non-null narrowing inside tick()
+      const points = path.points;
       const totalLen = polylineLength(points);
-      const durationMs = Math.max(totalLen * 900, 16000); // gentle wandering pace around the loop
+      const durationMs = Math.max(totalLen * 900, 16000);
       const SPEED_PER_MS = totalLen / durationMs;
       const TRAIL_SPACING = 0.6;
 
@@ -334,7 +401,6 @@ export default function MaraudersMap() {
 
       function tick(now: number) {
         if (loopStartTime === null) loopStartTime = now;
-
         if (now < pausedUntil) {
           const rafId = requestAnimationFrame(tick);
           rafIds.push(rafId);
@@ -351,20 +417,14 @@ export default function MaraudersMap() {
           return;
         }
 
-        const traveled = (elapsedActive * SPEED_PER_MS) % totalLen; // loops forever
+        const traveled = (elapsedActive * SPEED_PER_MS) % totalLen;
         const { x, y, angle } = pointAtDistance(points, traveled);
-
-        // Single atomic unit update — position AND angle change together,
-        // in one state write, so nothing can render mid-update as "name
-        // here, feet there." There is exactly one source of truth.
         setUnits(prev => ({ ...prev, [char.id]: { x, y, angle } }));
 
         if (traveled - lastTrailDist >= TRAIL_SPACING || Math.abs(traveled - lastTrailDist) > totalLen / 2) {
           setTrails(prev => {
             const existing = prev[char.id] || [];
             const next = [...existing, { x, y, angle }];
-            // Keep only the most recent 26 trail points — a long visible
-            // walking trail without growing unbounded.
             return { ...prev, [char.id]: next.slice(-26) };
           });
           lastTrailDist = traveled;
@@ -475,58 +535,79 @@ export default function MaraudersMap() {
             </radialGradient>
           </defs>
 
-          {/* ── STATIC PARCHMENT — built once, never regenerates. Everything
-              below this point except the character units is permanently fixed. ── */}
           <g transform={`translate(${pan.x / 8} ${pan.y / 8}) scale(${zoom})`} style={{ transformOrigin: "50% 50%" }}>
             <rect x="0" y="0" width="100" height="100" fill="url(#va-parchment-grad)" />
-            <circle cx="12" cy="20" r="9" fill="url(#va-ink-stain)" />
-            <circle cx="88" cy="30" r="7" fill="url(#va-ink-stain)" />
-            <circle cx="30" cy="85" r="10" fill="url(#va-ink-stain)" />
-            <circle cx="70" cy="8" r="6" fill="url(#va-ink-stain)" />
-            <circle cx="95" cy="90" r="8" fill="url(#va-ink-stain)" />
+            <circle cx="88" cy="78" r="7" fill="url(#va-ink-stain)" />
+            <circle cx="14" cy="60" r="6" fill="url(#va-ink-stain)" />
 
-            <g stroke="#5c3a1e" strokeOpacity="0.3" fill="none" strokeLinecap="round">
+            <g stroke="#5c3a1e" strokeOpacity="0.28" fill="none" strokeLinecap="round">
               {SCRIBBLE_CLUSTERS.map((c, i) => <path key={i} d={c.d} strokeWidth={c.size} />)}
             </g>
 
-            {SECRET_PASSAGE_LINES.map((pts, i) => (
-              <path key={i} d={polylineToPathD(pts)} fill="none" stroke="#5c3a1e" strokeWidth="0.1" strokeOpacity="0.3" strokeDasharray="0.3 0.7" />
-            ))}
+            {/* ── Boundary wall — coiled/scalloped ring with a gate gap
+                at the top, matching the sketch's looping wall line ── */}
+            <path d={polylineToPathD(WALL_POINTS)} fill="none" stroke="#3d2814" strokeWidth="0.3"
+              strokeOpacity="0.55" strokeDasharray="0.15 0.55" strokeLinecap="round" />
+            <text x={GATE_POS.x} y={GATE_POS.y - 1.5} textAnchor="middle"
+              style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.6px", fill: "#3d2814", opacity: 0.7 }}>
+              ✦ Gate to Hogsmeade ✦
+            </text>
 
-            <CompassRose cx={92} cy={94} />
+            {/* ── Lake ── */}
+            <path d={LAKE_PATH} fill="#7a8c8a" fillOpacity="0.28" stroke="#3d2814" strokeWidth="0.15" strokeOpacity="0.5" />
+            <text x="46" y="58" textAnchor="middle" style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.8px", fill: "#3d2814", opacity: 0.55, fontStyle: "italic" }}>
+              the lake
+            </text>
+
+            {/* ── Forbidden Forest dense tree mass ── */}
+            {FOREST_TREES.map((t, i) => (
+              <g key={i} transform={`translate(${t.x} ${t.y})`} opacity="0.4">
+                <circle cx="0" cy={-t.r * 0.6} r={t.r} fill="none" stroke="#3d2814" strokeWidth="0.12" />
+                <line x1="0" x2="0" y1={t.r * 0.1} y2={t.r * 0.7} stroke="#3d2814" strokeWidth="0.12" />
+              </g>
+            ))}
+            <text x="90" y="62" textAnchor="middle" style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.6px", fill: "#3d2814", opacity: 0.55 }}>
+              Forbidden Forest
+            </text>
+
+            {/* ── Hogsmeade railway leading off the bottom edge ── */}
+            <g opacity="0.45">
+              <line x1="40" x2="58" y1="98" y2="90" stroke="#3d2814" strokeWidth="0.18" />
+              {Array.from({ length: 7 }, (_, i) => {
+                const t = i / 6;
+                const x = 40 + (58 - 40) * t, y = 98 + (90 - 98) * t;
+                return <line key={i} x1={x - 1} x2={x + 1} y1={y + 0.6} y2={y - 0.6} stroke="#3d2814" strokeWidth="0.12" />;
+              })}
+            </g>
+
             <TitleBanner />
 
-            {/* Fixed zone labels — decorative only, dimmed background info,
-                drawn once and never regenerated, matching the parchment's
-                handwritten-annotation feel rather than architectural labels. */}
+            {/* ── Zone labels + location icons ── */}
             {WANDER_PATHS.map(path => {
               const cx = path.points.reduce((s, p) => s + p.x, 0) / path.points.length;
               const cy = path.points.reduce((s, p) => s + p.y, 0) / path.points.length;
               return (
-                <text key={path.zoneName} x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
-                  style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.7px", fill: "#3d2814", opacity: 0.42, letterSpacing: "0.02em" }}>
-                  {path.zoneName}
-                </text>
+                <g key={path.zoneName}>
+                  <LocationIcon kind={path.icon} x={path.iconPos.x} y={path.iconPos.y} />
+                  <text x={cx} y={cy + 4.5} textAnchor="middle"
+                    style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.5px", fill: "#3d2814", opacity: 0.55, letterSpacing: "0.02em" }}>
+                    {path.zoneName}
+                  </text>
+                </g>
               );
             })}
 
-            {/* ── CHARACTER UNITS — each step drops a PAIRED left+right
-                footprint (not alternating single prints far apart), and
-                the nameplate is plain text that rotates WITH the movement
-                angle — no background box, matching the film's plain
-                handwritten-on-parchment look. ── */}
+            {/* ── CHARACTER UNITS — paired L/R footprints, plain rotating
+                name text, no background box ── */}
             {characters.map(char => {
               const trail = trails[char.id] || [];
               const unit = units[char.id];
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
               const FOOT_SEPARATION = 0.55;
+              const footPath = "M 0 -0.55 C 0.28 -0.55 0.37 -0.34 0.35 -0.1 C 0.33 0.07 0.2 0.1 0.14 0.26 C 0.1 0.4 0.16 0.52 0.04 0.58 C -0.09 0.63 -0.25 0.58 -0.28 0.44 C -0.33 0.24 -0.25 0.1 -0.26 -0.08 C -0.28 -0.3 -0.16 -0.55 0 -0.55 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
-                  {/* Fading trail — each history point renders as a PAIR of
-                      feet (left + right together), close together like the
-                      film's "LR  LR  LR" stamped pairs, not spread-out
-                      alternating single dots. */}
                   {trail.map((t, i) => {
                     const ageFactor = 1 - i / trail.length;
                     const opacity = 0.6 * (1 - ageFactor * 0.85);
@@ -535,7 +616,6 @@ export default function MaraudersMap() {
                     const leftY = t.y + Math.sin(perpAngle) * FOOT_SEPARATION;
                     const rightX = t.x - Math.cos(perpAngle) * FOOT_SEPARATION;
                     const rightY = t.y - Math.sin(perpAngle) * FOOT_SEPARATION;
-                    const footPath = "M 0 -0.55 C 0.28 -0.55 0.37 -0.34 0.35 -0.1 C 0.33 0.07 0.2 0.1 0.14 0.26 C 0.1 0.4 0.16 0.52 0.04 0.58 C -0.09 0.63 -0.25 0.58 -0.28 0.44 C -0.33 0.24 -0.25 0.1 -0.26 -0.08 C -0.28 -0.3 -0.16 -0.55 0 -0.55 Z";
                     return (
                       <g key={i} opacity={Math.max(opacity, 0.04)}>
                         <path d={footPath} fill="#8b2e1f" transform={`translate(${leftX} ${leftY}) rotate(${t.angle})`} />
@@ -544,19 +624,12 @@ export default function MaraudersMap() {
                     );
                   })}
 
-                  {/* The leading unit — current paired footprints + the
-                      name, all positioned from one (x, y, angle) so they
-                      can never visually separate. */}
                   {unit && (() => {
                     const perpAngle = (unit.angle + 90) * Math.PI / 180;
                     const leftX = unit.x + Math.cos(perpAngle) * FOOT_SEPARATION;
                     const leftY = unit.y + Math.sin(perpAngle) * FOOT_SEPARATION;
                     const rightX = unit.x - Math.cos(perpAngle) * FOOT_SEPARATION;
                     const rightY = unit.y - Math.sin(perpAngle) * FOOT_SEPARATION;
-                    const footPath = "M 0 -0.55 C 0.28 -0.55 0.37 -0.34 0.35 -0.1 C 0.33 0.07 0.2 0.1 0.14 0.26 C 0.1 0.4 0.16 0.52 0.04 0.58 C -0.09 0.63 -0.25 0.58 -0.28 0.44 C -0.33 0.24 -0.25 0.1 -0.26 -0.08 C -0.28 -0.3 -0.16 -0.55 0 -0.55 Z";
-                    // Name sits just ahead of the foot pair along the
-                    // direction of travel, and rotates WITH that direction
-                    // (matching the film) rather than staying upright.
                     const nameDist = 2.4;
                     const nameRad = unit.angle * Math.PI / 180;
                     const nameX = unit.x + Math.cos(nameRad) * nameDist;
