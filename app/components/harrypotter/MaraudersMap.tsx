@@ -77,14 +77,11 @@ const CORRIDORS: Corridor[] = [
   { from: "Astronomy Tower", to: "Owlery", points: [{ x: 50, y: 10 }, { x: 50, y: 30 }], kind: "hallway" },
   { from: "Gryffindor Tower", to: "Owlery", points: [{ x: 14, y: 14 }, { x: 14, y: 30 }, { x: 50, y: 30 }], kind: "hallway" },
   { from: "Ravenclaw Tower", to: "Owlery", points: [{ x: 86, y: 14 }, { x: 86, y: 30 }, { x: 50, y: 30 }], kind: "hallway" },
-  // Loop: a second route between the towers, bypassing the Astronomy hub
   { from: "Gryffindor Tower", to: "Ravenclaw Tower", points: [{ x: 14, y: 14 }, { x: 30, y: 22 }, { x: 50, y: 24 }, { x: 70, y: 22 }, { x: 86, y: 14 }], kind: "hallway" },
-  // Secret passage — thin dashed, rarely used, cuts straight across
   { from: "Gryffindor Tower", to: "Astronomy Tower", points: [{ x: 14, y: 14 }, { x: 32, y: 18 }, { x: 50, y: 10 }], kind: "secret" },
-  // Walkable dead-end
   { from: "Owlery", to: "Broken Tower Stair", points: [{ x: 50, y: 30 }, { x: 38, y: 34 }], kind: "hallway" },
 
-  // ── Main floor — heavy branching, multiple loops, one secret passage ──
+  // ── Main floor — heavy branching, multiple loops, secret passages ──
   { from: "Great Hall", to: "Entrance Hall", points: [{ x: 50, y: 16 }, { x: 50, y: 36 }], kind: "hallway" },
   { from: "Entrance Hall", to: "Library", points: [{ x: 50, y: 36 }, { x: 35, y: 36 }, { x: 20, y: 38 }], kind: "hallway" },
   { from: "Entrance Hall", to: "Charms Corridor", points: [{ x: 50, y: 36 }, { x: 65, y: 36 }, { x: 78, y: 36 }], kind: "hallway" },
@@ -93,20 +90,13 @@ const CORRIDORS: Corridor[] = [
   { from: "Great Staircase", to: "Forbidden Corridor", points: [{ x: 50, y: 56 }, { x: 64, y: 56 }, { x: 78, y: 56 }], kind: "hallway" },
   { from: "Charms Corridor", to: "Forbidden Corridor", points: [{ x: 78, y: 36 }, { x: 78, y: 56 }], kind: "hallway" },
   { from: "Library", to: "Trophy Room", points: [{ x: 20, y: 38 }, { x: 21, y: 50 }, { x: 22, y: 62 }], kind: "hallway" },
-  // Tiny sub-room connections — small side rooms off the Library, very short links
   { from: "Library", to: "Restricted Section", points: [{ x: 20, y: 38 }, { x: 12, y: 32 }], kind: "hallway" },
   { from: "Library", to: "Reading Alcove", points: [{ x: 20, y: 38 }, { x: 12, y: 44 }], kind: "hallway" },
-  // Extra secret passage — One-Eyed Witch-style shortcut from Trophy Room to Forbidden Corridor
   { from: "Trophy Room", to: "Forbidden Corridor", points: [{ x: 22, y: 62 }, { x: 60, y: 50 }, { x: 78, y: 56 }], kind: "secret" },
-  // Loop: Great Hall directly to Library, bypassing Entrance Hall
   { from: "Great Hall", to: "Library", points: [{ x: 50, y: 16 }, { x: 34, y: 22 }, { x: 20, y: 38 }], kind: "hallway" },
-  // Loop: Great Hall directly to Charms Corridor
   { from: "Great Hall", to: "Charms Corridor", points: [{ x: 50, y: 16 }, { x: 66, y: 22 }, { x: 78, y: 36 }], kind: "hallway" },
-  // Loop: Trophy Room to Forbidden Corridor, a second southern route
   { from: "Trophy Room", to: "Forbidden Corridor", points: [{ x: 22, y: 62 }, { x: 50, y: 68 }, { x: 78, y: 56 }], kind: "hallway" },
-  // Secret passage — Library to Forbidden Corridor, thin dashed shortcut
   { from: "Library", to: "Forbidden Corridor", points: [{ x: 20, y: 38 }, { x: 50, y: 44 }, { x: 78, y: 56 }], kind: "secret" },
-  // Walkable dead-end
   { from: "Charms Corridor", to: "Boarded-Up Window Nook", points: [{ x: 78, y: 36 }, { x: 90, y: 30 }], kind: "hallway" },
   { from: "Trophy Room", to: "Caretaker's Cupboard", points: [{ x: 22, y: 62 }, { x: 10, y: 66 }], kind: "hallway" },
 
@@ -119,13 +109,9 @@ const CORRIDORS: Corridor[] = [
   { from: "Hufflepuff Basement", to: "Quidditch Pitch", points: [{ x: 82, y: 16 }, { x: 81, y: 50 }, { x: 80, y: 80 }], kind: "hallway" },
   { from: "Hagrid's Hut", to: "Greenhouses", points: [{ x: 20, y: 80 }, { x: 35, y: 82 }, { x: 50, y: 84 }], kind: "hallway" },
   { from: "Greenhouses", to: "Quidditch Pitch", points: [{ x: 50, y: 84 }, { x: 65, y: 82 }, { x: 80, y: 80 }], kind: "hallway" },
-  // Loop: Potions directly to Slytherin's southern reach, bypassing the corridor
   { from: "Potions Classroom", to: "Hagrid's Hut", points: [{ x: 18, y: 16 }, { x: 8, y: 48 }, { x: 20, y: 80 }], kind: "hallway" },
-  // Loop: Chamber Entrance to Quidditch Pitch, second eastern route
   { from: "Chamber Entrance", to: "Quidditch Pitch", points: [{ x: 50, y: 30 }, { x: 68, y: 50 }, { x: 80, y: 80 }], kind: "hallway" },
-  // Secret passage — Potions Classroom straight to Greenhouses (a "Honeydukes-style" shortcut)
   { from: "Potions Classroom", to: "Greenhouses", points: [{ x: 18, y: 16 }, { x: 34, y: 50 }, { x: 50, y: 84 }], kind: "secret" },
-  // Walkable dead-ends
   { from: "Slytherin Dungeon", to: "Flooded Passage", points: [{ x: 18, y: 40 }, { x: 6, y: 44 }], kind: "hallway" },
   { from: "Greenhouses", to: "Compost Heap Nook", points: [{ x: 50, y: 84 }, { x: 40, y: 94 }], kind: "hallway" },
 
@@ -201,10 +187,7 @@ function offsetPolyline(points: Array<{ x: number; y: number }>, offset: number)
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// DECORATIVE CARTOGRAPHIC CLUTTER — fake dead-end corridor fragments,
-// tiny compass rose, scattered annotation flourishes. Pure decoration,
-// not part of the navigable graph — fills empty parchment with the kind
-// of "fake annotations and map symbols" the real prop is dense with.
+// DECORATIVE CARTOGRAPHIC CLUTTER
 // ════════════════════════════════════════════════════════════════════════
 
 interface DecoFragment { d: string }
@@ -243,7 +226,7 @@ function CompassRose({ cx, cy }: { cx: number; cy: number }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// SCRIBBLE TEXTURE — zoned, dense
+// SCRIBBLE TEXTURE
 // ════════════════════════════════════════════════════════════════════════
 
 interface ScribbleZone { x0: number; y0: number; x1: number; y1: number; angle: number }
@@ -290,7 +273,7 @@ function buildScribbleClusters(zones: ScribbleZone[], seedBase: number): Array<{
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// AI POPULATION (unchanged logic, same as before)
+// AI POPULATION
 // ════════════════════════════════════════════════════════════════════════
 
 interface MapCharacter { id: string; name: string; room: string; rumor: string }
@@ -418,12 +401,11 @@ export default function MaraudersMap() {
   }, [clearAllTimers]);
 
   // ── Movement constrained to corridor paths, name IS the moving lead ─────
-  // Each character's position advances continuously via requestAnimationFrame
-  // rather than discrete ticks, so the rendered name glides smoothly along
-  // the corridor centerline. Footprints are dropped at fixed DISTANCE
-  // intervals (not fixed time intervals) behind that continuous lead point,
-  // so the trail reads as "footprints trailing the name" rather than the
-  // name snapping between footprint positions.
+  // Position advances continuously via requestAnimationFrame so the name
+  // glides smoothly. Footprints drop at fixed DISTANCE intervals (dense:
+  // every 0.6 viewBox units, alternating left/right of travel direction)
+  // and fade slowly over 9 seconds, maintaining a long visible walking
+  // trail (15-30+ prints) behind the name rather than sparse waypoint dots.
   useEffect(() => {
     if (phase !== "open" || characters.length === 0) return;
 
@@ -431,11 +413,19 @@ export default function MaraudersMap() {
 
     characters.forEach(char => {
       let currentRoom = char.room;
+      let stepCount = 0; // drives left/right alternation, persists across the whole walk
 
       function dropPrint(x: number, y: number, angle: number, floor: FloorId) {
+        stepCount++;
+        const side = stepCount % 2 === 0 ? 1 : -1;
+        const perpAngle = (angle + 90) * Math.PI / 180;
+        const offsetDist = 0.45;
+        const px = x + Math.cos(perpAngle) * offsetDist * side;
+        const py = y + Math.sin(perpAngle) * offsetDist * side;
+
         const id = ++printIdRef.current;
-        setFootprints(prev => [...prev, { id, x, y, angle, bornAt: Date.now(), ownerId: char.id, floor }]);
-        const cleanup = setTimeout(() => setFootprints(prev => prev.filter(p => p.id !== id)), 2600);
+        setFootprints(prev => [...prev, { id, x: px, y: py, angle, bornAt: Date.now(), ownerId: char.id, floor }]);
+        const cleanup = setTimeout(() => setFootprints(prev => prev.filter(p => p.id !== id)), 9000);
         timersRef.current.push(cleanup);
       }
 
@@ -443,25 +433,24 @@ export default function MaraudersMap() {
         const corridor = CORRIDOR_BY_PAIR[`${currentRoom}::${nextRoomName}`];
         if (!corridor) { onDone(); return; }
         const totalLen = polylineLength(corridor.points);
-        // Duration scales with corridor length: short crossings ~12-18s,
-        // long routes up to ~45s — walking pace, not RTS-unit speed.
+        // Walking pace: short crossings ~12-18s, long routes up to ~45s.
         const durationMs = 12000 + totalLen * 350;
         const SPEED_PER_MS = totalLen / durationMs;
-        const PRINT_SPACING = totalLen / 7; // drop a print roughly every 1/7th of the route
+        // Dense fixed-distance spacing — at this 0-100 viewBox scale, 0.6
+        // units reads as a natural stride length, giving a continuous
+        // walking trail of many prints rather than sparse waypoint dots.
+        const PRINT_SPACING = 0.6;
         const nextFloor = FLOOR_OF_ROOM[nextRoomName] ?? FLOOR_OF_ROOM[currentRoom];
 
         let lastPrintDist = 0;
         let startTime: number | null = null;
-        let pausedUntil = 0; // timestamp until which we hold position (mid-walk pause)
+        let pausedUntil = 0;
         let accumulatedPauseMs = 0;
-        let nextPauseCheckAt = 3000 + Math.random() * 4000; // first chance to pause
+        let nextPauseCheckAt = 3000 + Math.random() * 4000;
 
         function tick(now: number) {
           if (startTime === null) startTime = now;
 
-          // Mid-corridor pause: occasionally a walker stops for a few
-          // seconds (looking at a portrait, chatting, checking a passage)
-          // rather than moving continuously start to finish.
           if (now < pausedUntil) {
             const rafId = requestAnimationFrame(tick);
             rafIds.push(rafId);
@@ -481,13 +470,8 @@ export default function MaraudersMap() {
           const traveled = Math.min(elapsedActive * SPEED_PER_MS, totalLen);
           const { x, y, angle } = pointAtDistance(corridor.points, traveled);
 
-          // Smooth continuous position — this IS what the name follows,
-          // updated every animation frame, never snapping between ticks.
           setPositions(prev => ({ ...prev, [char.id]: { x, y, floor: nextFloor } }));
 
-          // Drop a footprint only every PRINT_SPACING distance traveled,
-          // independent of frame rate, so the trail behind the name stays
-          // evenly spaced regardless of how fast frames are firing.
           if (traveled - lastPrintDist >= PRINT_SPACING || traveled >= totalLen) {
             dropPrint(x, y, angle, nextFloor);
             lastPrintDist = traveled;
@@ -554,7 +538,6 @@ export default function MaraudersMap() {
     return characters.find(c => c.name.toLowerCase().includes(q))?.id ?? null;
   }, [searchQuery, characters]);
 
-  // Auto-switch floor view when the search-matched character is elsewhere
   useEffect(() => {
     if (matchedCharId && positions[matchedCharId]) {
       setActiveFloor(positions[matchedCharId].floor);
@@ -599,7 +582,6 @@ export default function MaraudersMap() {
         transformOrigin: "center", transition: "transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)",
         boxShadow: "0 20px 60px rgba(0,0,0,0.6)", borderRadius: "0.5rem", overflow: "hidden",
       }}>
-        {/* Top control bar */}
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0, zIndex: 10,
           display: "flex", alignItems: "center", gap: "0.75rem",
@@ -622,7 +604,6 @@ export default function MaraudersMap() {
           }}>✦ Mischief Managed</button>
         </div>
 
-        {/* Floor switcher tabs */}
         <div style={{
           position: "absolute", top: "2.7rem", left: 0, right: 0, zIndex: 10,
           display: "flex", justifyContent: "center", gap: "0.4rem", padding: "0.4rem",
@@ -666,14 +647,12 @@ export default function MaraudersMap() {
               {scribbleClusters.map((c, i) => <path key={i} d={c.d} strokeWidth={c.size} />)}
             </g>
 
-            {/* Decorative dead-end fragments — pure ink clutter, not navigable */}
             <g stroke="#3d2814" strokeOpacity="0.2" strokeWidth="0.18" fill="none">
               {decorFragments.map((f, i) => <path key={i} d={f.d} />)}
             </g>
 
             <CompassRose cx={92} cy={92} />
 
-            {/* Corridors — wall-lined hallways with branching junctions */}
             {visibleCorridors.map((c, i) => {
               if (c.kind === "secret") {
                 return (
@@ -692,8 +671,6 @@ export default function MaraudersMap() {
                   ) : (
                     <path d={polylineToPathD(c.points)} fill="none" stroke="#5c3a1e" strokeWidth="0.05" strokeOpacity="0.2" />
                   )}
-                  {/* junction tick marks where the corridor bends — gives the
-                      "crossing hallway" feel rather than a clean single line */}
                   {c.points.slice(1, -1).map((pt, pi) => (
                     <circle key={pi} cx={pt.x} cy={pt.y} r="0.25" fill="#3d2814" fillOpacity="0.4" />
                   ))}
@@ -701,8 +678,6 @@ export default function MaraudersMap() {
               );
             })}
 
-            {/* Floor-change staircase indicators — small spiral glyph at the
-                room end of any corridor leading to another floor */}
             {CORRIDORS.filter(c => c.kind === "floor-change" && (FLOOR_OF_ROOM[c.from] === activeFloor || FLOOR_OF_ROOM[c.to] === activeFloor)).map((c, i) => {
               const onThisFloorEnd = FLOOR_OF_ROOM[c.from] === activeFloor ? c.points[0] : c.points[c.points.length - 1];
               return (
@@ -716,49 +691,59 @@ export default function MaraudersMap() {
               );
             })}
 
-            {/* Rooms — decorative labels, NOT boxes. Underline flourish,
-                bracket flourish, or a small tower glyph depending on type. */}
-            {visibleRooms.map(room => (
+            {/* Rooms — decorative labels, NOT boxes. Treated as background
+                information: low opacity, smaller than character names, and
+                dimmed further if any character is currently near the label,
+                so character names always win the visual hierarchy. */}
+            {visibleRooms.map(room => {
+              const nearbyCharacter = characters.some(char => {
+                const pos = positions[char.id];
+                if (!pos || pos.floor !== activeFloor) return false;
+                const dx = pos.x - room.x, dy = pos.y - room.y;
+                return Math.sqrt(dx * dx + dy * dy) < 6;
+              });
+              const labelOpacity = nearbyCharacter ? 0.22 : 0.5;
+              return (
               <g key={room.name}>
                 {room.flourish === "tower" && (
                   <path d={`M ${room.x - 2} ${room.y + 3} L ${room.x - 2} ${room.y - 1} L ${room.x - 1} ${room.y - 2.5} L ${room.x} ${room.y - 1.2} L ${room.x + 1} ${room.y - 2.5} L ${room.x + 2} ${room.y - 1} L ${room.x + 2} ${room.y + 3}`}
-                    fill="none" stroke="#3d2814" strokeWidth="0.18" strokeOpacity="0.55" />
+                    fill="none" stroke="#3d2814" strokeWidth="0.18" strokeOpacity={labelOpacity * 0.65} />
                 )}
                 {room.flourish === "brackets" && (
                   <>
                     <path d={`M ${room.x - room.name.length * 0.55} ${room.y - 1.8} L ${room.x - room.name.length * 0.65} ${room.y - 1.8} L ${room.x - room.name.length * 0.65} ${room.y + 1.8} L ${room.x - room.name.length * 0.55} ${room.y + 1.8}`}
-                      fill="none" stroke="#3d2814" strokeWidth="0.15" strokeOpacity="0.5" />
+                      fill="none" stroke="#3d2814" strokeWidth="0.15" strokeOpacity={labelOpacity * 0.6} />
                     <path d={`M ${room.x + room.name.length * 0.55} ${room.y - 1.8} L ${room.x + room.name.length * 0.65} ${room.y - 1.8} L ${room.x + room.name.length * 0.65} ${room.y + 1.8} L ${room.x + room.name.length * 0.55} ${room.y + 1.8}`}
-                      fill="none" stroke="#3d2814" strokeWidth="0.15" strokeOpacity="0.5" />
+                      fill="none" stroke="#3d2814" strokeWidth="0.15" strokeOpacity={labelOpacity * 0.6} />
                   </>
                 )}
                 <text
                   x={room.x} y={room.y}
                   transform={`rotate(${room.labelAngle ?? 0} ${room.x} ${room.y})`}
                   textAnchor="middle" dominantBaseline="middle"
-                  style={{ fontFamily: "'IM Fell English', serif", fontSize: "2px", fill: "#3d2814", opacity: 0.85, letterSpacing: "0.02em" }}
+                  style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.6px", fill: "#3d2814", opacity: labelOpacity, letterSpacing: "0.02em" }}
                 >
                   {room.name}
                 </text>
                 {room.flourish === "underline" && (
                   <path d={`M ${room.x - room.name.length * 0.62} ${room.y + 1.3} Q ${room.x} ${room.y + 1.9} ${room.x + room.name.length * 0.62} ${room.y + 1.3}`}
-                    fill="none" stroke="#3d2814" strokeWidth="0.16" strokeOpacity="0.55" />
+                    fill="none" stroke="#3d2814" strokeWidth="0.16" strokeOpacity={labelOpacity * 0.6} />
                 )}
               </g>
-            ))}
+              );
+            })}
 
-            {/* Footprints + traveling name — the name now IS the smooth,
-                continuously-updating lead position (driven by requestAnimationFrame
-                in the movement effect above), with footprints dropped at fixed
-                distance intervals behind it. The name never snaps or detaches
-                from the trail, since both read from the same live position. */}
+            {/* Footprints + traveling name — dense alternating left/right
+                trail (15-30 visible prints, 9s fade), name always rendered
+                at full opacity/size on a legible backing plate so it stays
+                visually dominant over the dimmed room labels beneath it. */}
             {(() => {
               const visiblePrints = footprints.filter(p => p.floor === activeFloor);
               return (
                 <>
                   {visiblePrints.map(p => {
                     const age = Date.now() - p.bornAt;
-                    const fadeProgress = Math.min(age / 2600, 1);
+                    const fadeProgress = Math.min(age / 9000, 1);
                     const opacity = 0.85 * (1 - fadeProgress);
                     return (
                       <path key={p.id}
@@ -776,13 +761,8 @@ export default function MaraudersMap() {
                     return (
                       <g key={char.id} opacity={searchQuery && !isMatched ? 0.25 : 1}
                         onClick={() => setSelected(char)} style={{ cursor: "pointer" }}>
-                        {/* subtle backing plate so the name always stays legible
-                            over corridors, room labels, or other clutter beneath it */}
                         <rect x={pos.x - 1} y={pos.y - 1.1} width={nameWidth + 2.5} height="1.9"
-                          rx="0.3" fill="#e9d6a8" opacity="0.55" />
-                        {/* small flanking print-marks directly beside the name,
-                            so the name reads as "the leading point of the trail"
-                            rather than a label floating near separate footprints */}
+                          rx="0.3" fill="#e9d6a8" opacity="0.7" />
                         <path d="M 0 -0.4 C 0.2 -0.4 0.27 -0.25 0.26 -0.08 C 0.25 0.05 0.14 0.08 0.1 0.2 C 0.08 0.3 0.12 0.39 0.03 0.43 C -0.06 0.47 -0.18 0.43 -0.21 0.32 C -0.25 0.18 -0.18 0.08 -0.19 -0.06 C -0.2 -0.22 -0.12 -0.4 0 -0.4 Z"
                           fill="#8b2e1f" opacity="0.8" transform={`translate(${pos.x - 1.6} ${pos.y})`} />
                         <text x={pos.x} y={pos.y - 0.15} dominantBaseline="middle" textAnchor="start"
