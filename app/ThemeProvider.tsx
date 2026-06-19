@@ -78,6 +78,26 @@ const ROOM_BY_NAME: Record<string, CastleRoom> = CASTLE_ROOMS.reduce(
 // illegible cursive handwriting packed across the parchment, the way the
 // real map's background is filled with actual (if unreadable) script rather
 // than smooth decorative waves. Deterministic, computed once at module load.
+// Dense field of short jagged ink strokes simulating illegible handwriting,
+// organized into ~12 rectangular "zones" each with its own consistent angle —
+// matching how the real map's background reads as distinct patches of text
+// running in different directions, rather than one uniform texture.
+interface ScribbleZone { x0: number; y0: number; x1: number; y1: number; angle: number }
+const SCRIBBLE_ZONES: ScribbleZone[] = [
+  { x0: 0, y0: 0, x1: 35, y1: 18, angle: 8 },
+  { x0: 35, y0: 0, x1: 70, y1: 16, angle: -5 },
+  { x0: 70, y0: 0, x1: 100, y1: 20, angle: 22 },
+  { x0: 0, y0: 18, x1: 22, y1: 38, angle: -12 },
+  { x0: 78, y0: 20, x1: 100, y1: 42, angle: 35 },
+  { x0: 0, y0: 38, x1: 24, y1: 58, angle: 4 },
+  { x0: 76, y0: 42, x1: 100, y1: 62, angle: -18 },
+  { x0: 0, y0: 58, x1: 26, y1: 80, angle: 18 },
+  { x0: 74, y0: 62, x1: 100, y1: 84, angle: -8 },
+  { x0: 0, y0: 80, x1: 30, y1: 100, angle: -22 },
+  { x0: 70, y0: 84, x1: 100, y1: 100, angle: 12 },
+  { x0: 30, y0: 84, x1: 70, y1: 100, angle: -6 },
+];
+
 function buildScribbleClusters(): Array<{ d: string; size: number }> {
   const clusters: Array<{ d: string; size: number }> = [];
   let seed = 7;
@@ -85,40 +105,72 @@ function buildScribbleClusters(): Array<{ d: string; size: number }> {
     seed = (seed * 9301 + 49297) % 233280;
     return seed / 233280;
   }
-  // Pack ~140 small "word" clusters across the 0-100 field, each made of
-  // 2-4 jagged short strokes mimicking cursive letterforms.
-  for (let i = 0; i < 140; i++) {
-    const baseX = rand() * 100;
-    const baseY = rand() * 100;
-    const angle = (rand() - 0.5) * 30; // slight overall slant per cluster
-    const rad = (angle * Math.PI) / 180;
+  for (const zone of SCRIBBLE_ZONES) {
+    const w = zone.x1 - zone.x0;
+    const h = zone.y1 - zone.y0;
+    const area = w * h;
+    const clusterCount = Math.max(8, Math.floor(area * 0.55));
+    const rad = (zone.angle * Math.PI) / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
-    const strokeCount = 2 + Math.floor(rand() * 3);
-    let d = "";
-    let cursorX = 0;
-    for (let s = 0; s < strokeCount; s++) {
-      const letterW = 0.8 + rand() * 1.0;
-      const letterH = 0.6 + rand() * 1.4;
-      const x0 = cursorX;
-      const y0 = (rand() - 0.5) * 0.6;
-      const x1 = cursorX + letterW * 0.4;
-      const y1 = y0 - letterH * (rand() > 0.5 ? 1 : -1) * 0.6;
-      const x2 = cursorX + letterW;
-      const y2 = y0 + (rand() - 0.5) * 0.5;
-      const rx0 = baseX + (x0 * cos - y0 * sin);
-      const ry0 = baseY + (x0 * sin + y0 * cos);
-      const rx1 = baseX + (x1 * cos - y1 * sin);
-      const ry1 = baseY + (x1 * sin + y1 * cos);
-      const rx2 = baseX + (x2 * cos - y2 * sin);
-      const ry2 = baseY + (x2 * sin + y2 * cos);
-      d += `M ${rx0.toFixed(2)} ${ry0.toFixed(2)} Q ${rx1.toFixed(2)} ${ry1.toFixed(2)} ${rx2.toFixed(2)} ${ry2.toFixed(2)} `;
-      cursorX += letterW * 0.85;
+    for (let i = 0; i < clusterCount; i++) {
+      const baseX = zone.x0 + rand() * w;
+      const baseY = zone.y0 + rand() * h;
+      const strokeCount = 3 + Math.floor(rand() * 4);
+      let d = "";
+      let cursorX = 0;
+      for (let s = 0; s < strokeCount; s++) {
+        const letterW = 0.5 + rand() * 0.9;
+        const letterH = 0.5 + rand() * 1.1;
+        const x0 = cursorX;
+        const y0 = (rand() - 0.5) * 0.5;
+        const x1 = cursorX + letterW * 0.4;
+        const y1 = y0 - letterH * (rand() > 0.5 ? 1 : -1) * 0.7;
+        const x2 = cursorX + letterW;
+        const y2 = y0 + (rand() - 0.5) * 0.4;
+        const rx0 = baseX + (x0 * cos - y0 * sin);
+        const ry0 = baseY + (x0 * sin + y0 * cos);
+        const rx1 = baseX + (x1 * cos - y1 * sin);
+        const ry1 = baseY + (x1 * sin + y1 * cos);
+        const rx2 = baseX + (x2 * cos - y2 * sin);
+        const ry2 = baseY + (x2 * sin + y2 * cos);
+        d += `M ${rx0.toFixed(2)} ${ry0.toFixed(2)} Q ${rx1.toFixed(2)} ${ry1.toFixed(2)} ${rx2.toFixed(2)} ${ry2.toFixed(2)} `;
+        cursorX += letterW * 0.8;
+      }
+      clusters.push({ d, size: 0.1 + rand() * 0.07 });
     }
-    clusters.push({ d, size: 0.13 + rand() * 0.08 });
   }
   return clusters;
 }
 const SCRIBBLE_CLUSTERS = buildScribbleClusters();
+
+// Builds a parchment-ribbon banner path: a flat scroll body, one rolled/curled
+// end (drawn as a spiral cross-section like rolled paper), a fishtail notch
+// cut into the open end, and a separate thin curling tail flourish hanging
+// below — matching the style seen on the film props' name banners.
+function BannerShape({ cx, cy, width, fill }: { cx: number; cy: number; width: number; fill: string }) {
+  const w = width / 2;
+  return (
+    <g transform={`translate(${cx} ${cy})`}>
+      {/* curling tail flourish, drawn first so the banner body sits above it */}
+      <path
+        d={`M ${-w * 0.55} ${1.3} Q ${-w * 0.75} ${2.3} ${-w * 0.5} ${2.7} Q ${-w * 0.3} ${3.0} ${-w * 0.5} ${2.0} Q ${-w * 0.6} ${1.5} ${-w * 0.4} ${1.4}`}
+        fill="none" stroke={fill} strokeWidth="0.14" strokeOpacity="0.9"
+      />
+      {/* main ribbon body with fishtail notch on the right */}
+      <path
+        d={`M ${-w} ${-1.1} L ${w * 0.6} ${-1.2} L ${w} ${-0.5} L ${w * 0.72} ${0} L ${w} ${0.5} L ${w * 0.6} ${1.2} L ${-w} ${1.1} L ${-w * 0.75} ${0} Z`}
+        fill={fill} fillOpacity="0.85" stroke="#3d2814" strokeWidth="0.1"
+      />
+      {/* rolled scroll end on the left, drawn as a spiral cross-section */}
+      <g transform={`translate(${-w * 0.92} 0)`}>
+        <path d="M 0 -1.3 Q -0.9 -1.3 -0.9 -0.55 Q -0.9 0 -0.3 0.05 Q 0.15 0.05 0.15 -0.3 Q 0.15 -0.55 -0.15 -0.55"
+          fill="none" stroke="#3d2814" strokeWidth="0.12" />
+        <path d="M -0.9 -0.55 Q -0.9 0.3 0 1.3 L 0 -1.3 Z"
+          fill={fill} fillOpacity="0.7" stroke="#3d2814" strokeWidth="0.1" />
+      </g>
+    </g>
+  );
+}
 
 const GENERIC_WALKER_NAMES = [
   "Argus Filch", "Peeves", "Minerva McGonagall", "Severus Snape", "Albus Dumbledore",
@@ -309,6 +361,7 @@ export function applyStoredTheme() {
 }
 
 const HOGWARTS_GLOBAL_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Pirata+One&display=swap');
 @keyframes va-floating-dust {
   0% { transform: translateY(0px); opacity: .2; }
   50% { transform: translateY(-14px); opacity: .55; }
@@ -612,9 +665,10 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
               </g>
             ))}
 
-            <text x="50" y="6" textAnchor="middle" style={{
-              fontFamily: "'IM Fell English', serif", fontSize: "2.8px",
-              fill: "#3d2814", letterSpacing: "0.15em", opacity: 0.85,
+            <BannerShape cx={50} cy={6} width={34} fill="#7a3b2e" />
+            <text x="50" y="6.6" textAnchor="middle" style={{
+              fontFamily: "'Pirata One', 'IM Fell English', serif", fontSize: "3px",
+              fill: "#e9d6a8", letterSpacing: "0.05em",
             }}>
               Mischief Managed
             </text>
@@ -634,20 +688,21 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
             })}
 
             {labels.map(l => (
-              <text key={l.id}
-                x={l.x} y={l.y - 4.5}
-                textAnchor="middle"
-                style={{
-                  fontFamily: "'IM Fell English', cursive, serif",
-                  fontSize: "2px",
-                  fontStyle: "italic",
-                  fill: "#3d2814",
-                  opacity: 0.85,
-                  letterSpacing: "0.02em",
-                }}
-              >
-                {l.name}
-              </text>
+              <g key={l.id}>
+                <BannerShape cx={l.x} cy={l.y - 4.5} width={Math.max(10, l.name.length * 1.5)} fill="#7a3b2e" />
+                <text
+                  x={l.x} y={l.y - 3.9}
+                  textAnchor="middle"
+                  style={{
+                    fontFamily: "'Pirata One', 'IM Fell English', serif",
+                    fontSize: "1.7px",
+                    fill: "#e9d6a8",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  {l.name}
+                </text>
+              </g>
             ))}
           </svg>
         </div>
