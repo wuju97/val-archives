@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { loadArchive } from "@/lib/archiveEngine";
@@ -402,7 +402,7 @@ export default function MaraudersMap() {
         onClick={openMap}
         className="va-hogwarts-glow"
         style={{
-          position: "fixed", bottom: "1.5rem", right: "1.5rem", zIndex: 500,
+          position: "fixed", bottom: "1.5rem", left: "50%", transform: "translateX(-50%)", zIndex: 500,
           background: "linear-gradient(135deg, #7a3b2e, #3d2814)",
           color: "#e9d6a8", border: "1px solid #3d2814", borderRadius: "0.5rem",
           padding: "0.625rem 1.1rem", fontFamily: "'Pirata One', 'IM Fell English', serif",
@@ -521,9 +521,16 @@ export default function MaraudersMap() {
               const age = Date.now() - p.bornAt;
               const fadeProgress = Math.min(age / 2200, 1);
               const opacity = 0.85 * (1 - fadeProgress);
+              // Actual foot-sole silhouette: wider rounded toe-ball, narrower
+              // waist, rounded heel — built as one closed path, not an ellipse.
               return (
-                <ellipse key={p.id} cx={p.x} cy={p.y} rx="0.42" ry="0.58" fill="#8b2e1f"
-                  opacity={Math.max(opacity, 0)} transform={`rotate(${p.angle} ${p.x} ${p.y})`} />
+                <path
+                  key={p.id}
+                  d="M 0 -0.62 C 0.32 -0.62 0.42 -0.38 0.4 -0.12 C 0.38 0.08 0.22 0.12 0.16 0.3 C 0.12 0.46 0.18 0.6 0.05 0.66 C -0.1 0.72 -0.28 0.66 -0.32 0.5 C -0.38 0.28 -0.28 0.12 -0.3 -0.1 C -0.32 -0.34 -0.18 -0.62 0 -0.62 Z"
+                  fill="#8b2e1f"
+                  opacity={Math.max(opacity, 0)}
+                  transform={`translate(${p.x} ${p.y}) rotate(${p.angle}) scale(1.1)`}
+                />
               );
             })}
 
