@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMusic } from "../MusicPlayer";
+import { useSoundEffects, SOUND_SLOTS, SoundSlotId } from "../SoundEffects";
 import { useEffect, useState } from "react";
 import { clearArchive, exportVault, getActiveVaultId, loadArchive, regenerateMasterPrompt, saveArchive, pushHistory, undoArchive, redoArchive,
   clearCanonStory, clearPlayerStory,
@@ -279,6 +280,7 @@ export default function SettingsPage() {
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
   const [activeSection, setActiveSection] = useState<"display" | "personalisation" | "instructions" | "ai" | "danger" | "music" | "cloud">("display");
   const { songs, currentIndex, isPlaying, volume, loopMode, addSongs, removeSong, playSong, togglePlay, setVolume, setLoopMode, clearAll } = useMusic();
+  const { slots: soundSlots, enabled: soundsEnabled, volume: sfxVolume, uploadSound, removeSound: removeSfxSound, setEnabled: setSoundsEnabled, setVolume: setSfxVolume } = useSoundEffects();
   const [saved, setSaved] = useState(false);
   const [vaultCleared, setVaultCleared] = useState(false);
   const [canonStoryCleared, setCanonStoryCleared] = useState(false);
@@ -734,7 +736,7 @@ export default function SettingsPage() {
                           ["hogwartsDust", "✨ Floating Dust", "Subtle glowing particles drifting upward"],
                           ["hogwartsGlow", "🪄 Spell Glow", "Buttons glow like a charging wand on hover"],
                           ["hogwartsScrollReveal", "📜 Scroll Reveal", "Entries unfurl like ancient documents when opened"],
-                          ["hogwartsSounds", "🔔 Subtle Sounds", "Tiny paper rustle / chime on hover (experimental)"],
+                          ["hogwartsSounds", "🔔 Subtle Sounds", "Now live in Music/BGM tab → Custom Sound Effects (upload your own)"],
                         ] as Array<[keyof ThemeSettings, string, string]>).map(([key, label, desc]) => (
                           <div key={key} style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
                             <button onClick={() => updateTheme({ [key]: !theme[key] } as Partial<ThemeSettings>)}
@@ -1078,6 +1080,63 @@ export default function SettingsPage() {
                   <p>No songs yet. Upload some above to start your BGM playlist.</p>
                 </div>
               )}
+
+              {/* ── Custom Sound Effects ── */}
+              <div style={{ borderTop: "1px solid var(--va-border)", paddingTop: "1.25rem" }}>
+                <h3 style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>🔔 Custom Sound Effects</h3>
+                <p style={{ color: "var(--va-text-muted)", fontSize: "0.875rem", marginBottom: "1rem" }}>Upload your own short sound clips for specific actions across the site — a keystroke sound, a button click, a page turn, or a quill-scratch while typing.</p>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.625rem 0.875rem", background: "var(--va-bg)", borderRadius: "0.5rem", marginBottom: "1rem" }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: "0.875rem", fontWeight: "600" }}>Enable Sound Effects</p>
+                    <p style={{ fontSize: "0.72rem", color: "var(--va-text-muted)" }}>Master switch — turns all uploaded sounds on or off</p>
+                  </div>
+                  <button onClick={() => setSoundsEnabled(!soundsEnabled)}
+                    style={{ width: "44px", height: "24px", borderRadius: "9999px", border: "none", cursor: "pointer", background: soundsEnabled ? "#22c55e" : "var(--va-border)", position: "relative", flexShrink: 0 }}>
+                    <div style={{ position: "absolute", top: "2px", left: soundsEnabled ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", background: "white", transition: "left 0.2s" }} />
+                  </button>
+                </div>
+
+                <div style={{ marginBottom: "1rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.375rem" }}>
+                    <label style={{ fontSize: "0.875rem", fontWeight: "600" }}>🔈 SFX Volume</label>
+                    <span style={{ fontSize: "0.875rem", color: "var(--va-accent)", fontWeight: "700" }}>{sfxVolume}%</span>
+                  </div>
+                  <input type="range" min="0" max="100" value={sfxVolume} onChange={e => setSfxVolume(Number(e.target.value))} style={{ width: "100%", accentColor: "var(--va-accent)", cursor: "pointer" }} />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  {SOUND_SLOTS.map(slot => {
+                    const meta = soundSlots[slot.id];
+                    return (
+                      <div key={slot.id} style={S.card}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.625rem" }}>
+                          <div>
+                            <p style={{ fontWeight: "700", fontSize: "0.85rem" }}>{slot.label}</p>
+                            <p style={{ fontSize: "0.7rem", color: "var(--va-text-muted)" }}>{slot.desc}</p>
+                          </div>
+                          {meta && <span style={{ fontSize: "0.68rem", color: "#4ade80", flexShrink: 0 }}>✓ Loaded</span>}
+                        </div>
+                        {meta ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                            <span style={{ flex: 1, fontSize: "0.78rem", color: "var(--va-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta.name}</span>
+                            <span style={{ fontSize: "0.68rem", color: "var(--va-text-muted)" }}>{(meta.size / 1024).toFixed(0)}KB</span>
+                            <button onClick={() => removeSfxSound(slot.id)} style={{ ...S.btn("none", "var(--va-text-muted)"), border: "1px solid var(--va-border)", padding: "0.3rem 0.625rem", fontSize: "0.72rem" }}>Remove</button>
+                          </div>
+                        ) : (
+                          <label style={{ cursor: "pointer", display: "block" }}>
+                            <div style={{ border: "1px dashed var(--va-border)", borderRadius: "0.4rem", padding: "0.625rem", textAlign: "center" }}>
+                              <p style={{ color: "var(--va-text-muted)", fontSize: "0.78rem" }}>Click to upload a short audio clip</p>
+                            </div>
+                            <input type="file" accept="audio/*" style={{ display: "none" }}
+                              onChange={e => { const file = e.target.files?.[0]; if (file) uploadSound(slot.id, file); }} />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
 

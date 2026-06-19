@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { useSoundEffects } from "./SoundEffects";
 
 const FONT_SIZE_PX: Record<string, string> = { small: "14px", medium: "16px", large: "18px", xlarge: "20px" };
 const LINE_SPACING_VAL: Record<string, string> = { compact: "1.3", normal: "1.6", relaxed: "1.9" };
@@ -255,6 +256,7 @@ const FOOTSTEP_GLYPHS = ["👣"];
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { playSound, enabled: soundsEnabled } = useSoundEffects();
 
   // Reapply on every route change
   useEffect(() => {
@@ -262,6 +264,39 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
     const t = setTimeout(applyStoredTheme, 100);
     return () => clearTimeout(t);
   }, [pathname]);
+
+  // Page-turn sound — fires once per actual route change, not on the initial mount,
+  // since the initial load isn't really "turning a page."
+  const isFirstRender = useState(true);
+  useEffect(() => {
+    if (isFirstRender[0]) { isFirstRender[1](false); return; }
+    playSound("pageTurn");
+  }, [pathname]);
+
+  // Global keystroke + click sound effects — attached once, independent of route,
+  // so they keep firing across every page without needing to re-bind on navigation.
+  useEffect(() => {
+    function handleGlobalKeydown(e: KeyboardEvent) {
+      if (e.key.length !== 1 && e.key !== "Backspace" && e.key !== "Enter") return;
+      const target = e.target as HTMLElement | null;
+      const isTextField = target && (target.tagName === "TEXTAREA" || (target.tagName === "INPUT" && target.getAttribute("type") !== "checkbox" && target.getAttribute("type") !== "radio"));
+      // Quill Scratch takes priority over the generic Keystroke sound while actively
+      // typing in a text area or text input, since that's the "writing" context;
+      // everywhere else (shortcuts, navigating with arrow keys, etc.) uses Keystroke.
+      if (isTextField) playSound("quillScratch");
+      else playSound("keystroke");
+    }
+    function handleGlobalClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("button, a")) playSound("buttonClick");
+    }
+    window.addEventListener("keydown", handleGlobalKeydown);
+    window.addEventListener("click", handleGlobalClick);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKeydown);
+      window.removeEventListener("click", handleGlobalClick);
+    };
+  }, [soundsEnabled]);
 
   // Listen for storage/custom events
   useEffect(() => {
@@ -300,28 +335,55 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
 
   // Marauder's Map easter egg — typing "Mischief Managed" anywhere triggers a brief
   // map-mode overlay with fading footprints, regardless of which page you're on.
+  // Each trigger generates 2–4 distinct "people," each with their own randomized
+  // starting point, walking direction, and speed, so no two activations look the same.
   const [marauderActive, setMarauderActive] = useState(false);
-  const [footsteps, setFootsteps] = useState<Array<{ id: number; x: number; y: number }>>([]);
+  const [footsteps, setFootsteps] = useState<Array<{ id: number; x: number; y: number; personId: number; rotation: number }>>([]);
   useEffect(() => {
     let typed = "";
     const target = "mischief managed";
     function handleKeydown(e: KeyboardEvent) {
       if (e.key.length !== 1) return;
       typed = (typed + e.key.toLowerCase()).slice(-target.length);
-      console.log("[marauder debug] typed buffer:", JSON.stringify(typed)); // TEMPORARY — remove once confirmed working
       if (typed === target) {
         setMarauderActive(true);
-        let count = 0;
-        const stepInterval = setInterval(() => {
-          count++;
-          setFootsteps(prev => [...prev, {
-            id: Date.now() + count,
-            x: 10 + Math.random() * 80,
-            y: 10 + Math.random() * 80,
-          }].slice(-12));
-          if (count >= 10) clearInterval(stepInterval);
-        }, 280);
-        setTimeout(() => { setMarauderActive(false); setFootsteps([]); }, 4500);
+
+        // Generate 2–4 unique people, each walking in a random direction at a
+        // random speed from a random starting point on screen.
+        const peopleCount = 2 + Math.floor(Math.random() * 3);
+        const people = Array.from({ length: peopleCount }, (_, i) => ({
+          personId: i,
+          startX: 10 + Math.random() * 80,
+          startY: 10 + Math.random() * 80,
+          angle: Math.random() * Math.PI * 2, // walking direction in radians
+          speed: 2 + Math.random() * 4, // % of screen per step — varies per person
+          stepDelay: 220 + Math.random() * 200, // ms between footprints — varies per person, some walk faster than others
+        }));
+
+        const timers: ReturnType<typeof setInterval>[] = [];
+        people.forEach(person => {
+          let stepCount = 0;
+          const stepInterval = setInterval(() => {
+            stepCount++;
+            const dx = Math.cos(person.angle) * person.speed * stepCount;
+            const dy = Math.sin(person.angle) * person.speed * stepCount;
+            const x = Math.max(2, Math.min(96, person.startX + dx));
+            const y = Math.max(2, Math.min(96, person.startY + dy));
+            const rotation = (person.angle * 180) / Math.PI;
+            setFootsteps(prev => [...prev, {
+              id: Date.now() + person.personId * 1000 + stepCount,
+              x, y, personId: person.personId, rotation,
+            }].slice(-40)); // allow more total prints on screen since multiple people are walking at once
+            if (stepCount >= 8) clearInterval(stepInterval);
+          }, person.stepDelay);
+          timers.push(stepInterval);
+        });
+
+        setTimeout(() => {
+          setMarauderActive(false);
+          setFootsteps([]);
+          timers.forEach(t => clearInterval(t));
+        }, 4500);
       }
     }
     window.addEventListener("keydown", handleKeydown);
@@ -353,7 +415,14 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
       {marauderActive && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 9999, pointerEvents: "none",
-          background: "radial-gradient(circle at center, rgba(139,111,63,0.15) 0%, rgba(15,15,18,0.55) 100%)",
+          // Aged-parchment texture: layered radial highlights/shadows over a sepia base,
+          // rather than a flat color tint, so it actually reads as a map surface.
+          background: `
+            radial-gradient(circle at 20% 30%, rgba(212,175,55,0.08) 0%, transparent 35%),
+            radial-gradient(circle at 80% 70%, rgba(139,111,63,0.1) 0%, transparent 40%),
+            radial-gradient(circle at 50% 50%, rgba(233,223,200,0.06) 0%, transparent 60%),
+            linear-gradient(135deg, rgba(139,111,63,0.18) 0%, rgba(15,15,18,0.65) 100%)
+          `,
           animation: "va-marauder-fade 4.5s ease-in-out forwards",
         }}>
           <p style={{
@@ -367,7 +436,10 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
             <span key={f.id} style={{
               position: "absolute", left: `${f.x}%`, top: `${f.y}%`,
               fontSize: "1.1rem", animation: "va-footstep-fade 2s ease-out forwards",
-              filter: "sepia(1) opacity(0.7)",
+              transform: `rotate(${f.rotation}deg)`,
+              // Each person gets a slightly different hue rotation so distinct walkers
+              // are visually distinguishable from one another on the map.
+              filter: `sepia(1) opacity(0.75) hue-rotate(${f.personId * 35}deg)`,
             }}>
               {FOOTSTEP_GLYPHS[0]}
             </span>

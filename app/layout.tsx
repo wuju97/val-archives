@@ -4,6 +4,7 @@ import "./globals.css";
 import ThemeProvider from "./ThemeProvider";
 import { ExtractionProvider } from "./ExtractionContext";
 import { MusicProvider } from "./MusicPlayer";
+import { SoundEffectsProvider } from "./SoundEffects";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -162,7 +163,7 @@ export default function RootLayout({
         />
       </head>
       <body suppressHydrationWarning className="min-h-full flex flex-col">
-        <ThemeProvider><MusicProvider><ExtractionProvider>{children}</ExtractionProvider></MusicProvider></ThemeProvider>
+        <ThemeProvider><SoundEffectsProvider><MusicProvider><ExtractionProvider>{children}</ExtractionProvider></MusicProvider></SoundEffectsProvider></ThemeProvider>
       </body>
     </html>
   );
