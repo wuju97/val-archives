@@ -453,24 +453,65 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
           let currentRoom = roomNames[Math.floor(Math.random() * roomNames.length)];
           const walkerId = Date.now() + i;
 
-          function placeAt(roomName: string) {
-            const room = ROOM_BY_NAME[roomName];
-            if (!room) return;
+          function setPos(x: number, y: number, roomName: string) {
             setWalkers(prev => {
               const filtered = prev.filter(w => w.id !== walkerId);
-              return [...filtered, { id: walkerId, name, x: room.cx, y: room.cy, roomName }];
+              return [...filtered, { id: walkerId, name, x, y, roomName }];
             });
           }
-          placeAt(currentRoom);
 
-          const moveDelay = 700 + Math.random() * 400;
-          const moveInterval = setInterval(() => {
+          const startRoom = ROOM_BY_NAME[currentRoom];
+          if (startRoom) setPos(startRoom.cx, startRoom.cy, currentRoom);
+
+          // Walks in small steps along the actual corridor curve between rooms
+          // (sampling the same quadratic path used to draw the corridor line)
+          // rather than jumping straight to the next room's center — this is
+          // what makes movement read as "walking the corridor" instead of
+          // teleporting from point to point.
+          function walkToRoom(nextRoomName: string, onDone: () => void) {
+            const from = ROOM_BY_NAME[currentRoom];
+            const to = ROOM_BY_NAME[nextRoomName];
+            if (!from || !to) { onDone(); return; }
+
+            const mx = (from.cx + to.cx) / 2;
+            const my = (from.cy + to.cy) / 2;
+            const dx = to.cx - from.cx;
+            const dy = to.cy - from.cy;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const nx = -dy / len;
+            const ny = dx / len;
+            const wobble = seedOffset(from.name, to.name) * (len * 0.18);
+            const ctrlX = mx + nx * wobble;
+            const ctrlY = my + ny * wobble;
+
+            const STEPS = 8;
+            let step = 0;
+            const stepInterval = setInterval(() => {
+              step++;
+              const t = step / STEPS;
+              const oneMinusT = 1 - t;
+              const x = oneMinusT * oneMinusT * from.cx + 2 * oneMinusT * t * ctrlX + t * t * to.cx;
+              const y = oneMinusT * oneMinusT * from.cy + 2 * oneMinusT * t * ctrlY + t * t * to.cy;
+              setPos(x, y, currentRoom);
+              if (step >= STEPS) {
+                clearInterval(stepInterval);
+                currentRoom = nextRoomName;
+                onDone();
+              }
+            }, 90);
+            timers.push(stepInterval);
+          }
+
+          function scheduleNextMove() {
             const connections = CASTLE_CONNECTIONS[currentRoom] || [];
             if (connections.length === 0) return;
-            currentRoom = connections[Math.floor(Math.random() * connections.length)];
-            placeAt(currentRoom);
-          }, moveDelay);
-          timers.push(moveInterval);
+            const next = connections[Math.floor(Math.random() * connections.length)];
+            const pauseAtRoom = setTimeout(() => {
+              walkToRoom(next, scheduleNextMove);
+            }, 300 + Math.random() * 300);
+            timers.push(pauseAtRoom as unknown as ReturnType<typeof setInterval>);
+          }
+          scheduleNextMove();
         });
 
         setTimeout(() => {
@@ -579,28 +620,39 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
               </text>
             </g>
 
-            {walkers.map(w => (
-              <g key={w.id} style={{ transition: "transform 0.7s ease-in-out" }}
-                 transform={`translate(${w.x} ${w.y})`}>
-                <ellipse cx="-0.5" cy="0" rx="0.55" ry="0.85" fill="#3d2814" fillOpacity="0.7"
-                  transform="rotate(-12 -0.5 0)" />
-                <ellipse cx="0.5" cy="0.6" rx="0.55" ry="0.85" fill="#3d2814" fillOpacity="0.7"
-                  transform="rotate(10 0.5 0.6)" />
+            {walkers.map(w => {
+              const side = (w.id % 2 === 0) ? 1 : -1;
+              const offsetX = side * 3.2;
+              const offsetY = 5.5;
+              return (
+                <g key={w.id}
+                   transform={`translate(${w.x + offsetX} ${w.y + offsetY})`}>
+                  {/* boot-print pair — larger, clearer ink shapes: a rounded heel
+                      + toe per print, angled like an actual footstep stride */}
+                  <g transform="rotate(-15)" fillOpacity="0.75" fill="#3d2814">
+                    <ellipse cx="0" cy="0" rx="0.45" ry="0.7" />
+                    <ellipse cx="0" cy="-0.85" rx="0.55" ry="0.5" />
+                  </g>
+                  <g transform="translate(1.3 0.9) rotate(12)" fillOpacity="0.75" fill="#3d2814">
+                    <ellipse cx="0" cy="0" rx="0.45" ry="0.7" />
+                    <ellipse cx="0" cy="-0.85" rx="0.55" ry="0.5" />
+                  </g>
 
-                <g transform="translate(0 -3.6)">
-                  <path
-                    d="M -6.5 0 Q -7.5 -0.8 -6.8 -1.4 Q -6.2 -1.8 -5.5 -1.3 L 5.5 -1.3 Q 6.2 -1.8 6.8 -1.4 Q 7.5 -0.8 6.5 0 Q 7.5 0.8 6.8 1.4 Q 6.2 1.8 5.5 1.3 L -5.5 1.3 Q -6.2 1.8 -6.8 1.4 Q -7.5 0.8 -6.5 0 Z"
-                    fill="#7a3b2e" fillOpacity="0.88" stroke="#3d2814" strokeWidth="0.12"
-                  />
-                  <text x="0" y="0.45" textAnchor="middle" style={{
-                    fontFamily: "'IM Fell English', serif", fontSize: "1.5px",
-                    fill: "#e9d6a8", letterSpacing: "0.03em",
-                  }}>
-                    {w.name}
-                  </text>
+                  <g transform="translate(0.6 -3.4)">
+                    <path
+                      d="M -6.5 0 Q -7.5 -0.8 -6.8 -1.4 Q -6.2 -1.8 -5.5 -1.3 L 5.5 -1.3 Q 6.2 -1.8 6.8 -1.4 Q 7.5 -0.8 6.5 0 Q 7.5 0.8 6.8 1.4 Q 6.2 1.8 5.5 1.3 L -5.5 1.3 Q -6.2 1.8 -6.8 1.4 Q -7.5 0.8 -6.5 0 Z"
+                      fill="#7a3b2e" fillOpacity="0.88" stroke="#3d2814" strokeWidth="0.12"
+                    />
+                    <text x="0" y="0.45" textAnchor="middle" style={{
+                      fontFamily: "'IM Fell English', serif", fontSize: "1.5px",
+                      fill: "#e9d6a8", letterSpacing: "0.03em",
+                    }}>
+                      {w.name}
+                    </text>
+                  </g>
                 </g>
-              </g>
-            ))}
+              );
+            })}
           </svg>
         </div>
       )}
