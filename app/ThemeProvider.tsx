@@ -72,46 +72,6 @@ const ROOM_BY_NAME: Record<string, CastleRoom> = CASTLE_ROOMS.reduce(
   (acc, r) => ({ ...acc, [r.name]: r }), {} as Record<string, CastleRoom>
 );
 
-function seedOffset(a: string, b: string): number {
-  let h = 0;
-  const s = a + b;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 1000;
-  return (h / 1000) * 2 - 1;
-}
-
-// Quadratic curve with a deterministic perpendicular wobble — reads as a
-// hand-inked wandering corridor instead of a ruler-straight connector.
-function corridorPath(from: CastleRoom, to: CastleRoom): string {
-  const mx = (from.cx + to.cx) / 2;
-  const my = (from.cy + to.cy) / 2;
-  const dx = to.cx - from.cx;
-  const dy = to.cy - from.cy;
-  const len = Math.sqrt(dx * dx + dy * dy) || 1;
-  const nx = -dy / len;
-  const ny = dx / len;
-  const wobble = seedOffset(from.name, to.name) * (len * 0.18);
-  const cx = mx + nx * wobble;
-  const cy = my + ny * wobble;
-  return `M ${from.cx} ${from.cy} Q ${cx} ${cy} ${to.cx} ${to.cy}`;
-}
-
-function uniqueCorridors(): Array<{ from: CastleRoom; to: CastleRoom }> {
-  const seen = new Set<string>();
-  const out: Array<{ from: CastleRoom; to: CastleRoom }> = [];
-  for (const [name, neighbors] of Object.entries(CASTLE_CONNECTIONS)) {
-    for (const n of neighbors) {
-      const key = [name, n].sort().join("::");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const from = ROOM_BY_NAME[name];
-      const to = ROOM_BY_NAME[n];
-      if (from && to) out.push({ from, to });
-    }
-  }
-  return out;
-}
-const CORRIDORS = uniqueCorridors();
-
 // Dense illegible wavy "writing" filling empty parchment — deterministic,
 // computed once at module load, matching the busy look of the real map.
 function buildScribbleLines(): string[] {
@@ -434,7 +394,8 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
 
   // Marauder's Map easter egg
   const [marauderActive, setMarauderActive] = useState(false);
-  const [walkers, setWalkers] = useState<Array<{ id: number; name: string; x: number; y: number; roomName: string }>>([]);
+  const [footprints, setFootprints] = useState<Array<{ id: number; x: number; y: number; angle: number; bornAt: number; side: 1 | -1 }>>([]);
+  const [labels, setLabels] = useState<Array<{ id: number; name: string; x: number; y: number }>>([]);
   useEffect(() => {
     let typed = "";
     const target = "mischief managed";
@@ -448,57 +409,62 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
         const names = getMarauderWalkerNames(walkerCount);
         const roomNames = Object.keys(CASTLE_CONNECTIONS);
 
-        const timers: ReturnType<typeof setInterval>[] = [];
+        const timers: ReturnType<typeof setInterval | typeof setTimeout>[] = [];
+        let printIdCounter = 0;
+
         names.forEach((name, i) => {
           let currentRoom = roomNames[Math.floor(Math.random() * roomNames.length)];
-          const walkerId = Date.now() + i;
-
-          function setPos(x: number, y: number, roomName: string) {
-            setWalkers(prev => {
-              const filtered = prev.filter(w => w.id !== walkerId);
-              return [...filtered, { id: walkerId, name, x, y, roomName }];
-            });
-          }
+          const labelId = Date.now() + i;
+          let stepCount = 0;
 
           const startRoom = ROOM_BY_NAME[currentRoom];
-          if (startRoom) setPos(startRoom.cx, startRoom.cy, currentRoom);
+          if (startRoom) {
+            setLabels(prev => [...prev.filter(l => l.id !== labelId), { id: labelId, name, x: startRoom.cx, y: startRoom.cy }]);
+          }
 
-          // Walks in small steps along the actual corridor curve between rooms
-          // (sampling the same quadratic path used to draw the corridor line)
-          // rather than jumping straight to the next room's center — this is
-          // what makes movement read as "walking the corridor" instead of
-          // teleporting from point to point.
+          // Drops a single footprint blot at (x,y), alternating left/right of
+          // the direction of travel — this IS the visible trail, there is no
+          // separate line. Each print fades out on its own after ~1.8s via
+          // the bornAt timestamp read during render.
+          function dropPrint(x: number, y: number, angle: number) {
+            stepCount++;
+            const side: 1 | -1 = stepCount % 2 === 0 ? 1 : -1;
+            const perpX = Math.cos((angle + 90) * Math.PI / 180) * 0.5 * side;
+            const perpY = Math.sin((angle + 90) * Math.PI / 180) * 0.5 * side;
+            const id = ++printIdCounter + i * 10000;
+            setFootprints(prev => [
+              ...prev,
+              { id, x: x + perpX, y: y + perpY, angle, bornAt: Date.now(), side },
+            ]);
+            const cleanup = setTimeout(() => {
+              setFootprints(prev => prev.filter(p => p.id !== id));
+            }, 1800);
+            timers.push(cleanup);
+          }
+
           function walkToRoom(nextRoomName: string, onDone: () => void) {
             const from = ROOM_BY_NAME[currentRoom];
             const to = ROOM_BY_NAME[nextRoomName];
             if (!from || !to) { onDone(); return; }
 
-            const mx = (from.cx + to.cx) / 2;
-            const my = (from.cy + to.cy) / 2;
             const dx = to.cx - from.cx;
             const dy = to.cy - from.cy;
-            const len = Math.sqrt(dx * dx + dy * dy) || 1;
-            const nx = -dy / len;
-            const ny = dx / len;
-            const wobble = seedOffset(from.name, to.name) * (len * 0.18);
-            const ctrlX = mx + nx * wobble;
-            const ctrlY = my + ny * wobble;
-
-            const STEPS = 8;
+            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+            const STEPS = 6;
             let step = 0;
             const stepInterval = setInterval(() => {
               step++;
               const t = step / STEPS;
-              const oneMinusT = 1 - t;
-              const x = oneMinusT * oneMinusT * from.cx + 2 * oneMinusT * t * ctrlX + t * t * to.cx;
-              const y = oneMinusT * oneMinusT * from.cy + 2 * oneMinusT * t * ctrlY + t * t * to.cy;
-              setPos(x, y, currentRoom);
+              const x = from.cx + dx * t;
+              const y = from.cy + dy * t;
+              dropPrint(x, y, angle);
+              setLabels(prev => prev.map(l => l.id === labelId ? { ...l, x, y } : l));
               if (step >= STEPS) {
                 clearInterval(stepInterval);
                 currentRoom = nextRoomName;
                 onDone();
               }
-            }, 90);
+            }, 220);
             timers.push(stepInterval);
           }
 
@@ -508,22 +474,32 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
             const next = connections[Math.floor(Math.random() * connections.length)];
             const pauseAtRoom = setTimeout(() => {
               walkToRoom(next, scheduleNextMove);
-            }, 300 + Math.random() * 300);
-            timers.push(pauseAtRoom as unknown as ReturnType<typeof setInterval>);
+            }, 400 + Math.random() * 400);
+            timers.push(pauseAtRoom);
           }
           scheduleNextMove();
         });
 
         setTimeout(() => {
           setMarauderActive(false);
-          setWalkers([]);
-          timers.forEach(t => clearInterval(t));
-        }, 4500);
+          setFootprints([]);
+          setLabels([]);
+          timers.forEach(t => clearInterval(t as ReturnType<typeof setInterval>));
+        }, 6000);
       }
     }
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
   }, []);
+
+  // Re-render periodically while the map is active so fading footprints
+  // (opacity computed from age at render time) actually animate out smoothly.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!marauderActive) return;
+    const id = setInterval(() => forceTick(n => n + 1), 80);
+    return () => clearInterval(id);
+  }, [marauderActive]);
 
   const dustParticles = (hogwartsActive && dustOn)
     ? Array.from({ length: 18 }, (_, i) => ({
@@ -581,11 +557,9 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
               {SCRIBBLE_LINES.map((d, i) => <path key={i} d={d} />)}
             </g>
 
-            <g stroke="#3d2814" strokeOpacity="0.55" strokeWidth="0.45" fill="none" strokeLinecap="round">
-              {CORRIDORS.map(({ from, to }, i) => (
-                <path key={i} d={corridorPath(from, to)} />
-              ))}
-            </g>
+            {/* No static corridor lines — the real map has no drawn paths between
+                rooms. Movement is shown purely by the footprint trail itself,
+                which fades in and out as each walker passes through. */}
 
             {CASTLE_ROOMS.map(room => (
               <g key={room.name}>
@@ -607,52 +581,43 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
               </g>
             ))}
 
-            <g transform="translate(50 6)">
-              <path
-                d="M -22 0 Q -24 -2 -20 -3 L -14 -1.5 L -8 -3 L 0 -1 L 8 -3 L 14 -1.5 L 20 -3 Q 24 -2 22 0 Q 24 2 20 3 L 14 1.5 L 8 3 L 0 1 L -8 3 L -14 1.5 L -20 3 Q -24 2 -22 0 Z"
-                fill="#7a3b2e" fillOpacity="0.85" stroke="#3d2814" strokeWidth="0.2"
-              />
-              <text x="0" y="0.8" textAnchor="middle" style={{
-                fontFamily: "'IM Fell English', serif", fontSize: "2.6px",
-                fill: "#e9d6a8", letterSpacing: "0.12em",
-              }}>
-                Mischief Managed
-              </text>
-            </g>
+            <text x="50" y="6" textAnchor="middle" style={{
+              fontFamily: "'IM Fell English', serif", fontSize: "2.8px",
+              fill: "#3d2814", letterSpacing: "0.15em", opacity: 0.85,
+            }}>
+              Mischief Managed
+            </text>
 
-            {walkers.map(w => {
-              const side = (w.id % 2 === 0) ? 1 : -1;
-              const offsetX = side * 3.2;
-              const offsetY = 5.5;
+            {footprints.map(p => {
+              const age = Date.now() - p.bornAt;
+              const fadeProgress = Math.min(age / 1800, 1);
+              const opacity = 0.85 * (1 - fadeProgress);
               return (
-                <g key={w.id}
-                   transform={`translate(${w.x + offsetX} ${w.y + offsetY})`}>
-                  {/* boot-print pair — larger, clearer ink shapes: a rounded heel
-                      + toe per print, angled like an actual footstep stride */}
-                  <g transform="rotate(-15)" fillOpacity="0.75" fill="#3d2814">
-                    <ellipse cx="0" cy="0" rx="0.45" ry="0.7" />
-                    <ellipse cx="0" cy="-0.85" rx="0.55" ry="0.5" />
-                  </g>
-                  <g transform="translate(1.3 0.9) rotate(12)" fillOpacity="0.75" fill="#3d2814">
-                    <ellipse cx="0" cy="0" rx="0.45" ry="0.7" />
-                    <ellipse cx="0" cy="-0.85" rx="0.55" ry="0.5" />
-                  </g>
-
-                  <g transform="translate(0.6 -3.4)">
-                    <path
-                      d="M -6.5 0 Q -7.5 -0.8 -6.8 -1.4 Q -6.2 -1.8 -5.5 -1.3 L 5.5 -1.3 Q 6.2 -1.8 6.8 -1.4 Q 7.5 -0.8 6.5 0 Q 7.5 0.8 6.8 1.4 Q 6.2 1.8 5.5 1.3 L -5.5 1.3 Q -6.2 1.8 -6.8 1.4 Q -7.5 0.8 -6.5 0 Z"
-                      fill="#7a3b2e" fillOpacity="0.88" stroke="#3d2814" strokeWidth="0.12"
-                    />
-                    <text x="0" y="0.45" textAnchor="middle" style={{
-                      fontFamily: "'IM Fell English', serif", fontSize: "1.5px",
-                      fill: "#e9d6a8", letterSpacing: "0.03em",
-                    }}>
-                      {w.name}
-                    </text>
-                  </g>
-                </g>
+                <ellipse key={p.id}
+                  cx={p.x} cy={p.y} rx="0.5" ry="0.75"
+                  fill="#8b2e1f"
+                  opacity={Math.max(opacity, 0)}
+                  transform={`rotate(${p.angle} ${p.x} ${p.y})`}
+                />
               );
             })}
+
+            {labels.map(l => (
+              <text key={l.id}
+                x={l.x} y={l.y - 2.2}
+                textAnchor="middle"
+                style={{
+                  fontFamily: "'IM Fell English', cursive, serif",
+                  fontSize: "2px",
+                  fontStyle: "italic",
+                  fill: "#3d2814",
+                  opacity: 0.85,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {l.name}
+              </text>
+            ))}
           </svg>
         </div>
       )}
