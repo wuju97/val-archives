@@ -74,22 +74,51 @@ const ROOM_BY_NAME: Record<string, CastleRoom> = CASTLE_ROOMS.reduce(
 
 // Dense illegible wavy "writing" filling empty parchment — deterministic,
 // computed once at module load, matching the busy look of the real map.
-function buildScribbleLines(): string[] {
-  const lines: string[] = [];
-  for (let row = 0; row < 22; row++) {
-    const y = 2 + row * 4.4;
-    let d = `M 1 ${y}`;
-    const segs = 14;
-    for (let i = 1; i <= segs; i++) {
-      const x = 1 + (i * 98) / segs;
-      const wob = Math.sin(row * 1.7 + i * 0.9) * 1.1;
-      d += ` L ${x.toFixed(1)} ${(y + wob).toFixed(1)}`;
-    }
-    lines.push(d);
+// Dense field of short, jagged, letter-like ink squiggles — simulating
+// illegible cursive handwriting packed across the parchment, the way the
+// real map's background is filled with actual (if unreadable) script rather
+// than smooth decorative waves. Deterministic, computed once at module load.
+function buildScribbleClusters(): Array<{ d: string; size: number }> {
+  const clusters: Array<{ d: string; size: number }> = [];
+  let seed = 7;
+  function rand() {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
   }
-  return lines;
+  // Pack ~140 small "word" clusters across the 0-100 field, each made of
+  // 2-4 jagged short strokes mimicking cursive letterforms.
+  for (let i = 0; i < 140; i++) {
+    const baseX = rand() * 100;
+    const baseY = rand() * 100;
+    const angle = (rand() - 0.5) * 30; // slight overall slant per cluster
+    const rad = (angle * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const strokeCount = 2 + Math.floor(rand() * 3);
+    let d = "";
+    let cursorX = 0;
+    for (let s = 0; s < strokeCount; s++) {
+      const letterW = 0.8 + rand() * 1.0;
+      const letterH = 0.6 + rand() * 1.4;
+      const x0 = cursorX;
+      const y0 = (rand() - 0.5) * 0.6;
+      const x1 = cursorX + letterW * 0.4;
+      const y1 = y0 - letterH * (rand() > 0.5 ? 1 : -1) * 0.6;
+      const x2 = cursorX + letterW;
+      const y2 = y0 + (rand() - 0.5) * 0.5;
+      const rx0 = baseX + (x0 * cos - y0 * sin);
+      const ry0 = baseY + (x0 * sin + y0 * cos);
+      const rx1 = baseX + (x1 * cos - y1 * sin);
+      const ry1 = baseY + (x1 * sin + y1 * cos);
+      const rx2 = baseX + (x2 * cos - y2 * sin);
+      const ry2 = baseY + (x2 * sin + y2 * cos);
+      d += `M ${rx0.toFixed(2)} ${ry0.toFixed(2)} Q ${rx1.toFixed(2)} ${ry1.toFixed(2)} ${rx2.toFixed(2)} ${ry2.toFixed(2)} `;
+      cursorX += letterW * 0.85;
+    }
+    clusters.push({ d, size: 0.13 + rand() * 0.08 });
+  }
+  return clusters;
 }
-const SCRIBBLE_LINES = buildScribbleLines();
+const SCRIBBLE_CLUSTERS = buildScribbleClusters();
 
 const GENERIC_WALKER_NAMES = [
   "Argus Filch", "Peeves", "Minerva McGonagall", "Severus Snape", "Albus Dumbledore",
@@ -429,8 +458,8 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
           function dropPrint(x: number, y: number, angle: number) {
             stepCount++;
             const side: 1 | -1 = stepCount % 2 === 0 ? 1 : -1;
-            const perpX = Math.cos((angle + 90) * Math.PI / 180) * 0.5 * side;
-            const perpY = Math.sin((angle + 90) * Math.PI / 180) * 0.5 * side;
+            const perpX = Math.cos((angle + 90) * Math.PI / 180) * 1.1 * side;
+            const perpY = Math.sin((angle + 90) * Math.PI / 180) * 1.1 * side;
             const id = ++printIdCounter + i * 10000;
             setFootprints(prev => [
               ...prev,
@@ -553,8 +582,10 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
             <circle cx="70" cy="8" r="6" fill="url(#va-ink-stain)" />
             <circle cx="95" cy="90" r="8" fill="url(#va-ink-stain)" />
 
-            <g stroke="#5c3a1e" strokeOpacity="0.12" strokeWidth="0.18" fill="none">
-              {SCRIBBLE_LINES.map((d, i) => <path key={i} d={d} />)}
+            <g stroke="#5c3a1e" strokeOpacity="0.32" fill="none" strokeLinecap="round">
+              {SCRIBBLE_CLUSTERS.map((c, i) => (
+                <path key={i} d={c.d} strokeWidth={c.size} />
+              ))}
             </g>
 
             {/* No static corridor lines — the real map has no drawn paths between
@@ -594,7 +625,7 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
               const opacity = 0.85 * (1 - fadeProgress);
               return (
                 <ellipse key={p.id}
-                  cx={p.x} cy={p.y} rx="0.5" ry="0.75"
+                  cx={p.x} cy={p.y} rx="0.42" ry="0.58"
                   fill="#8b2e1f"
                   opacity={Math.max(opacity, 0)}
                   transform={`rotate(${p.angle} ${p.x} ${p.y})`}
@@ -604,7 +635,7 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
 
             {labels.map(l => (
               <text key={l.id}
-                x={l.x} y={l.y - 2.2}
+                x={l.x} y={l.y - 4.5}
                 textAnchor="middle"
                 style={{
                   fontFamily: "'IM Fell English', cursive, serif",
