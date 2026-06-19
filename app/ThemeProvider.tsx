@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSoundEffects } from "./SoundEffects";
-import { loadArchive } from "@/lib/archiveEngine";
 
 const FONT_SIZE_PX: Record<string, string> = { small: "14px", medium: "16px", large: "18px", xlarge: "20px" };
 const LINE_SPACING_VAL: Record<string, string> = { compact: "1.3", normal: "1.6", relaxed: "1.9" };
@@ -22,181 +21,6 @@ const HP_HOUSES: Record<string, { primary: string; secondary: string }> = {
   hufflepuff: { primary: "#ecb939", secondary: "#372e29" },
 };
 const HOUSE_ORDER = ["gryffindor", "slytherin", "ravenclaw", "hufflepuff"];
-
-// ════════════════════════════════════════════════════════════════════════
-// MARAUDER'S MAP v2 — organic film-map-style castle layout
-// ════════════════════════════════════════════════════════════════════════
-
-interface CastleRoom {
-  name: string;
-  cx: number; // center x (0-100)
-  cy: number; // center y (0-100)
-  labelAngle?: number; // degrees, slight hand-lettered tilt
-}
-
-// Rooms positioned diagonally/asymmetrically (towers top corners, grounds
-// bottom, central hall) rather than a grid, matching the real map's sprawl.
-const CASTLE_ROOMS: CastleRoom[] = [
-  { name: "Gryffindor Tower", cx: 14, cy: 12, labelAngle: -6 },
-  { name: "Ravenclaw Tower", cx: 86, cy: 14, labelAngle: 5 },
-  { name: "Great Hall", cx: 50, cy: 22, labelAngle: 0 },
-  { name: "Entrance Hall", cx: 50, cy: 38, labelAngle: 0 },
-  { name: "Library", cx: 27, cy: 40, labelAngle: -4 },
-  { name: "Astronomy Tower", cx: 73, cy: 40, labelAngle: 4 },
-  { name: "Great Staircase", cx: 50, cy: 54, labelAngle: 0 },
-  { name: "Potions Classroom", cx: 18, cy: 58, labelAngle: -8 },
-  { name: "Slytherin Dungeon", cx: 12, cy: 76, labelAngle: -5 },
-  { name: "Hufflepuff Basement", cx: 88, cy: 76, labelAngle: 5 },
-  { name: "Forbidden Corridor", cx: 62, cy: 64, labelAngle: 3 },
-  { name: "Hagrid's Hut", cx: 22, cy: 92, labelAngle: -3 },
-  { name: "Quidditch Pitch", cx: 78, cy: 92, labelAngle: 3 },
-];
-
-const CASTLE_CONNECTIONS: Record<string, string[]> = {
-  "Gryffindor Tower": ["Great Hall", "Library"],
-  "Ravenclaw Tower": ["Great Hall", "Astronomy Tower"],
-  "Great Hall": ["Gryffindor Tower", "Ravenclaw Tower", "Entrance Hall"],
-  "Entrance Hall": ["Great Hall", "Library", "Astronomy Tower", "Great Staircase"],
-  "Library": ["Gryffindor Tower", "Entrance Hall", "Potions Classroom"],
-  "Astronomy Tower": ["Ravenclaw Tower", "Entrance Hall", "Forbidden Corridor"],
-  "Great Staircase": ["Entrance Hall", "Potions Classroom", "Forbidden Corridor"],
-  "Potions Classroom": ["Library", "Great Staircase", "Slytherin Dungeon"],
-  "Slytherin Dungeon": ["Potions Classroom", "Hagrid's Hut"],
-  "Hufflepuff Basement": ["Forbidden Corridor", "Quidditch Pitch"],
-  "Forbidden Corridor": ["Astronomy Tower", "Great Staircase", "Hufflepuff Basement"],
-  "Hagrid's Hut": ["Slytherin Dungeon"],
-  "Quidditch Pitch": ["Hufflepuff Basement"],
-};
-
-const ROOM_BY_NAME: Record<string, CastleRoom> = CASTLE_ROOMS.reduce(
-  (acc, r) => ({ ...acc, [r.name]: r }), {} as Record<string, CastleRoom>
-);
-
-// Dense illegible wavy "writing" filling empty parchment — deterministic,
-// computed once at module load, matching the busy look of the real map.
-// Dense field of short, jagged, letter-like ink squiggles — simulating
-// illegible cursive handwriting packed across the parchment, the way the
-// real map's background is filled with actual (if unreadable) script rather
-// than smooth decorative waves. Deterministic, computed once at module load.
-// Dense field of short jagged ink strokes simulating illegible handwriting,
-// organized into ~12 rectangular "zones" each with its own consistent angle —
-// matching how the real map's background reads as distinct patches of text
-// running in different directions, rather than one uniform texture.
-interface ScribbleZone { x0: number; y0: number; x1: number; y1: number; angle: number }
-const SCRIBBLE_ZONES: ScribbleZone[] = [
-  { x0: 0, y0: 0, x1: 35, y1: 18, angle: 8 },
-  { x0: 35, y0: 0, x1: 70, y1: 16, angle: -5 },
-  { x0: 70, y0: 0, x1: 100, y1: 20, angle: 22 },
-  { x0: 0, y0: 18, x1: 22, y1: 38, angle: -12 },
-  { x0: 78, y0: 20, x1: 100, y1: 42, angle: 35 },
-  { x0: 0, y0: 38, x1: 24, y1: 58, angle: 4 },
-  { x0: 76, y0: 42, x1: 100, y1: 62, angle: -18 },
-  { x0: 0, y0: 58, x1: 26, y1: 80, angle: 18 },
-  { x0: 74, y0: 62, x1: 100, y1: 84, angle: -8 },
-  { x0: 0, y0: 80, x1: 30, y1: 100, angle: -22 },
-  { x0: 70, y0: 84, x1: 100, y1: 100, angle: 12 },
-  { x0: 30, y0: 84, x1: 70, y1: 100, angle: -6 },
-];
-
-function buildScribbleClusters(): Array<{ d: string; size: number }> {
-  const clusters: Array<{ d: string; size: number }> = [];
-  let seed = 7;
-  function rand() {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  }
-  for (const zone of SCRIBBLE_ZONES) {
-    const w = zone.x1 - zone.x0;
-    const h = zone.y1 - zone.y0;
-    const area = w * h;
-    const clusterCount = Math.max(8, Math.floor(area * 0.55));
-    const rad = (zone.angle * Math.PI) / 180;
-    const cos = Math.cos(rad), sin = Math.sin(rad);
-    for (let i = 0; i < clusterCount; i++) {
-      const baseX = zone.x0 + rand() * w;
-      const baseY = zone.y0 + rand() * h;
-      const strokeCount = 3 + Math.floor(rand() * 4);
-      let d = "";
-      let cursorX = 0;
-      for (let s = 0; s < strokeCount; s++) {
-        const letterW = 0.5 + rand() * 0.9;
-        const letterH = 0.5 + rand() * 1.1;
-        const x0 = cursorX;
-        const y0 = (rand() - 0.5) * 0.5;
-        const x1 = cursorX + letterW * 0.4;
-        const y1 = y0 - letterH * (rand() > 0.5 ? 1 : -1) * 0.7;
-        const x2 = cursorX + letterW;
-        const y2 = y0 + (rand() - 0.5) * 0.4;
-        const rx0 = baseX + (x0 * cos - y0 * sin);
-        const ry0 = baseY + (x0 * sin + y0 * cos);
-        const rx1 = baseX + (x1 * cos - y1 * sin);
-        const ry1 = baseY + (x1 * sin + y1 * cos);
-        const rx2 = baseX + (x2 * cos - y2 * sin);
-        const ry2 = baseY + (x2 * sin + y2 * cos);
-        d += `M ${rx0.toFixed(2)} ${ry0.toFixed(2)} Q ${rx1.toFixed(2)} ${ry1.toFixed(2)} ${rx2.toFixed(2)} ${ry2.toFixed(2)} `;
-        cursorX += letterW * 0.8;
-      }
-      clusters.push({ d, size: 0.1 + rand() * 0.07 });
-    }
-  }
-  return clusters;
-}
-const SCRIBBLE_CLUSTERS = buildScribbleClusters();
-
-// Builds a parchment-ribbon banner path: a flat scroll body, one rolled/curled
-// end (drawn as a spiral cross-section like rolled paper), a fishtail notch
-// cut into the open end, and a separate thin curling tail flourish hanging
-// below — matching the style seen on the film props' name banners.
-function BannerShape({ cx, cy, width, fill }: { cx: number; cy: number; width: number; fill: string }) {
-  const w = width / 2;
-  return (
-    <g transform={`translate(${cx} ${cy})`}>
-      {/* curling tail flourish, drawn first so the banner body sits above it */}
-      <path
-        d={`M ${-w * 0.55} ${1.3} Q ${-w * 0.75} ${2.3} ${-w * 0.5} ${2.7} Q ${-w * 0.3} ${3.0} ${-w * 0.5} ${2.0} Q ${-w * 0.6} ${1.5} ${-w * 0.4} ${1.4}`}
-        fill="none" stroke={fill} strokeWidth="0.14" strokeOpacity="0.9"
-      />
-      {/* main ribbon body with fishtail notch on the right */}
-      <path
-        d={`M ${-w} ${-1.1} L ${w * 0.6} ${-1.2} L ${w} ${-0.5} L ${w * 0.72} ${0} L ${w} ${0.5} L ${w * 0.6} ${1.2} L ${-w} ${1.1} L ${-w * 0.75} ${0} Z`}
-        fill={fill} fillOpacity="0.85" stroke="#3d2814" strokeWidth="0.1"
-      />
-      {/* rolled scroll end on the left, drawn as a spiral cross-section */}
-      <g transform={`translate(${-w * 0.92} 0)`}>
-        <path d="M 0 -1.3 Q -0.9 -1.3 -0.9 -0.55 Q -0.9 0 -0.3 0.05 Q 0.15 0.05 0.15 -0.3 Q 0.15 -0.55 -0.15 -0.55"
-          fill="none" stroke="#3d2814" strokeWidth="0.12" />
-        <path d="M -0.9 -0.55 Q -0.9 0.3 0 1.3 L 0 -1.3 Z"
-          fill={fill} fillOpacity="0.7" stroke="#3d2814" strokeWidth="0.1" />
-      </g>
-    </g>
-  );
-}
-
-const GENERIC_WALKER_NAMES = [
-  "Argus Filch", "Peeves", "Minerva McGonagall", "Severus Snape", "Albus Dumbledore",
-  "Rubeus Hagrid", "Pomona Sprout", "Filius Flitwick", "Madam Pince", "Madam Pomfrey",
-  "Nearly Headless Nick", "The Fat Friar", "Cho Chang", "Cedric Diggory", "Luna Lovegood",
-  "Neville Longbottom", "Fred Weasley", "George Weasley", "Oliver Wood", "Marcus Flint",
-];
-
-function getMarauderWalkerNames(count: number): string[] {
-  const names: string[] = [];
-  try {
-    const archive = loadArchive();
-    const vaultNames = new Set<string>();
-    for (const entry of [...(archive.entries || []), ...(archive.playerEntries || [])]) {
-      if (entry.category === "characters" && (entry as any).entity) vaultNames.add((entry as any).entity);
-    }
-    const shuffledVault = Array.from(vaultNames).sort(() => Math.random() - 0.5);
-    names.push(...shuffledVault.slice(0, count));
-  } catch {}
-  const shuffledGeneric = [...GENERIC_WALKER_NAMES].sort(() => Math.random() - 0.5);
-  for (const n of shuffledGeneric) {
-    if (names.length >= count) break;
-    if (!names.includes(n)) names.push(n);
-  }
-  return names.slice(0, count);
-}
 
 const HOGWARTS_PALETTES: Record<string, { gold: string; black: string; parchment: string; burgundy: string; bronze: string; magicBlue: string }> = {
   classic: { gold: "#D4AF37", black: "#0F0F12", parchment: "#E9DFC8", burgundy: "#5C1A1B", bronze: "#8B6B3F", magicBlue: "#5DADE2" },
@@ -360,8 +184,12 @@ export function applyStoredTheme() {
   } catch {}
 }
 
+// Global keyframes + Hogwarts-specific element styling — injected once, always
+// present. Scoped under [data-hogwarts="true"] so it has zero effect unless
+// Hogwarts Mode is on. Marauder's Map now lives entirely in its own component
+// (components/harrypotter/MaraudersMap.tsx) — this file only owns themes,
+// colors, fonts, dust particles, and the global sound-effect listeners.
 const HOGWARTS_GLOBAL_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Pirata+One&display=swap');
 @keyframes va-floating-dust {
   0% { transform: translateY(0px); opacity: .2; }
   50% { transform: translateY(-14px); opacity: .55; }
@@ -376,17 +204,6 @@ const HOGWARTS_GLOBAL_CSS = `
   0% { clip-path: inset(0 0 100% 0); opacity: 0; transform: scaleY(0.85); }
   40% { opacity: 1; }
   100% { clip-path: inset(0 0 0% 0); opacity: 1; transform: scaleY(1); }
-}
-@keyframes va-marauder-fade {
-  0% { opacity: 0; }
-  10% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { opacity: 0; }
-}
-@keyframes va-footstep-fade {
-  0% { opacity: 0; transform: scale(0.6); }
-  20% { opacity: .8; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1); }
 }
 
 [data-hogwarts="true"] {
@@ -474,115 +291,6 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
     };
   }, [pathname]);
 
-  // Marauder's Map easter egg
-  const [marauderActive, setMarauderActive] = useState(false);
-  const [footprints, setFootprints] = useState<Array<{ id: number; x: number; y: number; angle: number; bornAt: number; side: 1 | -1 }>>([]);
-  const [labels, setLabels] = useState<Array<{ id: number; name: string; x: number; y: number }>>([]);
-  useEffect(() => {
-    let typed = "";
-    const target = "mischief managed";
-    function handleKeydown(e: KeyboardEvent) {
-      if (e.key.length !== 1) return;
-      typed = (typed + e.key.toLowerCase()).slice(-target.length);
-      if (typed === target) {
-        setMarauderActive(true);
-
-        const walkerCount = 2 + Math.floor(Math.random() * 3);
-        const names = getMarauderWalkerNames(walkerCount);
-        const roomNames = Object.keys(CASTLE_CONNECTIONS);
-
-        const timers: ReturnType<typeof setInterval | typeof setTimeout>[] = [];
-        let printIdCounter = 0;
-
-        names.forEach((name, i) => {
-          let currentRoom = roomNames[Math.floor(Math.random() * roomNames.length)];
-          const labelId = Date.now() + i;
-          let stepCount = 0;
-
-          const startRoom = ROOM_BY_NAME[currentRoom];
-          if (startRoom) {
-            setLabels(prev => [...prev.filter(l => l.id !== labelId), { id: labelId, name, x: startRoom.cx, y: startRoom.cy }]);
-          }
-
-          // Drops a single footprint blot at (x,y), alternating left/right of
-          // the direction of travel — this IS the visible trail, there is no
-          // separate line. Each print fades out on its own after ~1.8s via
-          // the bornAt timestamp read during render.
-          function dropPrint(x: number, y: number, angle: number) {
-            stepCount++;
-            const side: 1 | -1 = stepCount % 2 === 0 ? 1 : -1;
-            const perpX = Math.cos((angle + 90) * Math.PI / 180) * 1.1 * side;
-            const perpY = Math.sin((angle + 90) * Math.PI / 180) * 1.1 * side;
-            const id = ++printIdCounter + i * 10000;
-            setFootprints(prev => [
-              ...prev,
-              { id, x: x + perpX, y: y + perpY, angle, bornAt: Date.now(), side },
-            ]);
-            const cleanup = setTimeout(() => {
-              setFootprints(prev => prev.filter(p => p.id !== id));
-            }, 1800);
-            timers.push(cleanup);
-          }
-
-          function walkToRoom(nextRoomName: string, onDone: () => void) {
-            const from = ROOM_BY_NAME[currentRoom];
-            const to = ROOM_BY_NAME[nextRoomName];
-            if (!from || !to) { onDone(); return; }
-
-            const dx = to.cx - from.cx;
-            const dy = to.cy - from.cy;
-            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-            const STEPS = 6;
-            let step = 0;
-            const stepInterval = setInterval(() => {
-              step++;
-              const t = step / STEPS;
-              const x = from.cx + dx * t;
-              const y = from.cy + dy * t;
-              dropPrint(x, y, angle);
-              setLabels(prev => prev.map(l => l.id === labelId ? { ...l, x, y } : l));
-              if (step >= STEPS) {
-                clearInterval(stepInterval);
-                currentRoom = nextRoomName;
-                onDone();
-              }
-            }, 220);
-            timers.push(stepInterval);
-          }
-
-          function scheduleNextMove() {
-            const connections = CASTLE_CONNECTIONS[currentRoom] || [];
-            if (connections.length === 0) return;
-            const next = connections[Math.floor(Math.random() * connections.length)];
-            const pauseAtRoom = setTimeout(() => {
-              walkToRoom(next, scheduleNextMove);
-            }, 400 + Math.random() * 400);
-            timers.push(pauseAtRoom);
-          }
-          scheduleNextMove();
-        });
-
-        setTimeout(() => {
-          setMarauderActive(false);
-          setFootprints([]);
-          setLabels([]);
-          timers.forEach(t => clearInterval(t as ReturnType<typeof setInterval>));
-        }, 6000);
-      }
-    }
-    window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
-  }, []);
-
-  // Re-render periodically while the map is active so fading footprints
-  // (opacity computed from age at render time) actually animate out smoothly.
-  const [, forceTick] = useState(0);
-  useEffect(() => {
-    if (!marauderActive) return;
-    const id = setInterval(() => forceTick(n => n + 1), 80);
-    return () => clearInterval(id);
-  }, [marauderActive]);
-
   const dustParticles = (hogwartsActive && dustOn)
     ? Array.from({ length: 18 }, (_, i) => ({
         id: i,
@@ -604,109 +312,6 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
           animationDuration: `${p.duration}s`, animationDelay: `${p.delay}s`,
         }} />
       ))}
-
-      {marauderActive && (
-        <div style={{
-          position: "fixed",
-          top: 0, left: 0, right: 0, bottom: 0,
-          zIndex: 999999,
-          pointerEvents: "none",
-          animation: "va-marauder-fade 4.5s ease-in-out forwards",
-        }}>
-          <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice"
-            style={{ width: "100%", height: "100%", display: "block" }}>
-            <defs>
-              <radialGradient id="va-parchment-grad" cx="50%" cy="45%" r="75%">
-                <stop offset="0%" stopColor="#e9d6a8" />
-                <stop offset="55%" stopColor="#d8bd82" />
-                <stop offset="100%" stopColor="#a9824f" />
-              </radialGradient>
-              <radialGradient id="va-ink-stain" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#5c3a1e" stopOpacity="0.18" />
-                <stop offset="100%" stopColor="#5c3a1e" stopOpacity="0" />
-              </radialGradient>
-            </defs>
-
-            <rect x="0" y="0" width="100" height="100" fill="url(#va-parchment-grad)" />
-
-            <circle cx="12" cy="20" r="9" fill="url(#va-ink-stain)" />
-            <circle cx="88" cy="30" r="7" fill="url(#va-ink-stain)" />
-            <circle cx="30" cy="85" r="10" fill="url(#va-ink-stain)" />
-            <circle cx="70" cy="8" r="6" fill="url(#va-ink-stain)" />
-            <circle cx="95" cy="90" r="8" fill="url(#va-ink-stain)" />
-
-            <g stroke="#5c3a1e" strokeOpacity="0.32" fill="none" strokeLinecap="round">
-              {SCRIBBLE_CLUSTERS.map((c, i) => (
-                <path key={i} d={c.d} strokeWidth={c.size} />
-              ))}
-            </g>
-
-            {/* No static corridor lines — the real map has no drawn paths between
-                rooms. Movement is shown purely by the footprint trail itself,
-                which fades in and out as each walker passes through. */}
-
-            {CASTLE_ROOMS.map(room => (
-              <g key={room.name}>
-                <circle cx={room.cx} cy={room.cy} r="0.7" fill="#3d2814" fillOpacity="0.6" />
-                <text
-                  x={room.cx} y={room.cy - 1.6}
-                  transform={`rotate(${room.labelAngle ?? 0} ${room.cx} ${room.cy - 1.6})`}
-                  textAnchor="middle"
-                  style={{
-                    fontFamily: "'IM Fell English', serif",
-                    fontSize: "2.1px",
-                    fill: "#3d2814",
-                    opacity: 0.75,
-                    letterSpacing: "0.02em",
-                  }}
-                >
-                  {room.name}
-                </text>
-              </g>
-            ))}
-
-            <BannerShape cx={50} cy={6} width={34} fill="#7a3b2e" />
-            <text x="50" y="6.6" textAnchor="middle" style={{
-              fontFamily: "'Pirata One', 'IM Fell English', serif", fontSize: "3px",
-              fill: "#e9d6a8", letterSpacing: "0.05em",
-            }}>
-              Mischief Managed
-            </text>
-
-            {footprints.map(p => {
-              const age = Date.now() - p.bornAt;
-              const fadeProgress = Math.min(age / 1800, 1);
-              const opacity = 0.85 * (1 - fadeProgress);
-              return (
-                <ellipse key={p.id}
-                  cx={p.x} cy={p.y} rx="0.42" ry="0.58"
-                  fill="#8b2e1f"
-                  opacity={Math.max(opacity, 0)}
-                  transform={`rotate(${p.angle} ${p.x} ${p.y})`}
-                />
-              );
-            })}
-
-            {labels.map(l => (
-              <g key={l.id}>
-                <BannerShape cx={l.x} cy={l.y - 4.5} width={Math.max(10, l.name.length * 1.5)} fill="#7a3b2e" />
-                <text
-                  x={l.x} y={l.y - 3.9}
-                  textAnchor="middle"
-                  style={{
-                    fontFamily: "'Pirata One', 'IM Fell English', serif",
-                    fontSize: "1.7px",
-                    fill: "#e9d6a8",
-                    letterSpacing: "0.02em",
-                  }}
-                >
-                  {l.name}
-                </text>
-              </g>
-            ))}
-          </svg>
-        </div>
-      )}
 
       {children}
     </>
