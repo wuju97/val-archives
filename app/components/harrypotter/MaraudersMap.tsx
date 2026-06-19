@@ -35,6 +35,8 @@ const ROOMS: RoomPoint[] = [
   { name: "Great Hall", x: 50, y: 16, labelAngle: 0, floor: "main", flourish: "underline" },
   { name: "Entrance Hall", x: 50, y: 36, labelAngle: 0, floor: "main", flourish: "underline" },
   { name: "Library", x: 20, y: 38, labelAngle: -4, floor: "main", flourish: "brackets" },
+  { name: "Restricted Section", x: 12, y: 32, labelAngle: -10, floor: "main", flourish: "none" },
+  { name: "Reading Alcove", x: 12, y: 44, labelAngle: -6, floor: "main", flourish: "none" },
   { name: "Great Staircase", x: 50, y: 56, labelAngle: 0, floor: "main", flourish: "brackets" },
   { name: "Forbidden Corridor", x: 78, y: 56, labelAngle: 3, floor: "main", flourish: "underline" },
   { name: "Charms Corridor", x: 78, y: 36, labelAngle: 4, floor: "main", flourish: "none" },
@@ -91,6 +93,11 @@ const CORRIDORS: Corridor[] = [
   { from: "Great Staircase", to: "Forbidden Corridor", points: [{ x: 50, y: 56 }, { x: 64, y: 56 }, { x: 78, y: 56 }], kind: "hallway" },
   { from: "Charms Corridor", to: "Forbidden Corridor", points: [{ x: 78, y: 36 }, { x: 78, y: 56 }], kind: "hallway" },
   { from: "Library", to: "Trophy Room", points: [{ x: 20, y: 38 }, { x: 21, y: 50 }, { x: 22, y: 62 }], kind: "hallway" },
+  // Tiny sub-room connections — small side rooms off the Library, very short links
+  { from: "Library", to: "Restricted Section", points: [{ x: 20, y: 38 }, { x: 12, y: 32 }], kind: "hallway" },
+  { from: "Library", to: "Reading Alcove", points: [{ x: 20, y: 38 }, { x: 12, y: 44 }], kind: "hallway" },
+  // Extra secret passage — One-Eyed Witch-style shortcut from Trophy Room to Forbidden Corridor
+  { from: "Trophy Room", to: "Forbidden Corridor", points: [{ x: 22, y: 62 }, { x: 60, y: 50 }, { x: 78, y: 56 }], kind: "secret" },
   // Loop: Great Hall directly to Library, bypassing Entrance Hall
   { from: "Great Hall", to: "Library", points: [{ x: 50, y: 16 }, { x: 34, y: 22 }, { x: 20, y: 38 }], kind: "hallway" },
   // Loop: Great Hall directly to Charms Corridor
@@ -436,17 +443,42 @@ export default function MaraudersMap() {
         const corridor = CORRIDOR_BY_PAIR[`${currentRoom}::${nextRoomName}`];
         if (!corridor) { onDone(); return; }
         const totalLen = polylineLength(corridor.points);
-        const SPEED_PER_MS = totalLen / 1600; // covers the whole corridor in ~1.6s
+        // Duration scales with corridor length: short crossings ~12-18s,
+        // long routes up to ~45s — walking pace, not RTS-unit speed.
+        const durationMs = 12000 + totalLen * 350;
+        const SPEED_PER_MS = totalLen / durationMs;
         const PRINT_SPACING = totalLen / 7; // drop a print roughly every 1/7th of the route
         const nextFloor = FLOOR_OF_ROOM[nextRoomName] ?? FLOOR_OF_ROOM[currentRoom];
 
         let lastPrintDist = 0;
         let startTime: number | null = null;
+        let pausedUntil = 0; // timestamp until which we hold position (mid-walk pause)
+        let accumulatedPauseMs = 0;
+        let nextPauseCheckAt = 3000 + Math.random() * 4000; // first chance to pause
 
         function tick(now: number) {
           if (startTime === null) startTime = now;
-          const elapsed = now - startTime;
-          const traveled = Math.min(elapsed * SPEED_PER_MS, totalLen);
+
+          // Mid-corridor pause: occasionally a walker stops for a few
+          // seconds (looking at a portrait, chatting, checking a passage)
+          // rather than moving continuously start to finish.
+          if (now < pausedUntil) {
+            const rafId = requestAnimationFrame(tick);
+            rafIds.push(rafId);
+            return;
+          }
+          const elapsedActive = now - startTime - accumulatedPauseMs;
+          if (elapsedActive >= nextPauseCheckAt && Math.random() < 0.35) {
+            const pauseMs = 1500 + Math.random() * 3000;
+            pausedUntil = now + pauseMs;
+            accumulatedPauseMs += pauseMs;
+            nextPauseCheckAt += 4000 + Math.random() * 4000;
+            const rafId = requestAnimationFrame(tick);
+            rafIds.push(rafId);
+            return;
+          }
+
+          const traveled = Math.min(elapsedActive * SPEED_PER_MS, totalLen);
           const { x, y, angle } = pointAtDistance(corridor.points, traveled);
 
           // Smooth continuous position — this IS what the name follows,
@@ -474,8 +506,8 @@ export default function MaraudersMap() {
       }
 
       function scheduleNextMove() {
-        const lingering = Math.random() < 0.4;
-        const delay = lingering ? 2500 + Math.random() * 3000 : 600 + Math.random() * 600;
+        const lingering = Math.random() < 0.55;
+        const delay = lingering ? 8000 + Math.random() * 12000 : 2000 + Math.random() * 2000;
         const t = setTimeout(() => {
           const connections = ADJACENCY[currentRoom] || [];
           if (connections.length === 0) { scheduleNextMove(); return; }
@@ -740,15 +772,20 @@ export default function MaraudersMap() {
                     const pos = positions[char.id];
                     if (!pos || pos.floor !== activeFloor) return null;
                     const isMatched = matchedCharId === char.id;
+                    const nameWidth = char.name.length * 1.1;
                     return (
                       <g key={char.id} opacity={searchQuery && !isMatched ? 0.25 : 1}
                         onClick={() => setSelected(char)} style={{ cursor: "pointer" }}>
+                        {/* subtle backing plate so the name always stays legible
+                            over corridors, room labels, or other clutter beneath it */}
+                        <rect x={pos.x - 1} y={pos.y - 1.1} width={nameWidth + 2.5} height="1.9"
+                          rx="0.3" fill="#e9d6a8" opacity="0.55" />
                         {/* small flanking print-marks directly beside the name,
                             so the name reads as "the leading point of the trail"
                             rather than a label floating near separate footprints */}
                         <path d="M 0 -0.4 C 0.2 -0.4 0.27 -0.25 0.26 -0.08 C 0.25 0.05 0.14 0.08 0.1 0.2 C 0.08 0.3 0.12 0.39 0.03 0.43 C -0.06 0.47 -0.18 0.43 -0.21 0.32 C -0.25 0.18 -0.18 0.08 -0.19 -0.06 C -0.2 -0.22 -0.12 -0.4 0 -0.4 Z"
                           fill="#8b2e1f" opacity="0.8" transform={`translate(${pos.x - 1.6} ${pos.y})`} />
-                        <text x={pos.x} y={pos.y - 0.3} dominantBaseline="middle" textAnchor="start"
+                        <text x={pos.x} y={pos.y - 0.15} dominantBaseline="middle" textAnchor="start"
                           style={{ fontFamily: "'Pirata One', 'IM Fell English', serif", fontSize: "1.6px", fill: isMatched ? "#a84a2f" : "#7a3b2e", letterSpacing: "0.02em" }}>
                           {char.name}
                         </text>
