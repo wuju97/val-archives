@@ -628,7 +628,7 @@ export default function MaraudersMap() {
               const unit = units[char.id];
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
-              const FOOT_SEPARATION = 0.55;
+              const FOOT_SEPARATION = 1.1;
               const footPath = "M 0 -0.55 C 0.28 -0.55 0.37 -0.34 0.35 -0.1 C 0.33 0.07 0.2 0.1 0.14 0.26 C 0.1 0.4 0.16 0.52 0.04 0.58 C -0.09 0.63 -0.25 0.58 -0.28 0.44 C -0.33 0.24 -0.25 0.1 -0.26 -0.08 C -0.28 -0.3 -0.16 -0.55 0 -0.55 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
