@@ -640,11 +640,12 @@ export default function MaraudersMap() {
               // back and forth — verified by direct simulation against
               // this file's actual route geometry. Keep ratio ~4:1.
               const FOOT_SEPARATION = 0.45;
-              // Small irregular ink-blot shape matching the reference photo —
-              // organic, slightly uneven rounded blob rather than a clean
-              // geometric shoe outline. Verified: 0.66 max dimension vs 1.05
-              // min center-to-center spacing along the actual route = safe gap.
-              const footPath = "M 0 -0.3 C 0.22 -0.32 0.32 -0.15 0.28 0.05 C 0.25 0.22 0.15 0.3 0.02 0.32 C -0.13 0.34 -0.27 0.24 -0.29 0.06 C -0.31 -0.13 -0.2 -0.28 0 -0.3 Z";
+              // Elongated foot-shaped blot (narrow, longer than wide, with
+              // a rounded toe, slight waist pinch, rounded heel) instead of
+              // the round circular blob — fits within a SMALLER bounding
+              // box (0.35 wide vs the old 0.6) so spacing/overlap math
+              // from the locked-in pace/trail/alternation values still holds.
+              const footPath = "M 0 -0.32 C 0.14 -0.32 0.18 -0.2 0.16 -0.05 C 0.15 0.05 0.1 0.08 0.09 0.18 C 0.08 0.28 0.13 0.34 0.06 0.4 C -0.02 0.46 -0.13 0.42 -0.15 0.3 C -0.17 0.18 -0.1 0.1 -0.11 -0.02 C -0.13 -0.18 -0.12 -0.32 0 -0.32 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
