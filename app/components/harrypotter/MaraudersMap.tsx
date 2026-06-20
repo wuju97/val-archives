@@ -627,11 +627,13 @@ export default function MaraudersMap() {
               const unit = units[char.id];
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
-              const FOOT_SEPARATION = 0.75;
-              // Smaller, more elongated print (narrow heel, pointed toe)
-              // instead of the rounder oval — reads as a footprint mark
-              // rather than a blob, and is small enough relative to the
-              // new spacing that consecutive prints touch without overlapping.
+              // FOOT_SEPARATION must be SMALLER than TRAIL_SPACING (the
+              // stride distance) for feet to zigzag across the path's
+              // centerline. If separation exceeds stride, alternating
+              // points form two parallel offset rails instead of crossing
+              // back and forth — verified by direct simulation against
+              // this file's actual route geometry before this fix.
+              const FOOT_SEPARATION = 0.18;
               const footPath = "M 0 -0.42 C 0.12 -0.42 0.17 -0.3 0.16 -0.16 C 0.15 -0.04 0.09 0.0 0.08 0.1 C 0.07 0.2 0.1 0.28 0.04 0.34 C -0.03 0.4 -0.13 0.36 -0.15 0.26 C -0.18 0.12 -0.13 0.0 -0.14 -0.1 C -0.15 -0.22 -0.08 -0.42 0 -0.42 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
@@ -641,12 +643,8 @@ export default function MaraudersMap() {
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
                     const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
                     const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
-                    // TEMPORARY DEBUG: color-code by side to verify alternation
-                    // is actually happening — red = side 1, blue = side -1.
-                    // Remove this debugColor override once confirmed.
-                    const debugColor = t.side === 1 ? "#ff0000" : "#0000ff";
                     return (
-                      <path key={i} d={footPath} fill={debugColor}
+                      <path key={i} d={footPath} fill="#8b2e1f"
                         opacity={Math.max(opacity, 0.05)}
                         transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`} />
                     );
