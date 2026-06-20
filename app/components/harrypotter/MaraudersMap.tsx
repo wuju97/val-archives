@@ -639,13 +639,11 @@ export default function MaraudersMap() {
               // points form two parallel offset rails instead of crossing
               // back and forth — verified by direct simulation against
               // this file's actual route geometry. Keep ratio ~4:1.
-              const FOOT_SEPARATION = 0.5;
-              // Real shoe-sole silhouette with a narrow waist (arch) between
-              // a rounded toe-ball and a rounded heel — verified by direct
-              // coordinate calculation before use: 0.32 max width vs 0.5
-              // separation leaves a 0.18-unit clear gap (no overlap), and
-              // separation/stride ratio of ~1.7:1 gives a visible zigzag.
-              const footPath = "M 0 -0.35 C 0.16 -0.35 0.16 -0.15 0.08 -0.05 C 0.1 0.1 0.13 0.2 0.13 0.35 C 0.065 0.43 -0.065 0.43 -0.13 0.35 C -0.13 0.2 -0.1 0.1 -0.08 -0.05 C -0.16 -0.15 -0.16 -0.35 0 -0.35 Z";
+              const FOOT_SEPARATION = 0.95;
+              // Real shoe-sole silhouette, scaled up significantly per
+              // feedback (was too small) — narrow waist between rounded
+              // toe-ball and rounded heel, same proportions just larger.
+              const footPath = "M 0 -1.05 C 0.48 -1.05 0.48 -0.45 0.24 -0.15 C 0.3 0.3 0.39 0.6 0.39 1.05 C 0.195 1.29 -0.195 1.29 -0.39 1.05 C -0.39 0.6 -0.3 0.3 -0.24 -0.15 C -0.48 -0.45 -0.48 -1.05 0 -1.05 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
