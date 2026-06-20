@@ -678,8 +678,17 @@ export default function MaraudersMap() {
                     // direction of travel — makes the print read as two
                     // legs striding rather than hopping sideways.
                     const strideOffset = 0.04 * t.side;
-                    const fx = t.x + Math.cos(perpAngle) * effectiveSeparation * t.side + Math.cos(forwardAngle) * strideOffset;
-                    const fy = t.y + Math.sin(perpAngle) * effectiveSeparation * t.side + Math.sin(forwardAngle) * strideOffset;
+                    // Slow centerline drift — a gentle whole-body sway,
+                    // applied EQUALLY to both feet (no t.side multiplier
+                    // here, unlike the lateral offset above). This is the
+                    // critical structural difference from the earlier sway
+                    // bug: because this term doesn't multiply by t.side, it
+                    // can never flip sign relative to a given step's
+                    // alternation and cancel it — it just shifts the whole
+                    // stride pattern gently side to side over time.
+                    const drift = Math.sin(t.stepIndex * 0.5) * 0.05;
+                    const fx = t.x + Math.cos(perpAngle) * effectiveSeparation * t.side + Math.cos(forwardAngle) * strideOffset + Math.cos(perpAngle) * drift;
+                    const fy = t.y + Math.sin(perpAngle) * effectiveSeparation * t.side + Math.sin(forwardAngle) * strideOffset + Math.sin(perpAngle) * drift;
                     // Toe flare reduced — heel stays near centerline, only
                     // the toe angles subtly outward, plus the real per-step
                     // rotation variation (t.rotationVariation) generated
