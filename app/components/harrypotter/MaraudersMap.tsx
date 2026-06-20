@@ -410,7 +410,7 @@ export default function MaraudersMap() {
         const totalLen = polylineLength(route);
         const durationMs = Math.max(totalLen * 900, 14000);
         const SPEED_PER_MS = totalLen / durationMs;
-        const TRAIL_SPACING = 0.45;
+        const TRAIL_SPACING = 0.85;
 
         let lastTrailDist = 0;
         let startTime: number | null = null;
@@ -633,8 +633,8 @@ export default function MaraudersMap() {
               // points form two parallel offset rails instead of crossing
               // back and forth — verified by direct simulation against
               // this file's actual route geometry before this fix.
-              const FOOT_SEPARATION = 0.4;
-              const footPath = "M 0 -0.6 C 0.17 -0.6 0.24 -0.43 0.23 -0.23 C 0.21 -0.05 0.13 0.0 0.11 0.15 C 0.09 0.28 0.15 0.4 0.05 0.48 C -0.04 0.57 -0.19 0.51 -0.21 0.36 C -0.25 0.17 -0.17 0.0 -0.2 -0.13 C -0.21 -0.31 -0.11 -0.6 0 -0.6 Z";
+              const FOOT_SEPARATION = 0.65;
+              const footPath = "M 0 -0.95 C 0.27 -0.95 0.38 -0.68 0.36 -0.36 C 0.33 -0.08 0.2 0.0 0.17 0.24 C 0.14 0.44 0.24 0.63 0.08 0.76 C -0.06 0.9 -0.3 0.8 -0.33 0.57 C -0.4 0.27 -0.27 0.0 -0.32 -0.21 C -0.33 -0.49 -0.17 -0.95 0 -0.95 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
