@@ -650,8 +650,8 @@ export default function MaraudersMap() {
               // bulges out on one side and is flatter on the other, like a
               // real boot's natural asymmetry, so left/right mirroring
               // via scale() now actually looks different.
-              const bootSolePath = "M 0.02 -0.4 C 0.1 -0.38 0.18 -0.22 0.17 -0.05 C 0.16 0.08 0.13 0.18 0.1 0.22 L -0.06 0.22 C -0.09 0.16 -0.1 0.05 -0.09 -0.1 C -0.08 -0.25 -0.04 -0.38 0.02 -0.4 Z";
-              const bootHeelPath = "M 0.08 0.32 C 0.12 0.36 0.1 0.46 0.02 0.46 L -0.06 0.46 C -0.1 0.42 -0.09 0.34 -0.05 0.3 Z";
+              const bootSolePath = "M 0.02 -0.4 C 0.14 -0.38 0.21 -0.2 0.2 -0.02 C 0.19 0.12 0.15 0.2 0.1 0.22 L -0.04 0.22 C -0.06 0.16 -0.07 0.05 -0.06 -0.1 C -0.05 -0.25 -0.02 -0.38 0.02 -0.4 Z";
+              const bootHeelPath = "M 0.1 0.32 C 0.15 0.36 0.13 0.46 0.04 0.46 L -0.04 0.46 C -0.07 0.41 -0.06 0.34 -0.03 0.3 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
