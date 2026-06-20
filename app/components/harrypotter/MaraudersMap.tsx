@@ -333,7 +333,7 @@ export default function MaraudersMap() {
   const [loadingChars, setLoadingChars] = useState(false);
   const [characters, setCharacters] = useState<MapCharacter[]>([]);
   const [units, setUnits] = useState<Record<string, CharUnit>>({});
-  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number; side: 1 | -1; stepIndex: number }>>>({});
+  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number; side: 1 | -1; stepIndex: number; widthVariation: number; rotationVariation: number }>>>({});
   const [selected, setSelected] = useState<MapCharacter | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [zoom, setZoom] = useState(1);
@@ -399,9 +399,15 @@ export default function MaraudersMap() {
         const side = stepSide;
         stepSide = stepSide === 1 ? -1 : 1;
         stepIndex++;
+        // Real per-step randomness, generated ONCE here at creation time
+        // (not recomputed every render, which would cause flicker) — small
+        // variation in lateral spacing and rotation so footsteps don't
+        // come from a perfectly rigid rhythm.
+        const widthVariation = (Math.random() - 0.5) * 0.06; // ± a small fraction of FOOT_SEPARATION
+        const rotationVariation = (Math.random() - 0.5) * 8; // ± degrees
         setTrails(prev => {
           const existing = prev[char.id] || [];
-          const next = [...existing, { x, y, angle, side, stepIndex }];
+          const next = [...existing, { x, y, angle, side, stepIndex, widthVariation, rotationVariation }];
           return { ...prev, [char.id]: next.slice(-10) };
         });
       }
@@ -642,38 +648,19 @@ export default function MaraudersMap() {
               const unit = units[char.id];
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
-              // FOOT_SEPARATION must be SMALLER than TRAIL_SPACING (the
-              // stride distance) for feet to zigzag across the path's
-              // centerline. If separation exceeds stride, alternating
-              // points form two parallel offset rails instead of crossing
-              // back and forth — verified by direct simulation against
-              // this file's actual route geometry. Keep ratio ~4:1.
-              const FOOT_SEPARATION = 0.45;
+              // Narrowed per feedback: separation should be a small fraction
+              // of stride (TRAIL_SPACING = 0.55 in the movement effect),
+              // for a believable narrow walking stance — heel near
+              // centerline, small footOffset, not wide-legged. Written as
+              // a literal since TRAIL_SPACING is scoped inside the
+              // movement effect, not accessible here.
+              const FOOT_SEPARATION = 0.165; // 0.55 * 0.3
               // Two-piece boot print: a pointed-toe sole (front) and a
               // separate squared heel block (back), with a small but
               // visible gap between them — like a riding/dress boot
               // imprint, not a single continuous foot outline.
-              // Genuinely ASYMMETRIC boot shapes this time — previous shape
-              // was accidentally near-perfectly symmetric (average X ≈ 0),
-              // so mirroring it produced no visible difference. This sole
-              // bulges out on one side and is flatter on the other, like a
-              // real boot's natural asymmetry, so left/right mirroring
-              // via scale() now actually looks different.
               const bootSolePath = "M -0.02 -0.4 C 0.1 -0.43 0.2 -0.32 0.21 -0.16 C 0.22 -0.0 0.19 0.12 0.1 0.22 L -0.04 0.22 C -0.06 0.16 -0.07 0.05 -0.06 -0.1 C -0.07 -0.26 -0.09 -0.36 -0.02 -0.4 Z";
               const bootHeelPath = "M 0.1 0.32 C 0.15 0.36 0.13 0.46 0.04 0.46 L -0.04 0.46 C -0.07 0.41 -0.06 0.34 -0.03 0.3 Z";
-
-              // Same deterministic gait fingerprint as the movement effect
-              // (recomputed here from char.id, not stored separately) —
-              // drives per-step width jitter and toe flare so footprints
-              // don't sit at a perfectly constant left-right distance.
-              let seed = 0;
-              for (let k = 0; k < char.id.length; k++) seed = (seed * 31 + char.id.charCodeAt(k)) % 10000;
-              function seededRand(offset: number) {
-                const v = Math.sin(seed + offset) * 10000;
-                return v - Math.floor(v);
-              }
-              const gaitWidthJitter = 0.04 + seededRand(3) * 0.05;
-              const gaitToeFlare = 8 + seededRand(4) * 10;
 
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
@@ -682,27 +669,23 @@ export default function MaraudersMap() {
                     const opacity = Math.max(0.85 * (1 - ageFactor * 0.85), 0.05);
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
                     const forwardAngle = t.angle * Math.PI / 180;
-                    // Per-step width jitter — real stride width varies
-                    // slightly step to step rather than staying a perfectly
-                    // constant distance, which is what reads as "robotic."
-                    const stepWidthVariation = Math.sin(t.stepIndex * 0.7) * gaitWidthJitter;
-                    const effectiveSeparation = FOOT_SEPARATION + stepWidthVariation;
+                    // Real per-step width variation, generated once at
+                    // creation time (t.widthVariation) — small, ± a
+                    // fraction of FOOT_SEPARATION, not a perfectly rigid
+                    // rhythm.
+                    const effectiveSeparation = FOOT_SEPARATION + t.widthVariation;
                     // Small independent forward/backward nudge along the
-                    // direction of travel, in addition to the existing
-                    // left-right offset — this is what makes the print read
-                    // as two legs striding (one foot slightly ahead, one
-                    // slightly behind) rather than one leg hopping sideways
-                    // along a single line. FOOT_SEPARATION itself (the
-                    // perpendicular distance) is completely unchanged.
-                    const strideOffset = 0.12 * t.side;
+                    // direction of travel — makes the print read as two
+                    // legs striding rather than hopping sideways.
+                    const strideOffset = 0.04 * t.side;
                     const fx = t.x + Math.cos(perpAngle) * effectiveSeparation * t.side + Math.cos(forwardAngle) * strideOffset;
                     const fy = t.y + Math.sin(perpAngle) * effectiveSeparation * t.side + Math.sin(forwardAngle) * strideOffset;
-                    // Toe flare — each foot angles slightly outward (away
-                    // from centerline) rather than pointing exactly along
-                    // the direction of travel, like a real walking stance.
+                    // Toe flare reduced — heel stays near centerline, only
+                    // the toe angles subtly outward, plus the real per-step
+                    // rotation variation (t.rotationVariation) generated
+                    // once at creation time.
                     const flareSign = t.side === 1 ? 1 : -1;
-                    const toeFlareJitter = (seededRand(t.stepIndex) - 0.5) * 6; // small per-step variation
-                    const footRotation = t.angle + 90 + flareSign * gaitToeFlare + toeFlareJitter;
+                    const footRotation = t.angle + 90 + flareSign * 5 + t.rotationVariation;
                     return (
                       <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${footRotation}) scale(${t.side === 1 ? 1 : -1} 1)`}>
                         <path d={bootSolePath} fill="#5c1f12" />
