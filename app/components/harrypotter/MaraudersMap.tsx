@@ -642,8 +642,8 @@ export default function MaraudersMap() {
                     const rightY = t.y - Math.sin(perpAngle) * FOOT_SEPARATION;
                     return (
                       <g key={i} opacity={Math.max(opacity, 0.04)}>
-                        <path d={footPath} fill="#8b2e1f" transform={`translate(${leftX} ${leftY}) rotate(${t.angle})`} />
-                        <path d={footPath} fill="#8b2e1f" transform={`translate(${rightX} ${rightY}) rotate(${t.angle})`} />
+                        <path d={footPath} fill="#8b2e1f" transform={`translate(${leftX} ${leftY}) rotate(${t.angle + 90})`} />
+                        <path d={footPath} fill="#8b2e1f" transform={`translate(${rightX} ${rightY}) rotate(${t.angle + 90})`} />
                       </g>
                     );
                   })}
@@ -660,8 +660,8 @@ export default function MaraudersMap() {
                     const nameY = unit.y + Math.sin(nameRad) * nameDist;
                     return (
                       <g onClick={() => setSelected(char)} style={{ cursor: "pointer" }}>
-                        <path d={footPath} fill="#8b2e1f" opacity="0.92" transform={`translate(${leftX} ${leftY}) rotate(${unit.angle})`} />
-                        <path d={footPath} fill="#8b2e1f" opacity="0.92" transform={`translate(${rightX} ${rightY}) rotate(${unit.angle})`} />
+                        <path d={footPath} fill="#8b2e1f" opacity="0.92" transform={`translate(${leftX} ${leftY}) rotate(${unit.angle + 90})`} />
+                        <path d={footPath} fill="#8b2e1f" opacity="0.92" transform={`translate(${rightX} ${rightY}) rotate(${unit.angle + 90})`} />
                         <text x={nameX} y={nameY} textAnchor="middle" dominantBaseline="middle"
                           transform={`rotate(${unit.angle} ${nameX} ${nameY})`}
                           style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.7px", fill: isMatched ? "#a84a2f" : "#3d2814", letterSpacing: "0.02em" }}>
