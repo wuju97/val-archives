@@ -652,12 +652,21 @@ export default function MaraudersMap() {
                     const ageFactor = 1 - i / trail.length;
                     const opacity = Math.max(0.85 * (1 - ageFactor * 0.85), 0.05);
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
-                    const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
-                    const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
+                    const forwardAngle = t.angle * Math.PI / 180;
+                    // Small independent forward/backward nudge along the
+                    // direction of travel, in addition to the existing
+                    // left-right offset — this is what makes the print read
+                    // as two legs striding (one foot slightly ahead, one
+                    // slightly behind) rather than one leg hopping sideways
+                    // along a single line. FOOT_SEPARATION itself (the
+                    // perpendicular distance) is completely unchanged.
+                    const strideOffset = 0.12 * t.side;
+                    const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side + Math.cos(forwardAngle) * strideOffset;
+                    const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side + Math.sin(forwardAngle) * strideOffset;
                     return (
                       <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`}>
-                        <path d={bootSolePath} fill="#8b2e1f" />
-                        <path d={bootHeelPath} fill="#8b2e1f" />
+                        <path d={bootSolePath} fill="#5c1f12" />
+                        <path d={bootHeelPath} fill="#5c1f12" />
                       </g>
                     );
                   })}
