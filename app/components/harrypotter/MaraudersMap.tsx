@@ -416,7 +416,7 @@ export default function MaraudersMap() {
         // alternating feet stop crossing the centerline and instead form
         // two parallel offset rails — this was a real bug, fixed by
         // keeping this ratio. Do not change one without the other.
-        const TRAIL_SPACING = 0.85;
+        const TRAIL_SPACING = 0.55;
 
         let lastTrailDist = 0;
         let startTime: number | null = null;
@@ -639,11 +639,12 @@ export default function MaraudersMap() {
               // points form two parallel offset rails instead of crossing
               // back and forth — verified by direct simulation against
               // this file's actual route geometry. Keep ratio ~4:1.
-              const FOOT_SEPARATION = 0.95;
-              // Real shoe-sole silhouette, scaled up significantly per
-              // feedback (was too small) — narrow waist between rounded
-              // toe-ball and rounded heel, same proportions just larger.
-              const footPath = "M 0 -1.05 C 0.48 -1.05 0.48 -0.45 0.24 -0.15 C 0.3 0.3 0.39 0.6 0.39 1.05 C 0.195 1.29 -0.195 1.29 -0.39 1.05 C -0.39 0.6 -0.3 0.3 -0.24 -0.15 C -0.48 -0.45 -0.48 -1.05 0 -1.05 Z";
+              const FOOT_SEPARATION = 0.45;
+              // Small irregular ink-blot shape matching the reference photo —
+              // organic, slightly uneven rounded blob rather than a clean
+              // geometric shoe outline. Verified: 0.66 max dimension vs 1.05
+              // min center-to-center spacing along the actual route = safe gap.
+              const footPath = "M 0 -0.3 C 0.22 -0.32 0.32 -0.15 0.28 0.05 C 0.25 0.22 0.15 0.3 0.02 0.32 C -0.13 0.34 -0.27 0.24 -0.29 0.06 C -0.31 -0.13 -0.2 -0.28 0 -0.3 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
