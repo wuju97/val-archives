@@ -15,7 +15,7 @@ type IconKind = "castle" | "hut" | "tree" | "hoops" | "shed" | "greenhouse" | "s
 interface LocationPoint {
   name: string;
   icon: IconKind;
-  x: number; y: number; // both the icon position AND the path anchor point
+  x: number; y: number;
   labelOffset?: { x: number; y: number };
 }
 
@@ -33,11 +33,6 @@ const LOCATION_BY_NAME: Record<string, LocationPoint> = LOCATIONS.reduce(
   (acc, l) => ({ ...acc, [l.name]: l }), {} as Record<string, LocationPoint>
 );
 
-// ── Path network — actual connecting routes between locations, each as a
-// SMOOTH curve (many sampled points via quadratic interpolation through a
-// control point), not a straight ruler line and not a private loop. This
-// is what fixes the "footprints don't curve" issue: more sample points
-// per segment means the per-point angle genuinely changes along the route.
 interface PathLink { from: string; to: string; control?: { x: number; y: number } }
 
 const PATH_LINKS: PathLink[] = [
@@ -56,9 +51,6 @@ function quadraticPoint(p0: { x: number; y: number }, ctrl: { x: number; y: numb
   return { x, y };
 }
 
-// Builds a densely-sampled point list for a curved path link — many points
-// (40) so the per-segment angle changes smoothly along the curve, instead
-// of a handful of long straight chords that read as "not curving."
 function buildCurvedRoute(link: PathLink): Array<{ x: number; y: number }> {
   const from = LOCATION_BY_NAME[link.from];
   const to = LOCATION_BY_NAME[link.to];
@@ -270,7 +262,7 @@ function TitleBanner() {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// AI POPULATION — capped at exactly 2 characters now
+// AI POPULATION
 // ════════════════════════════════════════════════════════════════════════
 
 interface MapCharacter { id: string; name: string; location: string; rumor: string }
@@ -394,21 +386,17 @@ export default function MaraudersMap() {
     }, 500);
   }, [clearAllTimers]);
 
-  // ── Movement: walk the actual curved path network between locations,
-  // never freelancing off the drawn routes. Per-point angle now changes
-  // smoothly because each route has 40 sampled points, so footprints
-  // visibly bend along curves instead of forming long straight runs.
   useEffect(() => {
     if (phase !== "open" || characters.length === 0) return;
     const rafIds: number[] = [];
 
     characters.forEach(char => {
       let currentLocation = char.location;
-      let stepSide: 1 | -1 = 1; // alternates every single drop — true gait, not a paired stamp
+      let stepSide: 1 | -1 = 1;
 
       function dropTrailPoint(x: number, y: number, angle: number) {
         const side = stepSide;
-        stepSide = stepSide === 1 ? -1 : 1; // flip for next step
+        stepSide = stepSide === 1 ? -1 : 1;
         setTrails(prev => {
           const existing = prev[char.id] || [];
           const next = [...existing, { x, y, angle, side }];
@@ -433,6 +421,12 @@ export default function MaraudersMap() {
           const traveled = Math.min(elapsed * SPEED_PER_MS, totalLen);
           const { x, y, angle } = pointAtDistance(route, traveled);
 
+          // Unit position still updates every frame (smooth glide for
+          // whatever else might reference it, e.g. future click targets),
+          // but it is NO LONGER independently rendered with its own pair
+          // of feet — see render section below. That was the actual bug:
+          // a dense 60fps-updated "always both feet" line was drawn on
+          // top of the correctly-alternating trail, visually burying it.
           setUnits(prev => ({ ...prev, [char.id]: { x, y, angle } }));
 
           if (traveled - lastTrailDist >= TRAIL_SPACING || traveled >= totalLen) {
@@ -604,9 +598,6 @@ export default function MaraudersMap() {
               })}
             </g>
 
-            {/* ── Path network — actual visible connecting routes between
-                locations, drawn as soft curved dotted ink lines, matching
-                the user's reference image's path-connection request. ── */}
             {ROUTES.map((r, i) => (
               <path key={i} d={polylineToPathD(r.points)} fill="none"
                 stroke="#5c3a1e" strokeWidth="0.14" strokeOpacity="0.4" strokeDasharray="0.4 0.5" strokeLinecap="round" />
@@ -624,8 +615,13 @@ export default function MaraudersMap() {
               </g>
             ))}
 
-            {/* ── CHARACTER UNITS — max 2, paired L/R footprints that now
-                visibly bend along the curved route, plain rotating name ── */}
+            {/* ── CHARACTER UNITS — max 2. The footprint trail is now the
+                ONLY thing drawing feet (one alternating L/R foot per trail
+                point). The live unit position drives where the NAME sits,
+                but no longer independently draws its own pair of feet —
+                that was the bug: a 60fps-dense "always both feet" line was
+                rendered on top of the trail every frame, visually masking
+                the correctly-alternating dots underneath it. ── */}
             {characters.map(char => {
               const trail = trails[char.id] || [];
               const unit = units[char.id];
@@ -637,40 +633,32 @@ export default function MaraudersMap() {
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
                     const ageFactor = 1 - i / trail.length;
-                    const opacity = 0.6 * (1 - ageFactor * 0.85);
+                    const opacity = 0.7 * (1 - ageFactor * 0.8);
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
-                    // ONE foot per trail point, on the side it was actually
-                    // stepped — true alternating gait (L, R, L, R...) rather
-                    // than stamping both feet together at every point.
                     const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
                     const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
                     return (
                       <path key={i} d={footPath} fill="#8b2e1f"
-                        opacity={Math.max(opacity, 0.04)}
+                        opacity={Math.max(opacity, 0.05)}
                         transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`} />
                     );
                   })}
 
                   {unit && (() => {
-                    const perpAngle = (unit.angle + 90) * Math.PI / 180;
-                    const leftX = unit.x + Math.cos(perpAngle) * FOOT_SEPARATION;
-                    const leftY = unit.y + Math.sin(perpAngle) * FOOT_SEPARATION;
-                    const rightX = unit.x - Math.cos(perpAngle) * FOOT_SEPARATION;
-                    const rightY = unit.y - Math.sin(perpAngle) * FOOT_SEPARATION;
                     const nameDist = 2.6;
                     const nameRad = unit.angle * Math.PI / 180;
                     const nameX = unit.x + Math.cos(nameRad) * nameDist;
                     const nameY = unit.y + Math.sin(nameRad) * nameDist;
                     return (
-                      <g onClick={() => setSelected(char)} style={{ cursor: "pointer" }}>
-                        <path d={footPath} fill="#8b2e1f" opacity="0.92" transform={`translate(${leftX} ${leftY}) rotate(${unit.angle + 90})`} />
-                        <path d={footPath} fill="#8b2e1f" opacity="0.92" transform={`translate(${rightX} ${rightY}) rotate(${unit.angle + 90})`} />
-                        <text x={nameX} y={nameY} textAnchor="middle" dominantBaseline="middle"
-                          transform={`rotate(${unit.angle} ${nameX} ${nameY})`}
-                          style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.7px", fill: isMatched ? "#a84a2f" : "#3d2814", letterSpacing: "0.02em" }}>
+                      <text x={nameX} y={nameY} textAnchor="middle" dominantBaseline="middle"
+                        transform={`rotate(${unit.angle} ${nameX} ${nameY})`}
+                        onClick={() => setSelected(char)} style={{ cursor: "pointer" }}
+                        className="va-hogwarts-glow"
+                      >
+                        <tspan style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.7px", fill: isMatched ? "#a84a2f" : "#3d2814", letterSpacing: "0.02em" }}>
                           {char.name}
-                        </text>
-                      </g>
+                        </tspan>
+                      </text>
                     );
                   })()}
                 </g>
