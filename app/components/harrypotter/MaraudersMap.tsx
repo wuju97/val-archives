@@ -639,10 +639,13 @@ export default function MaraudersMap() {
               // points form two parallel offset rails instead of crossing
               // back and forth — verified by direct simulation against
               // this file's actual route geometry. Keep ratio ~4:1.
-              const FOOT_SEPARATION = 0.22;
-              // Asymmetric shoe-print silhouette: rounder wider heel at the
-              // back, narrower slightly-pointed toe at the front.
-              const footPath = "M 0 -1.0 C 0.2 -1.0 0.32 -0.82 0.3 -0.6 C 0.28 -0.4 0.18 -0.32 0.22 -0.1 C 0.27 0.16 0.36 0.32 0.3 0.55 C 0.24 0.78 0.05 0.92 0 0.92 C -0.05 0.92 -0.24 0.78 -0.3 0.55 C -0.36 0.32 -0.27 0.16 -0.22 -0.1 C -0.18 -0.32 -0.28 -0.4 -0.3 -0.6 C -0.32 -0.82 -0.2 -1.0 0 -1.0 Z";
+              const FOOT_SEPARATION = 0.5;
+              // Real shoe-sole silhouette with a narrow waist (arch) between
+              // a rounded toe-ball and a rounded heel — verified by direct
+              // coordinate calculation before use: 0.32 max width vs 0.5
+              // separation leaves a 0.18-unit clear gap (no overlap), and
+              // separation/stride ratio of ~1.7:1 gives a visible zigzag.
+              const footPath = "M 0 -0.35 C 0.16 -0.35 0.16 -0.15 0.08 -0.05 C 0.1 0.1 0.13 0.2 0.13 0.35 C 0.065 0.43 -0.065 0.43 -0.13 0.35 C -0.13 0.2 -0.1 0.1 -0.08 -0.05 C -0.16 -0.15 -0.16 -0.35 0 -0.35 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
@@ -652,7 +655,7 @@ export default function MaraudersMap() {
                     const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
                     const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
                     return (
-                      <path key={i} d={footPath} fill="#3d2b1f"
+                      <path key={i} d={footPath} fill="#8b2e1f"
                         opacity={opacity}
                         transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`} />
                     );
