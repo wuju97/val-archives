@@ -130,41 +130,6 @@ function buildForestTrees(): Array<{ x: number; y: number; r: number }> {
 }
 const FOREST_TREES = buildForestTrees();
 
-// ── Footprint glyphs — ink-drawn shoe shape with 5 small toe marks,
-// left/right mirrored via scale(-1 1), matching the film prop's footprint
-// style rather than a generic ellipse or emoji. Slightly irregular path
-// curves and aged-ink brown (#3d2b1f) instead of pure black.
-function LeftFootprint({ x, y, rotation, opacity }: { x: number; y: number; rotation: number; opacity: number }) {
-  return (
-    <g transform={`translate(${x} ${y}) rotate(${rotation})`} opacity={opacity} filter="url(#inkBleed)">
-      <path
-        d="M0 -0.8 C0.4 -0.7 0.5 -0.2 0.45 0.4 C0.35 0.9 -0.1 1.1 -0.35 0.7 C-0.55 0.4 -0.5 -0.2 -0.3 -0.6 C-0.2 -0.8 -0.1 -0.85 0 -0.8"
-        fill="#3d2b1f"
-      />
-      <circle cx="-0.35" cy="-1.15" r="0.12" fill="#3d2b1f" />
-      <circle cx="-0.15" cy="-1.3" r="0.11" fill="#3d2b1f" />
-      <circle cx="0.05" cy="-1.35" r="0.10" fill="#3d2b1f" />
-      <circle cx="0.22" cy="-1.22" r="0.09" fill="#3d2b1f" />
-      <circle cx="0.35" cy="-1.0" r="0.08" fill="#3d2b1f" />
-    </g>
-  );
-}
-function RightFootprint({ x, y, rotation, opacity }: { x: number; y: number; rotation: number; opacity: number }) {
-  return (
-    <g transform={`translate(${x} ${y}) rotate(${rotation}) scale(-1 1)`} opacity={opacity} filter="url(#inkBleed)">
-      <path
-        d="M0 -0.8 C0.4 -0.7 0.5 -0.2 0.45 0.4 C0.35 0.9 -0.1 1.1 -0.35 0.7 C-0.55 0.4 -0.5 -0.2 -0.3 -0.6 C-0.2 -0.8 -0.1 -0.85 0 -0.8"
-        fill="#3d2b1f"
-      />
-      <circle cx="-0.35" cy="-1.15" r="0.12" fill="#3d2b1f" />
-      <circle cx="-0.15" cy="-1.3" r="0.11" fill="#3d2b1f" />
-      <circle cx="0.05" cy="-1.35" r="0.10" fill="#3d2b1f" />
-      <circle cx="0.22" cy="-1.22" r="0.09" fill="#3d2b1f" />
-      <circle cx="0.35" cy="-1.0" r="0.08" fill="#3d2b1f" />
-    </g>
-  );
-}
-
 function LocationIcon({ kind, x, y }: { kind: IconKind; x: number; y: number }) {
   const stroke = "#3d2814";
   switch (kind) {
@@ -368,7 +333,7 @@ export default function MaraudersMap() {
   const [loadingChars, setLoadingChars] = useState(false);
   const [characters, setCharacters] = useState<MapCharacter[]>([]);
   const [units, setUnits] = useState<Record<string, CharUnit>>({});
-  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number }>>>({});
+  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number; side: 1 | -1 }>>>({});
   const [selected, setSelected] = useState<MapCharacter | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [zoom, setZoom] = useState(1);
@@ -427,10 +392,13 @@ export default function MaraudersMap() {
 
     characters.forEach(char => {
       let currentLocation = char.location;
+      let stepSide: 1 | -1 = 1;
       function dropTrailPoint(x: number, y: number, angle: number) {
+        const side = stepSide;
+        stepSide = stepSide === 1 ? -1 : 1;
         setTrails(prev => {
           const existing = prev[char.id] || [];
-          const next = [...existing, { x, y, angle }];
+          const next = [...existing, { x, y, angle, side }];
           return { ...prev, [char.id]: next.slice(-10) };
         });
       }
@@ -446,11 +414,9 @@ export default function MaraudersMap() {
         // section). Real walking has small side-to-side sway relative to
         // forward progress. If separation approaches or exceeds stride,
         // alternating feet stop crossing the centerline and instead form
-        // two parallel offset rails — this was a real bug fixed earlier.
-        // Per the paired-stamp design: spawn a footprint PAIR roughly every
-        // 0.8-1.0 distance units of travel, not every single alternating
-        // foot — gives the "LR  LR  LR" walking-pair look.
-        const TRAIL_SPACING = 0.9;
+        // two parallel offset rails — this was a real bug, fixed by
+        // keeping this ratio. Do not change one without the other.
+        const TRAIL_SPACING = 0.85;
 
         let lastTrailDist = 0;
         let startTime: number | null = null;
@@ -596,9 +562,6 @@ export default function MaraudersMap() {
             <radialGradient id="va-ink-stain" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor="#5c3a1e" stopOpacity="0.18" /><stop offset="100%" stopColor="#5c3a1e" stopOpacity="0" />
             </radialGradient>
-            <filter id="inkBleed">
-              <feGaussianBlur stdDeviation="0.05" />
-            </filter>
           </defs>
 
           <g transform={`translate(${pan.x / 8} ${pan.y / 8}) scale(${zoom})`} style={{ transformOrigin: "50% 50%" }}>
@@ -675,28 +638,23 @@ export default function MaraudersMap() {
               // centerline. If separation exceeds stride, alternating
               // points form two parallel offset rails instead of crossing
               // back and forth — verified by direct simulation against
-              // this file's actual route geometry before this fix.
-              // Per spec: a tight FOOT_SPACING between the two prints of a
-              // pair, small relative to TRAIL_SPACING between pairs — this
-              // is what makes it read as "LR  LR  LR" walking pairs rather
-              // than two parallel rails (the pair itself is narrow; only
-              // the forward stride between pairs is the dominant motion).
-              const FOOT_SPACING = 0.7;
+              // this file's actual route geometry. Keep ratio ~4:1.
+              const FOOT_SEPARATION = 0.22;
+              // Asymmetric shoe-print silhouette: rounder wider heel at the
+              // back, narrower slightly-pointed toe at the front.
+              const footPath = "M 0 -1.0 C 0.2 -1.0 0.32 -0.82 0.3 -0.6 C 0.28 -0.4 0.18 -0.32 0.22 -0.1 C 0.27 0.16 0.36 0.32 0.3 0.55 C 0.24 0.78 0.05 0.92 0 0.92 C -0.05 0.92 -0.24 0.78 -0.3 0.55 C -0.36 0.32 -0.27 0.16 -0.22 -0.1 C -0.18 -0.32 -0.28 -0.4 -0.3 -0.6 C -0.32 -0.82 -0.2 -1.0 0 -1.0 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
                     const ageFactor = 1 - i / trail.length;
                     const opacity = Math.max(0.85 * (1 - ageFactor * 0.85), 0.05);
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
-                    const leftX = t.x + Math.cos(perpAngle) * (FOOT_SPACING / 2);
-                    const leftY = t.y + Math.sin(perpAngle) * (FOOT_SPACING / 2);
-                    const rightX = t.x - Math.cos(perpAngle) * (FOOT_SPACING / 2);
-                    const rightY = t.y - Math.sin(perpAngle) * (FOOT_SPACING / 2);
+                    const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
+                    const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
                     return (
-                      <g key={i}>
-                        <LeftFootprint x={leftX} y={leftY} rotation={t.angle + 90} opacity={opacity} />
-                        <RightFootprint x={rightX} y={rightY} rotation={t.angle + 90} opacity={opacity} />
-                      </g>
+                      <path key={i} d={footPath} fill="#3d2b1f"
+                        opacity={opacity}
+                        transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`} />
                     );
                   })}
 
