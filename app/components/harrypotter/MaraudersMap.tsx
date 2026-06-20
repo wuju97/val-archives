@@ -1,4 +1,4 @@
-"use client";
+ "use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { loadArchive } from "@/lib/archiveEngine";
@@ -657,7 +657,6 @@ export default function MaraudersMap() {
                     const nameY = unit.y + Math.sin(nameRad) * nameDist;
                     return (
                       <text x={nameX} y={nameY} textAnchor="middle" dominantBaseline="middle"
-                        transform={`rotate(${unit.angle} ${nameX} ${nameY})`}
                         onClick={() => setSelected(char)} style={{ cursor: "pointer" }}
                         className="va-hogwarts-glow"
                       >
