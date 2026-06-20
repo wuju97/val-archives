@@ -627,7 +627,7 @@ export default function MaraudersMap() {
               const unit = units[char.id];
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
-              const FOOT_SEPARATION = 0.5;
+              const FOOT_SEPARATION = 1.3;
               // Smaller, more elongated print (narrow heel, pointed toe)
               // instead of the rounder oval — reads as a footprint mark
               // rather than a blob, and is small enough relative to the
