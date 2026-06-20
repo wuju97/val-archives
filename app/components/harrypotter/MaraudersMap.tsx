@@ -5,49 +5,86 @@ import { loadArchive } from "@/lib/archiveEngine";
 import { geminiQualityCallFor, hasGeminiQualityKey3, hasGeminiQualityKey, hasGeminiQualityKey2 } from "@/lib/geminiEngine";
 
 // ════════════════════════════════════════════════════════════════════════
-// LAYOUT — matches the user's hand-drawn Hogwarts grounds sketch:
-// boundary wall ring with a Hogsmeade gate at the top, central lake with
-// the castle just north of it, broom shed + Quidditch ground to the west,
-// Hagrid's Hut/Pumpkin Patch + Whomping Willow + Greenhouses to the east,
-// Forbidden Forest filling the east edge, Hogsmeade Station + railway
-// along the bottom. Each location gets a small icon glyph, not just text.
+// LOCATIONS — fixed anchor points (not loop shapes). Characters travel
+// BETWEEN these along the drawn path network below, never freelancing
+// off-path. Matches the user's sketch composition.
 // ════════════════════════════════════════════════════════════════════════
 
 type IconKind = "castle" | "hut" | "tree" | "hoops" | "shed" | "greenhouse" | "station" | "none";
 
-interface WanderPath {
-  zoneName: string;
+interface LocationPoint {
+  name: string;
   icon: IconKind;
-  iconPos: { x: number; y: number };
-  points: Array<{ x: number; y: number }>; // closed loop for wandering
+  x: number; y: number; // both the icon position AND the path anchor point
+  labelOffset?: { x: number; y: number };
 }
 
-const WANDER_PATHS: WanderPath[] = [
-  { zoneName: "Hogwarts", icon: "castle", iconPos: { x: 48, y: 46 }, points: [
-    { x: 38, y: 42 }, { x: 48, y: 38 }, { x: 60, y: 42 }, { x: 58, y: 52 }, { x: 44, y: 54 }, { x: 36, y: 50 }, { x: 38, y: 42 },
-  ]},
-  { zoneName: "Broom Shed", icon: "shed", iconPos: { x: 28, y: 44 }, points: [
-    { x: 22, y: 38 }, { x: 32, y: 38 }, { x: 34, y: 46 }, { x: 26, y: 50 }, { x: 20, y: 46 }, { x: 22, y: 38 },
-  ]},
-  { zoneName: "Quidditch Ground", icon: "hoops", iconPos: { x: 28, y: 24 }, points: [
-    { x: 16, y: 18 }, { x: 36, y: 16 }, { x: 40, y: 26 }, { x: 30, y: 32 }, { x: 14, y: 28 }, { x: 16, y: 18 },
-  ]},
-  { zoneName: "Hagrid's Hut", icon: "hut", iconPos: { x: 76, y: 18 }, points: [
-    { x: 68, y: 12 }, { x: 80, y: 10 }, { x: 84, y: 18 }, { x: 76, y: 24 }, { x: 66, y: 20 }, { x: 68, y: 12 },
-  ]},
-  { zoneName: "Whomping Willow", icon: "tree", iconPos: { x: 70, y: 34 }, points: [
-    { x: 62, y: 28 }, { x: 76, y: 26 }, { x: 80, y: 36 }, { x: 70, y: 42 }, { x: 60, y: 38 }, { x: 62, y: 28 },
-  ]},
-  { zoneName: "Greenhouses", icon: "greenhouse", iconPos: { x: 64, y: 50 }, points: [
-    { x: 58, y: 46 }, { x: 70, y: 44 }, { x: 72, y: 52 }, { x: 62, y: 56 }, { x: 56, y: 52 }, { x: 58, y: 46 },
-  ]},
-  { zoneName: "Forbidden Forest", icon: "tree", iconPos: { x: 90, y: 40 }, points: [
-    { x: 84, y: 16 }, { x: 96, y: 20 }, { x: 96, y: 60 }, { x: 86, y: 64 }, { x: 80, y: 40 }, { x: 84, y: 16 },
-  ]},
-  { zoneName: "Hogsmeade Station", icon: "station", iconPos: { x: 68, y: 88 }, points: [
-    { x: 58, y: 84 }, { x: 76, y: 82 }, { x: 80, y: 90 }, { x: 70, y: 94 }, { x: 56, y: 92 }, { x: 58, y: 84 },
-  ]},
+const LOCATIONS: LocationPoint[] = [
+  { name: "Hogwarts", icon: "castle", x: 48, y: 46, labelOffset: { x: 0, y: 5 } },
+  { name: "Broom Shed", icon: "shed", x: 26, y: 44, labelOffset: { x: 0, y: 3.5 } },
+  { name: "Quidditch Ground", icon: "hoops", x: 26, y: 20, labelOffset: { x: 0, y: -3.5 } },
+  { name: "Hagrid's Hut", icon: "hut", x: 76, y: 16, labelOffset: { x: 0, y: 4 } },
+  { name: "Whomping Willow", icon: "tree", x: 70, y: 34, labelOffset: { x: 0, y: 4.5 } },
+  { name: "Greenhouses", icon: "greenhouse", x: 66, y: 50, labelOffset: { x: 0, y: 4.5 } },
+  { name: "Hogsmeade Station", icon: "station", x: 64, y: 88, labelOffset: { x: 0, y: 4 } },
 ];
+
+const LOCATION_BY_NAME: Record<string, LocationPoint> = LOCATIONS.reduce(
+  (acc, l) => ({ ...acc, [l.name]: l }), {} as Record<string, LocationPoint>
+);
+
+// ── Path network — actual connecting routes between locations, each as a
+// SMOOTH curve (many sampled points via quadratic interpolation through a
+// control point), not a straight ruler line and not a private loop. This
+// is what fixes the "footprints don't curve" issue: more sample points
+// per segment means the per-point angle genuinely changes along the route.
+interface PathLink { from: string; to: string; control?: { x: number; y: number } }
+
+const PATH_LINKS: PathLink[] = [
+  { from: "Hogwarts", to: "Broom Shed", control: { x: 32, y: 38 } },
+  { from: "Broom Shed", to: "Quidditch Ground", control: { x: 22, y: 32 } },
+  { from: "Hogwarts", to: "Whomping Willow", control: { x: 62, y: 36 } },
+  { from: "Whomping Willow", to: "Hagrid's Hut", control: { x: 76, y: 24 } },
+  { from: "Hogwarts", to: "Greenhouses", control: { x: 58, y: 50 } },
+  { from: "Greenhouses", to: "Hogsmeade Station", control: { x: 68, y: 70 } },
+  { from: "Hogwarts", to: "Hogsmeade Station", control: { x: 50, y: 70 } },
+];
+
+function quadraticPoint(p0: { x: number; y: number }, ctrl: { x: number; y: number }, p1: { x: number; y: number }, t: number) {
+  const x = (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * ctrl.x + t * t * p1.x;
+  const y = (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * ctrl.y + t * t * p1.y;
+  return { x, y };
+}
+
+// Builds a densely-sampled point list for a curved path link — many points
+// (40) so the per-segment angle changes smoothly along the curve, instead
+// of a handful of long straight chords that read as "not curving."
+function buildCurvedRoute(link: PathLink): Array<{ x: number; y: number }> {
+  const from = LOCATION_BY_NAME[link.from];
+  const to = LOCATION_BY_NAME[link.to];
+  const ctrl = link.control ?? { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  const SAMPLES = 40;
+  const pts: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    pts.push(quadraticPoint(from, ctrl, to, i / SAMPLES));
+  }
+  return pts;
+}
+
+const ROUTES: Array<{ from: string; to: string; points: Array<{ x: number; y: number }> }> =
+  PATH_LINKS.map(link => ({ from: link.from, to: link.to, points: buildCurvedRoute(link) }));
+
+const ROUTE_BY_PAIR: Record<string, Array<{ x: number; y: number }>> = {};
+for (const r of ROUTES) {
+  ROUTE_BY_PAIR[`${r.from}::${r.to}`] = r.points;
+  ROUTE_BY_PAIR[`${r.to}::${r.from}`] = [...r.points].reverse();
+}
+const ADJACENCY: Record<string, string[]> = {};
+for (const r of ROUTES) {
+  (ADJACENCY[r.from] ||= []).push(r.to);
+  (ADJACENCY[r.to] ||= []).push(r.from);
+}
+const LOCATION_NAMES = Object.keys(ADJACENCY);
 
 function polylineLength(points: Array<{ x: number; y: number }>): number {
   let total = 0;
@@ -73,30 +110,21 @@ function pointAtDistance(points: Array<{ x: number; y: number }>, dist: number):
   return { x: last.x, y: last.y, angle: 0 };
 }
 function polylineToPathD(points: Array<{ x: number; y: number }>): string {
-  return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ") + " Z";
+  return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// TERRAIN — boundary wall (ring with a gate gap at the top), lake, and
-// the Forbidden Forest's dense tree mass, all drawn as actual shapes
-// matching the sketch's composition rather than abstract labels.
+// TERRAIN
 // ════════════════════════════════════════════════════════════════════════
 
-// Boundary wall ring — irregular closed loop with a gap at the top for
-// the Hogsmeade gate, drawn as a coiled/scalloped line like the sketch.
 const WALL_POINTS: Array<{ x: number; y: number }> = [
   { x: 52, y: 4 }, { x: 30, y: 6 }, { x: 14, y: 14 }, { x: 6, y: 30 }, { x: 5, y: 50 },
   { x: 8, y: 70 }, { x: 18, y: 84 }, { x: 36, y: 92 }, { x: 56, y: 92 }, { x: 72, y: 84 },
   { x: 78, y: 68 }, { x: 78, y: 48 }, { x: 76, y: 28 }, { x: 68, y: 10 }, { x: 52, y: 4 },
 ];
-// Gate gap location (top of the wall, matching "Hogsmeade / Gate" in the sketch)
 const GATE_POS = { x: 52, y: 4 };
-
 const LAKE_PATH = "M 30 60 Q 22 56 24 48 Q 28 42 38 44 Q 46 40 54 44 Q 62 42 66 50 Q 70 58 62 64 Q 56 70 46 68 Q 36 70 30 60 Z";
 
-// Forbidden Forest dense tree clusters — many small tree glyphs packed
-// into the forest zone, giving the dense-mass look from the sketch's
-// scribbled forest texture rather than a single label.
 function buildForestTrees(): Array<{ x: number; y: number; r: number }> {
   const trees: Array<{ x: number; y: number; r: number }> = [];
   let seed = 31;
@@ -110,15 +138,8 @@ function buildForestTrees(): Array<{ x: number; y: number; r: number }> {
 }
 const FOREST_TREES = buildForestTrees();
 
-// ════════════════════════════════════════════════════════════════════════
-// ICON GLYPHS — small figures per location, matching the request for
-// "a hut figure where Hagrid's hut is, a castle figure for the castle"
-// etc, instead of plain text labels.
-// ════════════════════════════════════════════════════════════════════════
-
 function LocationIcon({ kind, x, y }: { kind: IconKind; x: number; y: number }) {
   const stroke = "#3d2814";
-  const fill = "#5c3a1e";
   switch (kind) {
     case "castle":
       return (
@@ -188,11 +209,6 @@ function LocationIcon({ kind, x, y }: { kind: IconKind; x: number; y: number }) 
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// SCRIBBLE TEXTURE — dense ink "writing" filling open ground, unchanged
-// in approach but kept lighter near terrain shapes so they stay legible.
-// ════════════════════════════════════════════════════════════════════════
-
 interface ScribbleZone { x0: number; y0: number; x1: number; y1: number; angle: number }
 const SCRIBBLE_ZONES: ScribbleZone[] = [
   { x0: 0, y0: 0, x1: 100, y1: 8, angle: 5 },
@@ -201,7 +217,6 @@ const SCRIBBLE_ZONES: ScribbleZone[] = [
   { x0: 32, y0: 0, x1: 68, y1: 8, angle: 0 },
   { x0: 0, y0: 70, x1: 18, y1: 92, angle: 20 },
 ];
-
 function buildScribbleClusters(): Array<{ d: string; size: number }> {
   const clusters: Array<{ d: string; size: number }> = [];
   let seed = 19;
@@ -255,11 +270,10 @@ function TitleBanner() {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// AI POPULATION
+// AI POPULATION — capped at exactly 2 characters now
 // ════════════════════════════════════════════════════════════════════════
 
-interface MapCharacter { id: string; name: string; zone: string; rumor: string }
-const ZONE_NAMES = WANDER_PATHS.map(p => p.zoneName);
+interface MapCharacter { id: string; name: string; location: string; rumor: string }
 
 const GENERIC_WALKER_NAMES = [
   "Argus Filch", "Peeves", "Minerva McGonagall", "Severus Snape", "Albus Dumbledore",
@@ -276,15 +290,15 @@ KNOWN CHARACTERS: ${vaultCharacterNames.join(", ") || "(none found in vault)"}
 STORY CONTEXT (recent canon/player entries, for plausibility only):
 ${vaultContext.slice(0, 4000)}
 
-AVAILABLE ZONES: ${ZONE_NAMES.join(", ")}
+AVAILABLE LOCATIONS: ${LOCATION_NAMES.join(", ")}
 
-Pick 3-6 characters who would plausibly be active right now (prefer named vault characters; you may include 1-2 generic Hogwarts staff/students if it makes sense). For each, assign:
+Pick EXACTLY 2 characters who would plausibly be active right now (prefer named vault characters — including any player character if present — otherwise generic Hogwarts staff/students). For each, assign:
 - "name": their name
-- "zone": one zone from the AVAILABLE ZONES list where they'd plausibly be wandering
+- "location": one location from the AVAILABLE LOCATIONS list where they'd plausibly be right now
 - "rumor": a short (max 12 words) in-character one-liner about what they're doing right now, written like an amusing rumor
 
-Output ONLY a valid JSON array, no markdown fences, no preamble:
-[{"name": "...", "zone": "...", "rumor": "..."}]`;
+Output ONLY a valid JSON array with EXACTLY 2 entries, no markdown fences, no preamble:
+[{"name": "...", "location": "...", "rumor": "..."}]`;
 }
 
 async function fetchMaraudersPopulation(): Promise<MapCharacter[]> {
@@ -294,23 +308,23 @@ async function fetchMaraudersPopulation(): Promise<MapCharacter[]> {
     const archive = loadArchive();
     const allEntries = [...(archive.entries || []), ...(archive.playerEntries || [])];
     const characterNames = Array.from(new Set(
-      allEntries.filter(e => e.category === "characters").map(e => (e as any).entity).filter(Boolean)
+      allEntries.filter(e => e.category === "characters" || e.category === "player-character")
+        .map(e => (e as any).entity).filter(Boolean)
     )) as string[];
     const contextText = allEntries.slice(-30).map(e => e.text).join(" / ");
     const prompt = buildMaraudersPrompt(characterNames, contextText);
     const raw = await geminiQualityCallFor("general", prompt);
     const cleaned = raw.replace(/```json\s*/gi, "").replace(/```/g, "").trim();
     const match = cleaned.match(/\[[\s\S]*\]/);
-    const parsed: Array<{ name: string; zone: string; rumor: string }> = match ? JSON.parse(match[0]) : JSON.parse(cleaned);
-    return parsed
-      .filter(p => p.name && ZONE_NAMES.includes(p.zone))
-      .map((p, i) => ({ id: `ai-${i}-${Date.now()}`, name: p.name, zone: p.zone, rumor: p.rumor || "" }));
+    const parsed: Array<{ name: string; location: string; rumor: string }> = match ? JSON.parse(match[0]) : JSON.parse(cleaned);
+    const valid = parsed.filter(p => p.name && LOCATION_NAMES.includes(p.location));
+    return valid.slice(0, 2).map((p, i) => ({ id: `ai-${i}-${Date.now()}`, name: p.name, location: p.location, rumor: p.rumor || "" }));
   } catch {
-    const count = 3 + Math.floor(Math.random() * 3);
-    const names = [...GENERIC_WALKER_NAMES].sort(() => Math.random() - 0.5).slice(0, count);
+    const names = [...GENERIC_WALKER_NAMES].sort(() => Math.random() - 0.5).slice(0, 2);
+    const shuffledLocs = [...LOCATION_NAMES].sort(() => Math.random() - 0.5);
     return names.map((name, i) => ({
       id: `fallback-${i}-${Date.now()}`, name,
-      zone: ZONE_NAMES[Math.floor(Math.random() * ZONE_NAMES.length)], rumor: "",
+      location: shuffledLocs[i % shuffledLocs.length], rumor: "",
     }));
   }
 }
@@ -362,8 +376,8 @@ export default function MaraudersMap() {
     setCharacters(chars);
     const initialUnits: Record<string, CharUnit> = {};
     chars.forEach(c => {
-      const path = WANDER_PATHS.find(p => p.zoneName === c.zone);
-      if (path) initialUnits[c.id] = { x: path.points[0].x, y: path.points[0].y, angle: 0 };
+      const loc = LOCATION_BY_NAME[c.location];
+      if (loc) initialUnits[c.id] = { x: loc.x, y: loc.y, angle: 0 };
     });
     setUnits(initialUnits);
     setLoadingChars(false);
@@ -380,64 +394,76 @@ export default function MaraudersMap() {
     }, 500);
   }, [clearAllTimers]);
 
+  // ── Movement: walk the actual curved path network between locations,
+  // never freelancing off the drawn routes. Per-point angle now changes
+  // smoothly because each route has 40 sampled points, so footprints
+  // visibly bend along curves instead of forming long straight runs.
   useEffect(() => {
     if (phase !== "open" || characters.length === 0) return;
     const rafIds: number[] = [];
 
     characters.forEach(char => {
-      const path = WANDER_PATHS.find(p => p.zoneName === char.zone);
-      if (!path) return;
-      const points = path.points;
-      const totalLen = polylineLength(points);
-      const durationMs = Math.max(totalLen * 900, 16000);
-      const SPEED_PER_MS = totalLen / durationMs;
-      const TRAIL_SPACING = 0.6;
+      let currentLocation = char.location;
 
-      let lastTrailDist = 0;
-      let loopStartTime: number | null = null;
-      let pausedUntil = 0;
-      let accumulatedPauseMs = 0;
-      let nextPauseCheckAt = 3000 + Math.random() * 4000;
+      function dropTrailPoint(x: number, y: number, angle: number) {
+        setTrails(prev => {
+          const existing = prev[char.id] || [];
+          const next = [...existing, { x, y, angle }];
+          return { ...prev, [char.id]: next.slice(-30) };
+        });
+      }
 
-      function tick(now: number) {
-        if (loopStartTime === null) loopStartTime = now;
-        if (now < pausedUntil) {
+      function walkTo(nextLocation: string, onDone: () => void) {
+        const route = ROUTE_BY_PAIR[`${currentLocation}::${nextLocation}`];
+        if (!route) { onDone(); return; }
+        const totalLen = polylineLength(route);
+        const durationMs = Math.max(totalLen * 900, 14000);
+        const SPEED_PER_MS = totalLen / durationMs;
+        const TRAIL_SPACING = 0.6;
+
+        let lastTrailDist = 0;
+        let startTime: number | null = null;
+
+        function tick(now: number) {
+          if (startTime === null) startTime = now;
+          const elapsed = now - startTime;
+          const traveled = Math.min(elapsed * SPEED_PER_MS, totalLen);
+          const { x, y, angle } = pointAtDistance(route, traveled);
+
+          setUnits(prev => ({ ...prev, [char.id]: { x, y, angle } }));
+
+          if (traveled - lastTrailDist >= TRAIL_SPACING || traveled >= totalLen) {
+            dropTrailPoint(x, y, angle);
+            lastTrailDist = traveled;
+          }
+
+          if (traveled >= totalLen) {
+            currentLocation = nextLocation;
+            onDone();
+            return;
+          }
           const rafId = requestAnimationFrame(tick);
           rafIds.push(rafId);
-          return;
         }
-        const elapsedActive = now - loopStartTime - accumulatedPauseMs;
-        if (elapsedActive >= nextPauseCheckAt && Math.random() < 0.3) {
-          const pauseMs = 1500 + Math.random() * 2500;
-          pausedUntil = now + pauseMs;
-          accumulatedPauseMs += pauseMs;
-          nextPauseCheckAt += 4000 + Math.random() * 4000;
-          const rafId = requestAnimationFrame(tick);
-          rafIds.push(rafId);
-          return;
-        }
-
-        const traveled = (elapsedActive * SPEED_PER_MS) % totalLen;
-        const { x, y, angle } = pointAtDistance(points, traveled);
-        setUnits(prev => ({ ...prev, [char.id]: { x, y, angle } }));
-
-        if (traveled - lastTrailDist >= TRAIL_SPACING || Math.abs(traveled - lastTrailDist) > totalLen / 2) {
-          setTrails(prev => {
-            const existing = prev[char.id] || [];
-            const next = [...existing, { x, y, angle }];
-            return { ...prev, [char.id]: next.slice(-26) };
-          });
-          lastTrailDist = traveled;
-        }
-
         const rafId = requestAnimationFrame(tick);
         rafIds.push(rafId);
       }
-      const rafId = requestAnimationFrame(tick);
-      rafIds.push(rafId);
+
+      function scheduleNextMove() {
+        const lingering = Math.random() < 0.5;
+        const delay = lingering ? 6000 + Math.random() * 8000 : 1500 + Math.random() * 1500;
+        const t = setTimeout(() => {
+          const connections = ADJACENCY[currentLocation] || [];
+          if (connections.length === 0) { scheduleNextMove(); return; }
+          const next = connections[Math.floor(Math.random() * connections.length)];
+          walkTo(next, scheduleNextMove);
+        }, delay);
+        timersRef.current.push(t);
+      }
+      scheduleNextMove();
     });
 
-    return () => rafIds.forEach(id => cancelAnimationFrame(id));
+    return () => { clearAllTimers(); rafIds.forEach(id => cancelAnimationFrame(id)); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, characters]);
 
@@ -544,22 +570,18 @@ export default function MaraudersMap() {
               {SCRIBBLE_CLUSTERS.map((c, i) => <path key={i} d={c.d} strokeWidth={c.size} />)}
             </g>
 
-            {/* ── Boundary wall — coiled/scalloped ring with a gate gap
-                at the top, matching the sketch's looping wall line ── */}
-            <path d={polylineToPathD(WALL_POINTS)} fill="none" stroke="#3d2814" strokeWidth="0.3"
+            <path d={polylineToPathD(WALL_POINTS) + " Z"} fill="none" stroke="#3d2814" strokeWidth="0.3"
               strokeOpacity="0.55" strokeDasharray="0.15 0.55" strokeLinecap="round" />
             <text x={GATE_POS.x} y={GATE_POS.y - 1.5} textAnchor="middle"
               style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.6px", fill: "#3d2814", opacity: 0.7 }}>
               ✦ Gate to Hogsmeade ✦
             </text>
 
-            {/* ── Lake ── */}
             <path d={LAKE_PATH} fill="#7a8c8a" fillOpacity="0.28" stroke="#3d2814" strokeWidth="0.15" strokeOpacity="0.5" />
             <text x="46" y="58" textAnchor="middle" style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.8px", fill: "#3d2814", opacity: 0.55, fontStyle: "italic" }}>
               the lake
             </text>
 
-            {/* ── Forbidden Forest dense tree mass ── */}
             {FOREST_TREES.map((t, i) => (
               <g key={i} transform={`translate(${t.x} ${t.y})`} opacity="0.4">
                 <circle cx="0" cy={-t.r * 0.6} r={t.r} fill="none" stroke="#3d2814" strokeWidth="0.12" />
@@ -570,7 +592,6 @@ export default function MaraudersMap() {
               Forbidden Forest
             </text>
 
-            {/* ── Hogsmeade railway leading off the bottom edge ── */}
             <g opacity="0.45">
               <line x1="40" x2="58" y1="98" y2="90" stroke="#3d2814" strokeWidth="0.18" />
               {Array.from({ length: 7 }, (_, i) => {
@@ -580,25 +601,28 @@ export default function MaraudersMap() {
               })}
             </g>
 
+            {/* ── Path network — actual visible connecting routes between
+                locations, drawn as soft curved dotted ink lines, matching
+                the user's reference image's path-connection request. ── */}
+            {ROUTES.map((r, i) => (
+              <path key={i} d={polylineToPathD(r.points)} fill="none"
+                stroke="#5c3a1e" strokeWidth="0.14" strokeOpacity="0.4" strokeDasharray="0.4 0.5" strokeLinecap="round" />
+            ))}
+
             <TitleBanner />
 
-            {/* ── Zone labels + location icons ── */}
-            {WANDER_PATHS.map(path => {
-              const cx = path.points.reduce((s, p) => s + p.x, 0) / path.points.length;
-              const cy = path.points.reduce((s, p) => s + p.y, 0) / path.points.length;
-              return (
-                <g key={path.zoneName}>
-                  <LocationIcon kind={path.icon} x={path.iconPos.x} y={path.iconPos.y} />
-                  <text x={cx} y={cy + 4.5} textAnchor="middle"
-                    style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.5px", fill: "#3d2814", opacity: 0.55, letterSpacing: "0.02em" }}>
-                    {path.zoneName}
-                  </text>
-                </g>
-              );
-            })}
+            {LOCATIONS.map(loc => (
+              <g key={loc.name}>
+                <LocationIcon kind={loc.icon} x={loc.x} y={loc.y} />
+                <text x={loc.x + (loc.labelOffset?.x ?? 0)} y={loc.y + (loc.labelOffset?.y ?? 4.5)} textAnchor="middle"
+                  style={{ fontFamily: "'IM Fell English', serif", fontSize: "1.5px", fill: "#3d2814", opacity: 0.55, letterSpacing: "0.02em" }}>
+                  {loc.name}
+                </text>
+              </g>
+            ))}
 
-            {/* ── CHARACTER UNITS — paired L/R footprints, plain rotating
-                name text, no background box ── */}
+            {/* ── CHARACTER UNITS — max 2, paired L/R footprints that now
+                visibly bend along the curved route, plain rotating name ── */}
             {characters.map(char => {
               const trail = trails[char.id] || [];
               const unit = units[char.id];
@@ -630,7 +654,7 @@ export default function MaraudersMap() {
                     const leftY = unit.y + Math.sin(perpAngle) * FOOT_SEPARATION;
                     const rightX = unit.x - Math.cos(perpAngle) * FOOT_SEPARATION;
                     const rightY = unit.y - Math.sin(perpAngle) * FOOT_SEPARATION;
-                    const nameDist = 2.4;
+                    const nameDist = 2.6;
                     const nameRad = unit.angle * Math.PI / 180;
                     const nameX = unit.x + Math.cos(nameRad) * nameDist;
                     const nameY = unit.y + Math.sin(nameRad) * nameDist;
@@ -670,7 +694,7 @@ export default function MaraudersMap() {
               padding: "1.25rem", maxWidth: "20rem", boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
             }}>
               <p style={{ fontFamily: "'Pirata One', serif", fontSize: "1.1rem", color: "#3d2814", marginBottom: "0.4rem" }}>{selected.name}</p>
-              <p style={{ fontFamily: "'IM Fell English', serif", fontSize: "0.85rem", color: "#5c3a1e", marginBottom: "0.6rem" }}>📍 {selected.zone}</p>
+              <p style={{ fontFamily: "'IM Fell English', serif", fontSize: "0.85rem", color: "#5c3a1e", marginBottom: "0.6rem" }}>📍 {selected.location}</p>
               {selected.rumor && <p style={{ fontFamily: "'IM Fell English', serif", fontSize: "0.8rem", color: "#3d2814", fontStyle: "italic", lineHeight: 1.5 }}>"{selected.rumor}"</p>}
               <button onClick={() => setSelected(null)} style={{ marginTop: "0.75rem", background: "#7a3b2e", color: "#e9d6a8", border: "none", borderRadius: "0.25rem", padding: "0.3rem 0.7rem", cursor: "pointer", fontSize: "0.75rem" }}>Close</button>
             </div>
