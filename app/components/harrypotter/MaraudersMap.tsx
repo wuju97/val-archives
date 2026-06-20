@@ -341,7 +341,7 @@ export default function MaraudersMap() {
   const [loadingChars, setLoadingChars] = useState(false);
   const [characters, setCharacters] = useState<MapCharacter[]>([]);
   const [units, setUnits] = useState<Record<string, CharUnit>>({});
-  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number }>>>({});
+  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number; side: 1 | -1 }>>>({});
   const [selected, setSelected] = useState<MapCharacter | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [zoom, setZoom] = useState(1);
@@ -404,11 +404,14 @@ export default function MaraudersMap() {
 
     characters.forEach(char => {
       let currentLocation = char.location;
+      let stepSide: 1 | -1 = 1; // alternates every single drop — true gait, not a paired stamp
 
       function dropTrailPoint(x: number, y: number, angle: number) {
+        const side = stepSide;
+        stepSide = stepSide === 1 ? -1 : 1; // flip for next step
         setTrails(prev => {
           const existing = prev[char.id] || [];
-          const next = [...existing, { x, y, angle }];
+          const next = [...existing, { x, y, angle, side }];
           return { ...prev, [char.id]: next.slice(-30) };
         });
       }
@@ -636,15 +639,15 @@ export default function MaraudersMap() {
                     const ageFactor = 1 - i / trail.length;
                     const opacity = 0.6 * (1 - ageFactor * 0.85);
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
-                    const leftX = t.x + Math.cos(perpAngle) * FOOT_SEPARATION;
-                    const leftY = t.y + Math.sin(perpAngle) * FOOT_SEPARATION;
-                    const rightX = t.x - Math.cos(perpAngle) * FOOT_SEPARATION;
-                    const rightY = t.y - Math.sin(perpAngle) * FOOT_SEPARATION;
+                    // ONE foot per trail point, on the side it was actually
+                    // stepped — true alternating gait (L, R, L, R...) rather
+                    // than stamping both feet together at every point.
+                    const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
+                    const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
                     return (
-                      <g key={i} opacity={Math.max(opacity, 0.04)}>
-                        <path d={footPath} fill="#8b2e1f" transform={`translate(${leftX} ${leftY}) rotate(${t.angle + 90})`} />
-                        <path d={footPath} fill="#8b2e1f" transform={`translate(${rightX} ${rightY}) rotate(${t.angle + 90})`} />
-                      </g>
+                      <path key={i} d={footPath} fill="#8b2e1f"
+                        opacity={Math.max(opacity, 0.04)}
+                        transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`} />
                     );
                   })}
 
