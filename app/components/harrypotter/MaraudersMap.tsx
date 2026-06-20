@@ -333,7 +333,7 @@ export default function MaraudersMap() {
   const [loadingChars, setLoadingChars] = useState(false);
   const [characters, setCharacters] = useState<MapCharacter[]>([]);
   const [units, setUnits] = useState<Record<string, CharUnit>>({});
-  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number; side: 1 | -1 }>>>({});
+  const [trails, setTrails] = useState<Record<string, Array<{ x: number; y: number; angle: number; side: 1 | -1; stepIndex: number }>>>({});
   const [selected, setSelected] = useState<MapCharacter | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [zoom, setZoom] = useState(1);
@@ -393,12 +393,32 @@ export default function MaraudersMap() {
     characters.forEach(char => {
       let currentLocation = char.location;
       let stepSide: 1 | -1 = 1;
+      let stepIndex = 0; // drives per-step sway/variation, increments each trail drop
+
+      // Deterministic per-character "gait fingerprint" — seeded from the
+      // character's id so Harry, Hermione, etc. each walk with a slightly
+      // different personality (gait stays consistent for that character
+      // across the whole session, not re-randomized every render).
+      let seed = 0;
+      for (let i = 0; i < char.id.length; i++) seed = (seed * 31 + char.id.charCodeAt(i)) % 10000;
+      function seededRand(offset: number) {
+        const v = Math.sin(seed + offset) * 10000;
+        return v - Math.floor(v); // 0..1
+      }
+      const gait = {
+        swayFreq: 2.0 + seededRand(1) * 1.5,      // how quickly the centerline sways side to side
+        swayAmount: 0.08 + seededRand(2) * 0.1,    // how far the centerline sways (small, in path units)
+        widthJitter: 0.04 + seededRand(3) * 0.05,  // per-step lateral width variation
+        toeFlare: 8 + seededRand(4) * 10,          // degrees the toes flare outward
+      };
+
       function dropTrailPoint(x: number, y: number, angle: number) {
         const side = stepSide;
         stepSide = stepSide === 1 ? -1 : 1;
+        stepIndex++;
         setTrails(prev => {
           const existing = prev[char.id] || [];
-          const next = [...existing, { x, y, angle, side }];
+          const next = [...existing, { x, y, angle, side, stepIndex }];
           return { ...prev, [char.id]: next.slice(-10) };
         });
       }
@@ -425,7 +445,16 @@ export default function MaraudersMap() {
           if (startTime === null) startTime = now;
           const elapsed = now - startTime;
           const traveled = Math.min(elapsed * SPEED_PER_MS, totalLen);
-          const { x, y, angle } = pointAtDistance(route, traveled);
+          const { x: rawX, y: rawY, angle } = pointAtDistance(route, traveled);
+
+          // Subtle centerline sway — a real person doesn't walk on a
+          // mathematically perfect line. Small (well under FOOT_SEPARATION)
+          // sideways drift driven by this character's own gait fingerprint,
+          // so it reads as natural wander rather than a robotic straight path.
+          const swayPerpAngle = (angle + 90) * Math.PI / 180;
+          const swayAmt = Math.sin(traveled * gait.swayFreq) * gait.swayAmount;
+          const x = rawX + Math.cos(swayPerpAngle) * swayAmt;
+          const y = rawY + Math.sin(swayPerpAngle) * swayAmt;
 
           // Unit position still updates every frame (smooth glide for
           // whatever else might reference it, e.g. future click targets),
@@ -652,6 +681,20 @@ export default function MaraudersMap() {
               // via scale() now actually looks different.
               const bootSolePath = "M -0.02 -0.4 C 0.1 -0.43 0.2 -0.32 0.21 -0.16 C 0.22 -0.0 0.19 0.12 0.1 0.22 L -0.04 0.22 C -0.06 0.16 -0.07 0.05 -0.06 -0.1 C -0.07 -0.26 -0.09 -0.36 -0.02 -0.4 Z";
               const bootHeelPath = "M 0.1 0.32 C 0.15 0.36 0.13 0.46 0.04 0.46 L -0.04 0.46 C -0.07 0.41 -0.06 0.34 -0.03 0.3 Z";
+
+              // Same deterministic gait fingerprint as the movement effect
+              // (recomputed here from char.id, not stored separately) —
+              // drives per-step width jitter and toe flare so footprints
+              // don't sit at a perfectly constant left-right distance.
+              let seed = 0;
+              for (let k = 0; k < char.id.length; k++) seed = (seed * 31 + char.id.charCodeAt(k)) % 10000;
+              function seededRand(offset: number) {
+                const v = Math.sin(seed + offset) * 10000;
+                return v - Math.floor(v);
+              }
+              const gaitWidthJitter = 0.04 + seededRand(3) * 0.05;
+              const gaitToeFlare = 8 + seededRand(4) * 10;
+
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
@@ -659,6 +702,11 @@ export default function MaraudersMap() {
                     const opacity = Math.max(0.85 * (1 - ageFactor * 0.85), 0.05);
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
                     const forwardAngle = t.angle * Math.PI / 180;
+                    // Per-step width jitter — real stride width varies
+                    // slightly step to step rather than staying a perfectly
+                    // constant distance, which is what reads as "robotic."
+                    const stepWidthVariation = Math.sin(t.stepIndex * 0.7) * gaitWidthJitter;
+                    const effectiveSeparation = FOOT_SEPARATION + stepWidthVariation;
                     // Small independent forward/backward nudge along the
                     // direction of travel, in addition to the existing
                     // left-right offset — this is what makes the print read
@@ -667,10 +715,16 @@ export default function MaraudersMap() {
                     // along a single line. FOOT_SEPARATION itself (the
                     // perpendicular distance) is completely unchanged.
                     const strideOffset = 0.12 * t.side;
-                    const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side + Math.cos(forwardAngle) * strideOffset;
-                    const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side + Math.sin(forwardAngle) * strideOffset;
+                    const fx = t.x + Math.cos(perpAngle) * effectiveSeparation * t.side + Math.cos(forwardAngle) * strideOffset;
+                    const fy = t.y + Math.sin(perpAngle) * effectiveSeparation * t.side + Math.sin(forwardAngle) * strideOffset;
+                    // Toe flare — each foot angles slightly outward (away
+                    // from centerline) rather than pointing exactly along
+                    // the direction of travel, like a real walking stance.
+                    const flareSign = t.side === 1 ? 1 : -1;
+                    const toeFlareJitter = (seededRand(t.stepIndex) - 0.5) * 6; // small per-step variation
+                    const footRotation = t.angle + 90 + flareSign * gaitToeFlare + toeFlareJitter;
                     return (
-                      <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${t.angle + 90}) scale(${t.side === 1 ? 1 : -1} 1)`}>
+                      <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${footRotation}) scale(${t.side === 1 ? 1 : -1} 1)`}>
                         <path d={bootSolePath} fill="#5c1f12" />
                         <path d={bootHeelPath} fill="#5c1f12" />
                       </g>
