@@ -641,8 +641,12 @@ export default function MaraudersMap() {
                     const perpAngle = (t.angle + 90) * Math.PI / 180;
                     const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
                     const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
+                    // TEMPORARY DEBUG: color-code by side to verify alternation
+                    // is actually happening — red = side 1, blue = side -1.
+                    // Remove this debugColor override once confirmed.
+                    const debugColor = t.side === 1 ? "#ff0000" : "#0000ff";
                     return (
-                      <path key={i} d={footPath} fill="#8b2e1f"
+                      <path key={i} d={footPath} fill={debugColor}
                         opacity={Math.max(opacity, 0.05)}
                         transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`} />
                     );
