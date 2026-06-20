@@ -393,24 +393,7 @@ export default function MaraudersMap() {
     characters.forEach(char => {
       let currentLocation = char.location;
       let stepSide: 1 | -1 = 1;
-      let stepIndex = 0; // drives per-step sway/variation, increments each trail drop
-
-      // Deterministic per-character "gait fingerprint" — seeded from the
-      // character's id so Harry, Hermione, etc. each walk with a slightly
-      // different personality (gait stays consistent for that character
-      // across the whole session, not re-randomized every render).
-      let seed = 0;
-      for (let i = 0; i < char.id.length; i++) seed = (seed * 31 + char.id.charCodeAt(i)) % 10000;
-      function seededRand(offset: number) {
-        const v = Math.sin(seed + offset) * 10000;
-        return v - Math.floor(v); // 0..1
-      }
-      const gait = {
-        swayFreq: 2.0 + seededRand(1) * 1.5,      // how quickly the centerline sways side to side
-        swayAmount: 0.08 + seededRand(2) * 0.1,    // how far the centerline sways (small, in path units)
-        widthJitter: 0.04 + seededRand(3) * 0.05,  // per-step lateral width variation
-        toeFlare: 8 + seededRand(4) * 10,          // degrees the toes flare outward
-      };
+      let stepIndex = 0; // drives per-step variation, increments each trail drop
 
       function dropTrailPoint(x: number, y: number, angle: number) {
         const side = stepSide;
@@ -445,16 +428,13 @@ export default function MaraudersMap() {
           if (startTime === null) startTime = now;
           const elapsed = now - startTime;
           const traveled = Math.min(elapsed * SPEED_PER_MS, totalLen);
-          const { x: rawX, y: rawY, angle } = pointAtDistance(route, traveled);
-
-          // Subtle centerline sway — a real person doesn't walk on a
-          // mathematically perfect line. Small (well under FOOT_SEPARATION)
-          // sideways drift driven by this character's own gait fingerprint,
-          // so it reads as natural wander rather than a robotic straight path.
-          const swayPerpAngle = (angle + 90) * Math.PI / 180;
-          const swayAmt = Math.sin(traveled * gait.swayFreq) * gait.swayAmount;
-          const x = rawX + Math.cos(swayPerpAngle) * swayAmt;
-          const y = rawY + Math.sin(swayPerpAngle) * swayAmt;
+          const { x, y, angle } = pointAtDistance(route, traveled);
+          // NOTE: centerline sway was removed here. It was applied on the
+          // SAME perpendicular axis as the left/right footprint alternation
+          // downstream — whenever the sway's sign opposed a given step's
+          // side, it partially canceled that step's lateral offset, making
+          // the zigzag inconsistent and reading as "parallel/shuffling"
+          // even though the underlying alternation math was correct.
 
           // Unit position still updates every frame (smooth glide for
           // whatever else might reference it, e.g. future click targets),
