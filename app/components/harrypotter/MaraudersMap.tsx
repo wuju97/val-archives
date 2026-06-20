@@ -654,7 +654,11 @@ export default function MaraudersMap() {
               // centerline, small footOffset, not wide-legged. Written as
               // a literal since TRAIL_SPACING is scoped inside the
               // movement effect, not accessible here.
-              const FOOT_SEPARATION = 0.165; // 0.55 * 0.3
+              // CALIBRATION HISTORY: 0.45 was rated "best so far" (9/10).
+              // 0.165 (a 0.3x-of-stride cut) was then tried and rated
+              // "too narrow — tightrope walk." Correct value is the 0.45
+              // baseline reduced by only ~12%, not a drastic cut.
+              const FOOT_SEPARATION = 0.4;
               // Two-piece boot print: a pointed-toe sole (front) and a
               // separate squared heel block (back), with a small but
               // visible gap between them — like a riding/dress boot
@@ -677,7 +681,7 @@ export default function MaraudersMap() {
                     // Small independent forward/backward nudge along the
                     // direction of travel — makes the print read as two
                     // legs striding rather than hopping sideways.
-                    const strideOffset = 0.04 * t.side;
+                    const strideOffset = 0.1 * t.side;
                     // Slow centerline drift — a gentle whole-body sway,
                     // applied EQUALLY to both feet (no t.side multiplier
                     // here, unlike the lateral offset above). This is the
