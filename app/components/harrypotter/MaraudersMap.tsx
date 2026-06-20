@@ -664,7 +664,7 @@ export default function MaraudersMap() {
                     const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side + Math.cos(forwardAngle) * strideOffset;
                     const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side + Math.sin(forwardAngle) * strideOffset;
                     return (
-                      <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`}>
+                      <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${t.angle + 90}) scale(${t.side === 1 ? 1 : -1} 1)`}>
                         <path d={bootSolePath} fill="#5c1f12" />
                         <path d={bootHeelPath} fill="#5c1f12" />
                       </g>
