@@ -640,12 +640,12 @@ export default function MaraudersMap() {
               // back and forth — verified by direct simulation against
               // this file's actual route geometry. Keep ratio ~4:1.
               const FOOT_SEPARATION = 0.45;
-              // Elongated foot-shaped blot (narrow, longer than wide, with
-              // a rounded toe, slight waist pinch, rounded heel) instead of
-              // the round circular blob — fits within a SMALLER bounding
-              // box (0.35 wide vs the old 0.6) so spacing/overlap math
-              // from the locked-in pace/trail/alternation values still holds.
-              const footPath = "M 0 -0.32 C 0.14 -0.32 0.18 -0.2 0.16 -0.05 C 0.15 0.05 0.1 0.08 0.09 0.18 C 0.08 0.28 0.13 0.34 0.06 0.4 C -0.02 0.46 -0.13 0.42 -0.15 0.3 C -0.17 0.18 -0.1 0.1 -0.11 -0.02 C -0.13 -0.18 -0.12 -0.32 0 -0.32 Z";
+              // Two-piece boot print: a pointed-toe sole (front) and a
+              // separate squared heel block (back), with a small but
+              // visible gap between them — like a riding/dress boot
+              // imprint, not a single continuous foot outline.
+              const bootSolePath = "M 0 -0.4 L 0.1 -0.25 C 0.16 -0.1 0.15 0.05 0.12 0.15 C 0.09 0.22 -0.09 0.22 -0.12 0.15 C -0.15 0.05 -0.16 -0.1 -0.1 -0.25 Z";
+              const bootHeelPath = "M 0.1 0.32 C 0.13 0.38 0.1 0.46 0 0.46 C -0.1 0.46 -0.13 0.38 -0.1 0.32 C -0.08 0.27 0.08 0.27 0.1 0.32 Z";
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
@@ -655,9 +655,10 @@ export default function MaraudersMap() {
                     const fx = t.x + Math.cos(perpAngle) * FOOT_SEPARATION * t.side;
                     const fy = t.y + Math.sin(perpAngle) * FOOT_SEPARATION * t.side;
                     return (
-                      <path key={i} d={footPath} fill="#8b2e1f"
-                        opacity={opacity}
-                        transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`} />
+                      <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${t.angle + 90})`}>
+                        <path d={bootSolePath} fill="#8b2e1f" />
+                        <path d={bootHeelPath} fill="#8b2e1f" />
+                      </g>
                     );
                   })}
 
