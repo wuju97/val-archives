@@ -415,8 +415,6 @@ export default function MaraudersMap() {
         const totalLen = polylineLength(route);
         const durationMs = Math.max(totalLen * 1300, 18000); 
         const SPEED_PER_MS = totalLen / durationMs;
-        
-        // CALIBRATION: The perfect human stride spacing on this map coordinate grid
         const TRAIL_SPACING = 0.52; 
 
         let lastTrailDist = 0;
@@ -599,7 +597,6 @@ export default function MaraudersMap() {
               })}
             </g>
 
-            {/* Hidden behind footprints to keep layout clear */}
             {ROUTES.map((r, i) => (
               <path key={i} d={polylineToPathD(r.points)} fill="none"
                 stroke="#5c3a1e" strokeWidth="0.14" strokeOpacity="0.15" strokeDasharray="0.4 0.5" strokeLinecap="round" />
@@ -618,7 +615,7 @@ export default function MaraudersMap() {
             ))}
 
             {/* ════════════════════════════════════════════════════════════════════════
-                PERFECT MOVIE-ACCURATE MARAUDER FOOTSTEPS - THE ULTIMATE CALIBRATION
+                PERFECT MOVIE-ACCURATE MARAUDER FOOTSTEPS - CALIBRATED GAP
                 ════════════════════════════════════════════════════════════════════════ */}
             {characters.map(char => {
               const trail = trails[char.id] || [];
@@ -641,10 +638,9 @@ export default function MaraudersMap() {
                     
                     const perpRad = (t.angle + 90) * Math.PI / 180;
 
-                    // Perfect Stance Calibration: tight, natural track footprint profile
-                    const stanceSeparation = 0.12 + t.widthVariation;
+                    // ADJUSTED ONLY THIS: Added a small pocket of clear space between tracks
+                    const stanceSeparation = 0.22 + t.widthVariation;
                     
-                    // Inverted tracking assignment logic matches movement directions perfectly
                     const fx = t.x + Math.cos(perpRad) * stanceSeparation * t.side;
                     const fy = t.y + Math.sin(perpRad) * stanceSeparation * t.side;
 
