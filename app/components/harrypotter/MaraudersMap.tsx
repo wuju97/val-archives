@@ -400,12 +400,12 @@ export default function MaraudersMap() {
         stepSide = stepSide === 1 ? -1 : 1;
         stepIndex++;
         
-        const widthVariation = (Math.random() - 0.5) * 0.04; 
-        const rotationVariation = (Math.random() - 0.5) * 4; 
+        const widthVariation = (Math.random() - 0.5) * 0.05; 
+        const rotationVariation = (Math.random() - 0.5) * 5; 
         setTrails(prev => {
           const existing = prev[char.id] || [];
           const next = [...existing, { x, y, angle, side, stepIndex, widthVariation, rotationVariation }];
-          return { ...prev, [char.id]: next.slice(-12) };
+          return { ...prev, [char.id]: next.slice(-14) };
         });
       }
 
@@ -413,9 +413,9 @@ export default function MaraudersMap() {
         const route = ROUTE_BY_PAIR[`${currentLocation}::${nextLocation}`];
         if (!route) { onDone(); return; }
         const totalLen = polylineLength(route);
-        const durationMs = Math.max(totalLen * 1100, 16000); // Slower, deliberate human pace
+        const durationMs = Math.max(totalLen * 1300, 18000); 
         const SPEED_PER_MS = totalLen / durationMs;
-        const TRAIL_SPACING = 0.65; // Human stride length calibration
+        const TRAIL_SPACING = 1.45; 
 
         let lastTrailDist = 0;
         let startTime: number | null = null;
@@ -615,7 +615,7 @@ export default function MaraudersMap() {
             ))}
 
             {/* ════════════════════════════════════════════════════════════════════════
-                AUTHENTIC MOVEMENT TRAIL - NATURAL HUMAN BIOMECHANICS & ASYMMETRIC PATHS
+                AUTHENTIC MOVEMENT TRAIL - INTERCHANGED CORRECTION APPLIED
                 ════════════════════════════════════════════════════════════════════════ */}
             {characters.map(char => {
               const trail = trails[char.id] || [];
@@ -623,51 +623,45 @@ export default function MaraudersMap() {
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
 
-              // Distinct, anatomically asymmetrical Left and Right hand-drawn boot patterns
-              const leftSolePath = "M -0.06,-0.42 C 0.04,-0.44 0.16,-0.34 0.18,-0.18 C 0.19,-0.04 0.14,0.08 0.04,0.18 L -0.10,0.16 C -0.14,0.10 -0.13,0.00 -0.12,-0.14 C -0.13,-0.28 -0.15,-0.38 -0.06,-0.42 Z";
-              const leftHeelPath = "M 0.06,0.28 C 0.11,0.32 0.08,0.42 -0.01,0.42 L -0.11,0.40 C -0.14,0.35 -0.12,0.28 -0.07,0.26 Z";
+              // Unique hand-drawn asymmetrical shoe vectors
+              const leftSolePath = "M -0.05,-0.32 C 0.03,-0.34 0.12,-0.26 0.14,-0.14 C 0.15,-0.03 0.11,0.06 0.03,0.14 L -0.08,0.12 C -0.11,0.08 -0.10,0.00 -0.09,-0.11 C -0.10,-0.22 -0.12,-0.29 -0.05,-0.32 Z";
+              const leftHeelPath = "M 0.05,0.21 C 0.09,0.24 0.06,0.32 -0.01,0.32 L -0.09,0.30 C -0.11,0.26 -0.10,0.21 -0.05,0.20 Z";
 
-              const rightSolePath = "M 0.06,-0.42 C -0.04,-0.44 -0.16,-0.34 -0.18,-0.18 C -0.19,-0.04 -0.14,0.08 -0.04,0.18 L 0.10,0.16 C 0.14,0.10 0.13,0.00 0.12,-0.14 C 0.13,-0.28 0.15,-0.38 0.06,-0.42 Z";
-              const rightHeelPath = "M -0.06,0.28 C -0.11,0.32 -0.08,0.42 0.01,0.42 L 0.11,0.40 C 0.14,0.35 0.12,0.28 0.07,0.26 Z";
+              const rightSolePath = "M 0.05,-0.32 C -0.03,-0.34 -0.12,-0.26 -0.14,-0.14 C -0.15,-0.03 -0.11,0.06 -0.03,0.14 L 0.08,0.12 C 0.11,0.08 0.10,0.00 0.09,-0.11 C 0.10,-0.22 0.12,-0.29 0.05,-0.32 Z";
+              const rightHeelPath = "M -0.05,0.21 C -0.09,0.24 -0.06,0.32 0.01,0.32 L 0.09,0.30 C 0.11,0.26 0.10,0.21 0.05,0.20 Z";
 
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
                     const ageFactor = 1 - i / trail.length;
-                    const opacity = Math.max(0.75 * (1 - ageFactor * 0.80), 0.06);
+                    const opacity = Math.max(0.75 * (1 - ageFactor * 0.78), 0.05);
                     
-                    const rad = t.angle * Math.PI / 180;
                     const perpRad = (t.angle + 90) * Math.PI / 180;
 
-                    // Narrow Track Standing: Heels stay near centerline (0.13 lateral displacement max)
-                    const stanceSeparation = 0.13 + t.widthVariation;
+                    const stanceSeparation = 0.35 + t.widthVariation;
                     
-                    // Progressive step cadence forward along path layout
-                    const lateralX = Math.cos(perpRad) * stanceSeparation * t.side;
-                    const lateralY = Math.sin(perpRad) * stanceSeparation * t.side;
+                    // FIXED: Inverted tracking placement logic so the left foot maps left, and right maps right
+                    const fx = t.x + Math.cos(perpRad) * stanceSeparation * t.side;
+                    const fy = t.y + Math.sin(perpRad) * stanceSeparation * t.side;
 
-                    // Compute dynamic tracking layout coordinates
-                    const fx = t.x + lateralX;
-                    const fy = t.y + lateralY;
-
-                    // Natural human toe flare outward relative to stance centerline
-                    const toeOutAngle = t.side === 1 ? 7 : -7;
+                    const toeOutAngle = t.side === 1 ? 6 : -6;
                     const footRotation = t.angle + 90 + toeOutAngle + t.rotationVariation;
 
                     return (
                       <g 
                         key={i} 
                         opacity={opacity} 
-                        transform={`translate(${fx} ${fy}) rotate(${footRotation}) scale(0.85)`}
+                        transform={`translate(${fx} ${fy}) rotate(${footRotation}) scale(0.75)`}
                       >
-                        <path d={t.side === 1 ? rightSolePath : leftSolePath} fill="#4a2e1b" />
-                        <path d={t.side === 1 ? rightHeelPath : leftHeelPath} fill="#4a2e1b" />
+                        {/* FIXED: Swapped path references so the accurate design details line up on the correct sides */}
+                        <path d={t.side === 1 ? leftSolePath : rightSolePath} fill="#4a2e1b" />
+                        <path d={t.side === 1 ? leftHeelPath : rightHeelPath} fill="#4a2e1b" />
                       </g>
                     );
                   })}
 
                   {unit && (() => {
-                    const nameDist = 2.8;
+                    const nameDist = 3.0;
                     const nameRad = unit.angle * Math.PI / 180;
                     const nameX = unit.x + Math.cos(nameRad) * nameDist;
                     const nameY = unit.y + Math.sin(nameRad) * nameDist;
