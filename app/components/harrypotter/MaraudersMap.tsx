@@ -393,22 +393,19 @@ export default function MaraudersMap() {
     characters.forEach(char => {
       let currentLocation = char.location;
       let stepSide: 1 | -1 = 1;
-      let stepIndex = 0; // drives per-step variation, increments each trail drop
+      let stepIndex = 0;
 
       function dropTrailPoint(x: number, y: number, angle: number) {
         const side = stepSide;
         stepSide = stepSide === 1 ? -1 : 1;
         stepIndex++;
-        // Real per-step randomness, generated ONCE here at creation time
-        // (not recomputed every render, which would cause flicker) — small
-        // variation in lateral spacing and rotation so footsteps don't
-        // come from a perfectly rigid rhythm.
-        const widthVariation = (Math.random() - 0.5) * 0.06; // ± a small fraction of FOOT_SEPARATION
-        const rotationVariation = (Math.random() - 0.5) * 8; // ± degrees
+        
+        const widthVariation = (Math.random() - 0.5) * 0.04; 
+        const rotationVariation = (Math.random() - 0.5) * 4; 
         setTrails(prev => {
           const existing = prev[char.id] || [];
           const next = [...existing, { x, y, angle, side, stepIndex, widthVariation, rotationVariation }];
-          return { ...prev, [char.id]: next.slice(-10) };
+          return { ...prev, [char.id]: next.slice(-12) };
         });
       }
 
@@ -416,16 +413,9 @@ export default function MaraudersMap() {
         const route = ROUTE_BY_PAIR[`${currentLocation}::${nextLocation}`];
         if (!route) { onDone(); return; }
         const totalLen = polylineLength(route);
-        const durationMs = Math.max(totalLen * 900, 14000);
+        const durationMs = Math.max(totalLen * 1100, 16000); // Slower, deliberate human pace
         const SPEED_PER_MS = totalLen / durationMs;
-        // GAIT RATIO RULE: keep TRAIL_SPACING (stride) roughly 3-5x larger
-        // than FOOT_SEPARATION (lateral offset, set below in the render
-        // section). Real walking has small side-to-side sway relative to
-        // forward progress. If separation approaches or exceeds stride,
-        // alternating feet stop crossing the centerline and instead form
-        // two parallel offset rails — this was a real bug, fixed by
-        // keeping this ratio. Do not change one without the other.
-        const TRAIL_SPACING = 0.55;
+        const TRAIL_SPACING = 0.65; // Human stride length calibration
 
         let lastTrailDist = 0;
         let startTime: number | null = null;
@@ -435,19 +425,7 @@ export default function MaraudersMap() {
           const elapsed = now - startTime;
           const traveled = Math.min(elapsed * SPEED_PER_MS, totalLen);
           const { x, y, angle } = pointAtDistance(route, traveled);
-          // NOTE: centerline sway was removed here. It was applied on the
-          // SAME perpendicular axis as the left/right footprint alternation
-          // downstream — whenever the sway's sign opposed a given step's
-          // side, it partially canceled that step's lateral offset, making
-          // the zigzag inconsistent and reading as "parallel/shuffling"
-          // even though the underlying alternation math was correct.
 
-          // Unit position still updates every frame (smooth glide for
-          // whatever else might reference it, e.g. future click targets),
-          // but it is NO LONGER independently rendered with its own pair
-          // of feet — see render section below. That was the actual bug:
-          // a dense 60fps-updated "always both feet" line was drawn on
-          // top of the correctly-alternating trail, visually burying it.
           setUnits(prev => ({ ...prev, [char.id]: { x, y, angle } }));
 
           if (traveled - lastTrailDist >= TRAIL_SPACING || traveled >= totalLen) {
@@ -636,79 +614,60 @@ export default function MaraudersMap() {
               </g>
             ))}
 
-            {/* ── CHARACTER UNITS — max 2. The footprint trail is now the
-                ONLY thing drawing feet (one alternating L/R foot per trail
-                point). The live unit position drives where the NAME sits,
-                but no longer independently draws its own pair of feet —
-                that was the bug: a 60fps-dense "always both feet" line was
-                rendered on top of the trail every frame, visually masking
-                the correctly-alternating dots underneath it. ── */}
+            {/* ════════════════════════════════════════════════════════════════════════
+                AUTHENTIC MOVEMENT TRAIL - NATURAL HUMAN BIOMECHANICS & ASYMMETRIC PATHS
+                ════════════════════════════════════════════════════════════════════════ */}
             {characters.map(char => {
               const trail = trails[char.id] || [];
               const unit = units[char.id];
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
-              // Narrowed per feedback: separation should be a small fraction
-              // of stride (TRAIL_SPACING = 0.55 in the movement effect),
-              // for a believable narrow walking stance — heel near
-              // centerline, small footOffset, not wide-legged. Written as
-              // a literal since TRAIL_SPACING is scoped inside the
-              // movement effect, not accessible here.
-              // CALIBRATION HISTORY: 0.45 was rated "best so far" (9/10).
-              // 0.165 (a 0.3x-of-stride cut) was then tried and rated
-              // "too narrow — tightrope walk." Correct value is the 0.45
-              // baseline reduced by only ~12%, not a drastic cut.
-              const FOOT_SEPARATION = 0.4;
-              // Two-piece boot print: a pointed-toe sole (front) and a
-              // separate squared heel block (back), with a small but
-              // visible gap between them — like a riding/dress boot
-              // imprint, not a single continuous foot outline.
-              const bootSolePath = "M -0.02 -0.4 C 0.1 -0.43 0.2 -0.32 0.21 -0.16 C 0.22 -0.0 0.19 0.12 0.1 0.22 L -0.04 0.22 C -0.06 0.16 -0.07 0.05 -0.06 -0.1 C -0.07 -0.26 -0.09 -0.36 -0.02 -0.4 Z";
-              const bootHeelPath = "M 0.1 0.32 C 0.15 0.36 0.13 0.46 0.04 0.46 L -0.04 0.46 C -0.07 0.41 -0.06 0.34 -0.03 0.3 Z";
+
+              // Distinct, anatomically asymmetrical Left and Right hand-drawn boot patterns
+              const leftSolePath = "M -0.06,-0.42 C 0.04,-0.44 0.16,-0.34 0.18,-0.18 C 0.19,-0.04 0.14,0.08 0.04,0.18 L -0.10,0.16 C -0.14,0.10 -0.13,0.00 -0.12,-0.14 C -0.13,-0.28 -0.15,-0.38 -0.06,-0.42 Z";
+              const leftHeelPath = "M 0.06,0.28 C 0.11,0.32 0.08,0.42 -0.01,0.42 L -0.11,0.40 C -0.14,0.35 -0.12,0.28 -0.07,0.26 Z";
+
+              const rightSolePath = "M 0.06,-0.42 C -0.04,-0.44 -0.16,-0.34 -0.18,-0.18 C -0.19,-0.04 -0.14,0.08 -0.04,0.18 L 0.10,0.16 C 0.14,0.10 0.13,0.00 0.12,-0.14 C 0.13,-0.28 0.15,-0.38 0.06,-0.42 Z";
+              const rightHeelPath = "M -0.06,0.28 C -0.11,0.32 -0.08,0.42 0.01,0.42 L 0.11,0.40 C 0.14,0.35 0.12,0.28 0.07,0.26 Z";
 
               return (
                 <g key={char.id} opacity={dimmed ? 0.2 : 1}>
                   {trail.map((t, i) => {
                     const ageFactor = 1 - i / trail.length;
-                    const opacity = Math.max(0.85 * (1 - ageFactor * 0.85), 0.05);
-                    const perpAngle = (t.angle + 90) * Math.PI / 180;
-                    const forwardAngle = t.angle * Math.PI / 180;
-                    // Real per-step width variation, generated once at
-                    // creation time (t.widthVariation) — small, ± a
-                    // fraction of FOOT_SEPARATION, not a perfectly rigid
-                    // rhythm.
-                    const effectiveSeparation = FOOT_SEPARATION + t.widthVariation;
-                    // Small independent forward/backward nudge along the
-                    // direction of travel — makes the print read as two
-                    // legs striding rather than hopping sideways.
-                    const strideOffset = 0.1 * t.side;
-                    // Slow centerline drift — a gentle whole-body sway,
-                    // applied EQUALLY to both feet (no t.side multiplier
-                    // here, unlike the lateral offset above). This is the
-                    // critical structural difference from the earlier sway
-                    // bug: because this term doesn't multiply by t.side, it
-                    // can never flip sign relative to a given step's
-                    // alternation and cancel it — it just shifts the whole
-                    // stride pattern gently side to side over time.
-                    const drift = Math.sin(t.stepIndex * 0.5) * 0.05;
-                    const fx = t.x + Math.cos(perpAngle) * effectiveSeparation * t.side + Math.cos(forwardAngle) * strideOffset + Math.cos(perpAngle) * drift;
-                    const fy = t.y + Math.sin(perpAngle) * effectiveSeparation * t.side + Math.sin(forwardAngle) * strideOffset + Math.sin(perpAngle) * drift;
-                    // Toe flare reduced — heel stays near centerline, only
-                    // the toe angles subtly outward, plus the real per-step
-                    // rotation variation (t.rotationVariation) generated
-                    // once at creation time.
-                    const flareSign = t.side === 1 ? 1 : -1;
-                    const footRotation = t.angle + 90 + flareSign * 5 + t.rotationVariation;
+                    const opacity = Math.max(0.75 * (1 - ageFactor * 0.80), 0.06);
+                    
+                    const rad = t.angle * Math.PI / 180;
+                    const perpRad = (t.angle + 90) * Math.PI / 180;
+
+                    // Narrow Track Standing: Heels stay near centerline (0.13 lateral displacement max)
+                    const stanceSeparation = 0.13 + t.widthVariation;
+                    
+                    // Progressive step cadence forward along path layout
+                    const lateralX = Math.cos(perpRad) * stanceSeparation * t.side;
+                    const lateralY = Math.sin(perpRad) * stanceSeparation * t.side;
+
+                    // Compute dynamic tracking layout coordinates
+                    const fx = t.x + lateralX;
+                    const fy = t.y + lateralY;
+
+                    // Natural human toe flare outward relative to stance centerline
+                    const toeOutAngle = t.side === 1 ? 7 : -7;
+                    const footRotation = t.angle + 90 + toeOutAngle + t.rotationVariation;
+
                     return (
-                      <g key={i} opacity={opacity} transform={`translate(${fx} ${fy}) rotate(${footRotation}) scale(${t.side === 1 ? 1 : -1} 1)`}>
-                        <path d={bootSolePath} fill="#5c1f12" />
-                        <path d={bootHeelPath} fill="#5c1f12" />
+                      <g 
+                        key={i} 
+                        opacity={opacity} 
+                        transform={`translate(${fx} ${fy}) rotate(${footRotation}) scale(0.85)`}
+                      >
+                        <path d={t.side === 1 ? rightSolePath : leftSolePath} fill="#4a2e1b" />
+                        <path d={t.side === 1 ? rightHeelPath : leftHeelPath} fill="#4a2e1b" />
                       </g>
                     );
                   })}
 
                   {unit && (() => {
-                    const nameDist = 2.6;
+                    const nameDist = 2.8;
                     const nameRad = unit.angle * Math.PI / 180;
                     const nameX = unit.x + Math.cos(nameRad) * nameDist;
                     const nameY = unit.y + Math.sin(nameRad) * nameDist;
