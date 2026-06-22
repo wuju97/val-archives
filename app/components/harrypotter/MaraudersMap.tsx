@@ -4,12 +4,6 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { loadArchive } from "@/lib/archiveEngine";
 import { geminiQualityCallFor, hasGeminiQualityKey3, hasGeminiQualityKey, hasGeminiQualityKey2 } from "@/lib/geminiEngine";
 
-// ════════════════════════════════════════════════════════════════════════
-// LOCATIONS — fixed anchor points (not loop shapes). Characters travel
-// BETWEEN these along the drawn path network below, never freelancing
-// off-path. Matches the user's sketch composition.
-// ════════════════════════════════════════════════════════════════════════
-
 type IconKind = "castle" | "hut" | "tree" | "hoops" | "shed" | "greenhouse" | "station" | "none";
 
 interface LocationPoint {
@@ -104,10 +98,6 @@ function pointAtDistance(points: Array<{ x: number; y: number }>, dist: number):
 function polylineToPathD(points: Array<{ x: number; y: number }>): string {
   return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
-
-// ════════════════════════════════════════════════════════════════════════
-// TERRAIN
-// ════════════════════════════════════════════════════════════════════════
 
 const WALL_POINTS: Array<{ x: number; y: number }> = [
   { x: 52, y: 4 }, { x: 30, y: 6 }, { x: 14, y: 14 }, { x: 6, y: 30 }, { x: 5, y: 50 },
@@ -261,10 +251,6 @@ function TitleBanner() {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// AI POPULATION
-// ════════════════════════════════════════════════════════════════════════
-
 interface MapCharacter { id: string; name: string; location: string; rumor: string }
 
 const GENERIC_WALKER_NAMES = [
@@ -320,10 +306,6 @@ async function fetchMaraudersPopulation(): Promise<MapCharacter[]> {
     }));
   }
 }
-
-// ════════════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ════════════════════════════════════════════════════════════════════════
 
 type MapPhase = "closed" | "opening" | "open" | "closing";
 interface CharUnit { x: number; y: number; angle: number }
@@ -405,7 +387,7 @@ export default function MaraudersMap() {
         setTrails(prev => {
           const existing = prev[char.id] || [];
           const next = [...existing, { x, y, angle, side, stepIndex, widthVariation, rotationVariation }];
-          return { ...prev, [char.id]: next.slice(-14) };
+          return { ...prev, [char.id]: next.slice(-10) };
         });
       }
 
@@ -415,6 +397,7 @@ export default function MaraudersMap() {
         const totalLen = polylineLength(route);
         const durationMs = Math.max(totalLen * 1300, 18000); 
         const SPEED_PER_MS = totalLen / durationMs;
+        
         const TRAIL_SPACING = 0.52; 
 
         let lastTrailDist = 0;
@@ -597,10 +580,9 @@ export default function MaraudersMap() {
               })}
             </g>
 
-            {ROUTES.map((r, i) => (
-              <path key={i} d={polylineToPathD(r.points)} fill="none"
-                stroke="#5c3a1e" strokeWidth="0.14" strokeOpacity="0.15" strokeDasharray="0.4 0.5" strokeLinecap="round" />
-            ))}
+            {/* Path lines removed per request — routes still exist in
+                ROUTE_BY_PAIR/ADJACENCY for movement logic, just no longer
+                drawn on the parchment. Map looks plain/clean now. */}
 
             <TitleBanner />
 
@@ -614,16 +596,12 @@ export default function MaraudersMap() {
               </g>
             ))}
 
-            {/* ════════════════════════════════════════════════════════════════════════
-                PERFECT MOVIE-ACCURATE MARAUDER FOOTSTEPS - CALIBRATED GAP
-                ════════════════════════════════════════════════════════════════════════ */}
             {characters.map(char => {
               const trail = trails[char.id] || [];
               const unit = units[char.id];
               const isMatched = matchedCharId === char.id;
               const dimmed = !!searchQuery && !isMatched;
 
-              // Distinct left/right asymmetric high-fidelity boot prints
               const leftSolePath = "M -0.05,-0.32 C 0.03,-0.34 0.12,-0.26 0.14,-0.14 C 0.15,-0.03 0.11,0.06 0.03,0.14 L -0.08,0.12 C -0.11,0.08 -0.10,0.00 -0.09,-0.11 C -0.10,-0.22 -0.12,-0.29 -0.05,-0.32 Z";
               const leftHeelPath = "M 0.05,0.21 C 0.09,0.24 0.06,0.32 -0.01,0.32 L -0.09,0.30 C -0.11,0.26 -0.10,0.21 -0.05,0.20 Z";
 
@@ -638,7 +616,6 @@ export default function MaraudersMap() {
                     
                     const perpRad = (t.angle + 90) * Math.PI / 180;
 
-                    // ADJUSTED ONLY THIS: Added a small pocket of clear space between tracks
                     const stanceSeparation = 0.22 + t.widthVariation;
                     
                     const fx = t.x + Math.cos(perpRad) * stanceSeparation * t.side;
